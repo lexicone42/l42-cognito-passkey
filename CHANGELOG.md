@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-01-21
+
+### Added
+
+- **CI/CD Pipeline**: GitHub Actions workflows for automated testing and publishing
+  - `ci.yml`: Runs tests on PRs and pushes to main (Node 18, 20, 22)
+  - `publish.yml`: Publishes to npm on version tags, creates GitHub releases
+
+- **Semantic Versioning Automation**: Version bump scripts that keep all files in sync
+  - `pnpm release:patch` - Bug fixes (0.5.0 → 0.5.1)
+  - `pnpm release:minor` - New features (0.5.0 → 0.6.0)
+  - `pnpm release:major` - Breaking changes (0.5.0 → 1.0.0)
+  - `pnpm release:prerelease` - Pre-release versions (0.5.1-rc.0)
+
+- **Version Sync Script**: `scripts/sync-version.js` automatically updates version in:
+  - `src/auth.js` (@version JSDoc)
+  - `plugin/plugin.json`
+  - All documentation files
+
+- **Release Documentation**: `docs/RELEASING.md` with complete release process
+
+### Changed
+
+- All previous versions are now preserved on npm (semantic versioning)
+- Version consistency tests now run in CI
+
 ## [0.4.0] - 2026-01-21
 
 ### Security Improvements
