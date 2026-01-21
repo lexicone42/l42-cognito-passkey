@@ -4,7 +4,7 @@
 [![CI](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml/badge.svg)](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/package-json/v/lexicone42/l42-cognito-passkey)](https://github.com/lexicone42/l42-cognito-passkey/releases)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
 [![Tests](https://img.shields.io/badge/tests-130%20passing-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
 
 AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configurable, no build step required.

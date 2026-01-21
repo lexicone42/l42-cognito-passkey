@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 
 // =============================================================================
 // ADMIN ACCESS CONTROL
@@ -282,7 +283,7 @@ describe('Audit Logging', () => {
      */
     function createAuditEntry({ actor, action, target, details }) {
         return {
-            id: crypto.randomUUID?.() || Date.now().toString(),
+            id: randomUUID(),
             timestamp: new Date().toISOString(),
             actor,
             action,
