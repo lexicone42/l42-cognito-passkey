@@ -142,7 +142,7 @@ All notable changes to this project will be documented in this file.
 - Hardcoded `lexicone.com` domain restrictions
 - CDN dependency (library is self-hosted)
 
-## [1.1.0] - 2026-01-18
+## [0.1.1] - 2026-01-18
 
 ### Added
 
@@ -155,7 +155,7 @@ All notable changes to this project will be documented in this file.
 
 - OAuth flow now sets `auth_method: 'passkey'` for longer refresh period
 
-## [1.0.0] - 2026-01-15
+## [0.1.0] - 2026-01-15
 
 ### Added
 
