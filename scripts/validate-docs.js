@@ -133,7 +133,23 @@ for (const { doc, refs } of fileReferences) {
 }
 
 // ============================================================================
-// 4. Check upgrade notes exist for current version
+// 4. Check CHANGELOG has entry for current version
+// ============================================================================
+
+const changelogPath = path.join(ROOT, 'CHANGELOG.md');
+if (fs.existsSync(changelogPath)) {
+  const changelog = fs.readFileSync(changelogPath, 'utf8');
+  const changelogVersionPattern = `## [${expectedVersion}]`;
+
+  if (changelog.includes(changelogVersionPattern)) {
+    console.log(`  ✓ CHANGELOG.md: Entry for v${expectedVersion}`);
+  } else {
+    errors.push(`CHANGELOG.md: No entry for v${expectedVersion} - add changelog before release`);
+  }
+}
+
+// ============================================================================
+// 5. Check upgrade notes exist for current version
 // ============================================================================
 
 const claudeMdPath = path.join(ROOT, 'CLAUDE.md');
@@ -144,8 +160,7 @@ if (fs.existsSync(claudeMdPath)) {
   if (upgradeNotesPattern.test(claudeContent)) {
     console.log(`  ✓ CLAUDE.md: Upgrade notes for v${expectedVersion}`);
   } else {
-    // Check if CHANGELOG has this version (if so, might need upgrade notes)
-    const changelogPath = path.join(ROOT, 'CHANGELOG.md');
+    // Check if CHANGELOG has this version with breaking/async/renamed changes
     if (fs.existsSync(changelogPath)) {
       const changelog = fs.readFileSync(changelogPath, 'utf8');
       const hasBreakingChanges = changelog.includes(`## [${expectedVersion}]`) &&

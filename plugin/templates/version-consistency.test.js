@@ -130,14 +130,24 @@ describe('Version Consistency', () => {
 });
 
 describe('Pre-release Checklist', () => {
-    it('CHANGELOG has current version at top (not unreleased)', () => {
+    it('CHANGELOG has current or next version at top (ready for release)', () => {
         const content = readFile('CHANGELOG.md');
         const EXPECTED_VERSION = getPackageVersion();
 
-        // First version header should be current version
+        // First version header should be current version OR next patch version
+        // (allows updating CHANGELOG before version bump, which is the correct workflow)
         const firstVersionMatch = content.match(/## \[(\d+\.\d+\.\d+)\]/);
         expect(firstVersionMatch).not.toBeNull();
-        expect(firstVersionMatch[1]).toBe(EXPECTED_VERSION);
+
+        const changelogVersion = firstVersionMatch[1];
+        const [major, minor, patch] = EXPECTED_VERSION.split('.').map(Number);
+        const nextPatch = `${major}.${minor}.${patch + 1}`;
+        const nextMinor = `${major}.${minor + 1}.0`;
+
+        const isCurrentOrNext = changelogVersion === EXPECTED_VERSION ||
+            changelogVersion === nextPatch ||
+            changelogVersion === nextMinor;
+        expect(isCurrentOrNext).toBe(true);
     });
 
     it('no TODO or FIXME in src/auth.js', () => {

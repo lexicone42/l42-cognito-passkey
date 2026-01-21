@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.3] - 2026-01-21
+
+### Fixed
+
+- **OAuth State Storage**: Switched from sessionStorage to localStorage to fix "Invalid OAuth state" errors
+  - Safari ITP and Firefox ETP can clear sessionStorage during cross-domain OAuth redirects
+  - localStorage survives cross-domain navigation while maintaining security (single-use, cleared immediately)
+  - Also affects PKCE code verifier storage
+
+### Added
+
+- 6 new OAuth state storage tests (total: 174 tests)
+
 ## [0.5.2] - 2026-01-21
 
 ### Security
@@ -9,7 +22,7 @@ All notable changes to this project will be documented in this file.
 - **PKCE Implementation**: Added Proof Key for Code Exchange to prevent authorization code interception attacks
   - Generates cryptographically secure code verifier (RFC 7636 compliant)
   - SHA-256 code challenge sent with authorization request
-  - Code verifier stored in sessionStorage and cleared after use
+  - Code verifier stored in localStorage and cleared after use (updated from sessionStorage in 0.5.3)
 
 - **HTTPS Enforcement**: Redirect URIs must use HTTPS (except localhost for development)
   - Prevents token interception via network sniffing

@@ -6,7 +6,7 @@ L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for A
 
 **Current Version**: 0.5.2
 **License**: Apache-2.0
-**Tests**: 168 (including 22 property-based tests)
+**Tests**: 174 (including 22 property-based tests)
 
 ## Quick Start for Claude Instances
 
@@ -218,6 +218,14 @@ The RBAC system has 22 property-based tests using fast-check:
 - Cognito group alias consistency
 
 ## Upgrade Notes
+
+### v0.5.3 (Bug Fix)
+
+**OAuth state now uses localStorage instead of sessionStorage**
+
+This fixes the "Invalid OAuth state - possible CSRF attack" error that occurred with Safari ITP and Firefox ETP during cross-domain OAuth redirects.
+
+No code changes required - this is a transparent fix. If you previously implemented workarounds, you can remove them.
 
 ### v0.5.2 (Security Release)
 

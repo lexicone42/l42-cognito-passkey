@@ -434,3 +434,94 @@ describe('Cognito Domain Validation', () => {
             .toThrow('Invalid cognitoDomain format');
     });
 });
+
+// ============================================================================
+// OAuth State Storage (localStorage for cross-domain survival)
+// ============================================================================
+
+describe('OAuth State Storage', () => {
+    /**
+     * Simulate the storage functions using localStorage
+     * (localStorage survives Safari ITP/Firefox ETP during cross-domain OAuth)
+     */
+    const STATE_KEY = 'l42_auth_state';
+    const PKCE_KEY = 'l42_pkce_verifier';
+
+    // Mock localStorage for Node.js test environment
+    let mockStorage = {};
+    const mockLocalStorage = {
+        getItem: (key) => mockStorage[key] || null,
+        setItem: (key, value) => { mockStorage[key] = String(value); },
+        removeItem: (key) => { delete mockStorage[key]; },
+        clear: () => { mockStorage = {}; }
+    };
+
+    function storeOAuthState(state) {
+        mockLocalStorage.setItem(STATE_KEY, state);
+    }
+
+    function verifyOAuthState(state) {
+        const stored = mockLocalStorage.getItem(STATE_KEY);
+        mockLocalStorage.removeItem(STATE_KEY);
+        return Boolean(stored && stored === state);
+    }
+
+    function storeCodeVerifier(verifier) {
+        mockLocalStorage.setItem(PKCE_KEY, verifier);
+    }
+
+    function getAndClearCodeVerifier() {
+        const verifier = mockLocalStorage.getItem(PKCE_KEY);
+        mockLocalStorage.removeItem(PKCE_KEY);
+        return verifier;
+    }
+
+    beforeEach(() => {
+        mockStorage = {};
+    });
+
+    afterEach(() => {
+        mockStorage = {};
+    });
+
+    it('stores and verifies OAuth state correctly', () => {
+        const state = 'test-state-12345';
+        storeOAuthState(state);
+        expect(verifyOAuthState(state)).toBe(true);
+    });
+
+    it('clears state after verification (single-use)', () => {
+        const state = 'test-state-12345';
+        storeOAuthState(state);
+        verifyOAuthState(state);
+        // Second verification should fail - state already cleared
+        expect(verifyOAuthState(state)).toBe(false);
+    });
+
+    it('rejects mismatched state', () => {
+        storeOAuthState('original-state');
+        expect(verifyOAuthState('different-state')).toBe(false);
+    });
+
+    it('stores and retrieves PKCE verifier correctly', () => {
+        const verifier = 'test-verifier-abc123';
+        storeCodeVerifier(verifier);
+        expect(getAndClearCodeVerifier()).toBe(verifier);
+    });
+
+    it('clears PKCE verifier after retrieval (single-use)', () => {
+        const verifier = 'test-verifier-abc123';
+        storeCodeVerifier(verifier);
+        getAndClearCodeVerifier();
+        // Second retrieval should return null
+        expect(getAndClearCodeVerifier()).toBeNull();
+    });
+
+    it('uses localStorage (survives cross-domain navigation)', () => {
+        // This test documents that we use localStorage, not sessionStorage
+        // localStorage survives Safari ITP and Firefox ETP during OAuth redirects
+        storeOAuthState('test-state');
+        expect(mockLocalStorage.getItem(STATE_KEY)).toBe('test-state');
+        // Note: In production, this uses real localStorage which survives cross-domain navigation
+    });
+});

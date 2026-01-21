@@ -5,18 +5,26 @@
 [![Version](https://img.shields.io/badge/version-0.5.2-blue)](https://github.com/lexicone42/l42-cognito-passkey/releases)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-168%20passing-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
+[![Tests](https://img.shields.io/badge/tests-174%20passing-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
 
 AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configurable, no build step required.
 
 ## Features
 
 - Password + Passkey authentication via AWS Cognito
-- OAuth2 with CSRF protection
+- OAuth2 with PKCE and CSRF protection
 - Automatic token refresh
 - Role-based access control (RBAC) via Cognito groups
 - Self-hosted - copy to your project, no CDN dependency
 - ES module - zero build step required
+
+## Security
+
+- **PKCE** (Proof Key for Code Exchange) - Prevents authorization code interception
+- **CSRF Protection** - State parameter validated on every OAuth callback
+- **HTTPS Enforcement** - Redirect URIs must use HTTPS (except localhost)
+- **Domain Validation** - Cognito domain format validated to prevent open redirects
+- **Secure Cookies** - Secure flag + SameSite=Lax for server-side validation cookie
 
 ## Quick Start
 
@@ -147,7 +155,7 @@ See [`CLAUDE.md`](CLAUDE.md) for integration guidelines, security patterns, and 
 ### Development with Claude Code
 
 ```bash
-pnpm test                 # Run all 168 tests
+pnpm test                 # Run all 174 tests
 pnpm validate-docs        # Check documentation consistency
 pnpm release:patch        # Bump version (0.5.1 → 0.5.2)
 ```

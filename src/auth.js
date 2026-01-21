@@ -838,13 +838,19 @@ function generateOAuthState() {
     return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Store OAuth state for CSRF protection.
+ * Uses localStorage instead of sessionStorage to survive cross-domain navigation
+ * (Safari ITP and Firefox ETP can clear sessionStorage during OAuth redirects).
+ * State is cleared immediately after verification for security.
+ */
 function storeOAuthState(state) {
-    sessionStorage.setItem(config.stateKey, state);
+    localStorage.setItem(config.stateKey, state);
 }
 
 function verifyOAuthState(state) {
-    const stored = sessionStorage.getItem(config.stateKey);
-    sessionStorage.removeItem(config.stateKey);
+    const stored = localStorage.getItem(config.stateKey);
+    localStorage.removeItem(config.stateKey);  // Clear immediately - single use
     return stored && stored === state;
 }
 
@@ -883,13 +889,18 @@ async function generateCodeChallenge(verifier) {
         .replace(/=/g, '');
 }
 
+/**
+ * Store PKCE code verifier.
+ * Uses localStorage to survive cross-domain navigation during OAuth flow.
+ * Cleared immediately after token exchange for security.
+ */
 function storeCodeVerifier(verifier) {
-    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    localStorage.setItem(PKCE_VERIFIER_KEY, verifier);
 }
 
 function getAndClearCodeVerifier() {
-    const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
-    sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+    const verifier = localStorage.getItem(PKCE_VERIFIER_KEY);
+    localStorage.removeItem(PKCE_VERIFIER_KEY);  // Clear immediately - single use
     return verifier;
 }
 

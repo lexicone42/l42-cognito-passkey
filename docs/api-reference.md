@@ -239,18 +239,23 @@ try {
 
 Redirect to Cognito Hosted UI for OAuth login. Required for getting admin scope.
 
+Uses **PKCE** (Proof Key for Code Exchange) for enhanced security. The function generates a cryptographic code challenge before redirecting.
+
 ```javascript
 import { loginWithHostedUI } from '/auth/auth.js';
 
 // Store redirect destination before redirecting
 sessionStorage.setItem('l42_redirect_after_login', window.location.pathname);
 
-loginWithHostedUI();
+// Function is async (generates PKCE challenge)
+await loginWithHostedUI();
 // or with email hint:
-loginWithHostedUI('user@example.com');
+await loginWithHostedUI('user@example.com');
 ```
 
-**Returns:** `void` (redirects browser)
+**Returns:** `Promise<void>` (redirects browser after generating PKCE challenge)
+
+> **Note (v0.5.2+):** This function is now async. The redirect happens before the promise resolves, so existing synchronous calls still work, but `await` is recommended for clarity.
 
 ### exchangeCodeForTokens(code, state)
 
