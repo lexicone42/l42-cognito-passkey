@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-01-21
+
+### Added
+
+- **RBAC Role System**: Comprehensive role definitions in `plugin/templates/rbac-roles.js`
+  - 3 core roles: `admin`, `readonly`, `user`
+  - 20+ standard roles for common patterns
+  - Role hierarchy with level-based permissions (10-100)
+  - Permission checking: `hasPermission()`, `canManageRole()`, `getRoleHierarchy()`
+  - Cognito group mapping: `getCognitoGroupConfig()`
+
+- **Static Site Pattern** (`plugin/templates/static-site-pattern.html`)
+  - Public static site + protected auth area architecture
+  - Roles: readonly, user, editor, reviewer, publisher, admin
+  - 27 unit tests for RBAC and permission logic
+
+- **Multi-User WASM Pattern** (`plugin/templates/wasm-multiuser-pattern.html`)
+  - Real-time WebSocket + WASM architecture for collaborative apps
+  - Role hierarchy: player (10) → moderator (30) → dm (50) → admin (100)
+  - Session management with 6-character codes (excludes confusing chars)
+  - DM controls overlay for session management
+  - 29 unit tests for roles, permissions, and session logic
+
+- **Admin Panel Pattern** (`plugin/templates/admin-panel-pattern.html`)
+  - Admin-only interface for user management
+  - User listing with search/filter and pagination
+  - User invitation via email with role assignment
+  - User enable/disable and password reset
+  - Audit logging for admin actions
+  - 41 unit tests for access control, invitations, and filtering
+
+- **XSS-Safe Patterns**: All templates use `textContent` for user data
+- **CSP Requirements**: Documented Content-Security-Policy headers
+- **Test Framework**: Vitest integration with `npm test`
+- **BACKLOG.md**: Documented future features and priorities
+
+### Changed
+
+- Session codes now exclude confusing characters (0, O, 1, I, L)
+- Updated plugin/CLAUDE.md with comprehensive documentation
+
+### Fixed
+
+- Session code generator test was using outdated character set
+
 ## [0.2.0] - 2026-01-21
 
 ### Breaking Changes

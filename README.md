@@ -135,7 +135,7 @@ This repo includes a Claude Code plugin for guided setup:
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.2.0"
+console.log(VERSION); // "0.3.0"
 ```
 
 ## License

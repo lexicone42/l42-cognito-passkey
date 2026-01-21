@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Serena (Claude Code MCP)
+.serena/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.temp

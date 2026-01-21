@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<!--
+  L42 Cognito Passkey - Static Site Pattern Template
+
+  Architecture:
+  ==============
+  - site.domain/           -> Public static content (CDN-cached)
+  - site.domain/auth/      -> Protected area (requires login)
+  - site.domain/admin/     -> Admin area (editor/publisher roles)
+
+  Flow:
+  =====
+  1. Anonymous users browse static site freely
+  2. Click "Login" -> authenticate via Cognito
+  3. Protected routes check isAuthenticated()
+  4. Admin routes check role permissions
+  5. Editors push changes that trigger static site rebuild
+
+  Testing:
+  ========
+  See /templates/static-site-pattern.test.js for unit tests.
+
+  Security Notes:
+  ===============
+  - Uses textContent instead of innerHTML to prevent XSS
+  - CSRF protection via state parameter in OAuth flow
+  - Tokens stored in localStorage (standard SPA pattern)
+  - ID token cookie for server-side validation
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Static Site with Auth - L42 Template</title>
+
+    <!--
+      Content Security Policy
+      IMPORTANT: frame-ancestors must be set via HTTP headers, not meta tags
+    -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' https://lexicone.com 'unsafe-inline';
+        style-src 'self' 'unsafe-inline';
+        connect-src 'self'
+            https://cognito-idp.us-west-2.amazonaws.com
+            https://cognito-identity.us-west-2.amazonaws.com
+            https://*.amazoncognito.com;
+        form-action 'self' https://*.amazoncognito.com;
+    ">
+
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --surface: #16213e;
+            --primary: #e94560;
+            --text: #eee;
+            --muted: #888;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background: var(--surface);
+            border-bottom: 1px solid #333;
+        }
+        nav a {
+            color: var(--text);
+            text-decoration: none;
+            margin: 0 1rem;
+        }
+        nav a:hover { color: var(--primary); }
+        .auth-section { display: flex; gap: 1rem; align-items: center; }
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-outline { background: transparent; border: 1px solid var(--primary); color: var(--primary); }
+
+        main { padding: 2rem; max-width: 1200px; margin: 0 auto; }
+
+        .hero {
+            text-align: center;
+            padding: 4rem 2rem;
+        }
+        .hero h1 { font-size: 3rem; margin-bottom: 1rem; }
+        .hero p { color: var(--muted); font-size: 1.2rem; }
+
+        .protected-content {
+            display: none;
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 8px;
+            margin-top: 2rem;
+        }
+        .protected-content.visible { display: block; }
+
+        .admin-panel {
+            display: none;
+            background: #2d1f3d;
+            padding: 2rem;
+            border-radius: 8px;
+            margin-top: 2rem;
+            border: 1px solid var(--primary);
+        }
+        .admin-panel.visible { display: block; }
+
+        .role-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            margin-left: 0.5rem;
+        }
+        .role-admin { background: #e94560; }
+        .role-editor { background: #4a90d9; }
+        .role-readonly { background: #666; }
+
+        .user-info {
+            font-size: 0.9rem;
+            color: var(--muted);
+        }
+
+        /* Login Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal.visible { display: flex; }
+        .modal-content {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 400px;
+        }
+        .modal h2 { margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; color: var(--muted); }
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background: var(--bg);
+            color: var(--text);
+        }
+        .login-options { display: flex; gap: 1rem; margin-top: 1.5rem; }
+        .login-options .btn { flex: 1; }
+    </style>
+</head>
+<body>
+    <nav>
+        <div>
+            <a href="/" style="font-weight: bold; font-size: 1.2rem;">🔐 L42 Auth</a>
+            <a href="/about">About</a>
+            <a href="/blog">Blog</a>
+            <a href="/auth" id="nav-protected" style="display: none;">Dashboard</a>
+            <a href="/admin" id="nav-admin" style="display: none;">Admin</a>
+        </div>
+        <div class="auth-section">
+            <!-- User info: email displayed via textContent, badge via class -->
+            <span class="user-info" id="user-email"></span>
+            <span class="role-badge" id="user-role-badge" style="display: none;"></span>
+            <button class="btn btn-primary" id="btn-login">Login</button>
+            <button class="btn btn-outline" id="btn-logout" style="display: none;">Logout</button>
+        </div>
+    </nav>
+
+    <main>
+        <!-- Public Content (always visible) -->
+        <section class="hero">
+            <h1>Static Site Pattern</h1>
+            <p>Public content served from CDN. Login for protected features.</p>
+        </section>
+
+        <!-- Protected Content (authenticated users) -->
+        <section class="protected-content" id="protected-content">
+            <h2>📊 Protected Dashboard</h2>
+            <p>This content is only visible to authenticated users.</p>
+            <p style="margin-top: 1rem; color: var(--muted);">
+                Your roles: <span id="user-roles">loading...</span>
+            </p>
+        </section>
+
+        <!-- Admin Panel (editor/publisher/admin roles) -->
+        <section class="admin-panel" id="admin-panel">
+            <h2>⚡ Admin Panel</h2>
+            <p>Push changes to static site. Requires editor, publisher, or admin role.</p>
+
+            <div style="margin-top: 1.5rem;">
+                <h3>Actions</h3>
+                <button class="btn btn-primary" id="btn-rebuild" style="margin-top: 0.5rem;">
+                    🔄 Rebuild Static Site
+                </button>
+                <button class="btn btn-outline" id="btn-invalidate" style="margin-top: 0.5rem;">
+                    🗑️ Invalidate CDN Cache
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Login Modal -->
+    <div class="modal" id="login-modal">
+        <div class="modal-content">
+            <h2>Login</h2>
+            <form id="login-form">
+                <!-- Hidden username for password managers (accessibility requirement) -->
+                <input type="email" id="username-hidden" autocomplete="username" style="display:none;">
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" autocomplete="email" required>
+                </div>
+                <div class="form-group" id="password-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" autocomplete="current-password">
+                </div>
+                <div class="login-options">
+                    <button type="submit" class="btn btn-primary">Password</button>
+                    <button type="button" class="btn btn-outline" id="btn-passkey">🔑 Passkey</button>
+                </div>
+            </form>
+            <p style="text-align: center; margin-top: 1rem; color: var(--muted); font-size: 0.85rem;">
+                <a href="#" id="btn-hosted-ui" style="color: var(--primary);">Use Cognito Hosted UI</a>
+            </p>
+        </div>
+    </div>
+
+    <script type="module">
+        /**
+         * L42 Cognito Passkey - Static Site Pattern
+         *
+         * This script demonstrates the authentication flow for a static site
+         * with protected areas. It uses safe DOM manipulation (textContent)
+         * to prevent XSS vulnerabilities.
+         *
+         * @module static-site-auth
+         */
+
+        // =====================================================================
+        // AUTH CONFIGURATION
+        // =====================================================================
+
+        /**
+         * Determine auth module URL based on environment.
+         * Development uses local file, production uses CDN.
+         */
+        const AUTH_URL = window.location.hostname === 'localhost'
+            ? '/auth/auth.js'
+            : 'https://lexicone.com/auth/auth.js';
+
+        // Import auth module
+        const auth = await import(AUTH_URL);
+
+        // =====================================================================
+        // DOM ELEMENTS
+        // =====================================================================
+
+        /**
+         * Safe query selector helper
+         * @param {string} sel - CSS selector
+         * @returns {HTMLElement|null}
+         */
+        const $ = (sel) => document.querySelector(sel);
+
+        const loginModal = $('#login-modal');
+        const loginForm = $('#login-form');
+        const btnLogin = $('#btn-login');
+        const btnLogout = $('#btn-logout');
+        const btnPasskey = $('#btn-passkey');
+        const btnHostedUI = $('#btn-hosted-ui');
+        const userEmail = $('#user-email');
+        const userRoleBadge = $('#user-role-badge');
+        const navProtected = $('#nav-protected');
+        const navAdmin = $('#nav-admin');
+        const protectedContent = $('#protected-content');
+        const adminPanel = $('#admin-panel');
+        const userRoles = $('#user-roles');
+
+        // =====================================================================
+        // ROLE-BASED ACCESS CONTROL
+        // =====================================================================
+
+        /**
+         * Roles that grant admin panel access.
+         * Ordered by privilege level (highest first).
+         * @constant {string[]}
+         */
+        const ADMIN_ROLES = ['admin', 'publisher', 'editor'];
+
+        /**
+         * Get current user's Cognito groups.
+         * @returns {string[]} Array of role names
+         */
+        function getUserRoles() {
+            return auth.getUserGroups() || [];
+        }
+
+        /**
+         * Check if user has any admin-level role.
+         * @returns {boolean} True if user can access admin panel
+         */
+        function hasAdminAccess() {
+            const roles = getUserRoles();
+            return roles.some(r => ADMIN_ROLES.includes(r));
+        }
+
+        /**
+         * Get the user's highest-privilege role for display.
+         * @returns {string} Role name
+         */
+        function getHighestRole() {
+            const roles = getUserRoles();
+            if (roles.includes('admin')) return 'admin';
+            if (roles.includes('publisher')) return 'publisher';
+            if (roles.includes('editor')) return 'editor';
+            if (roles.includes('readonly')) return 'readonly';
+            return 'user';
+        }
+
+        // =====================================================================
+        // UI UPDATES (XSS-SAFE)
+        // =====================================================================
+
+        /**
+         * Update UI based on authentication state.
+         * Uses textContent for safe DOM updates (prevents XSS).
+         */
+        function updateUI() {
+            const authenticated = auth.isAuthenticated();
+
+            // Toggle login/logout buttons
+            btnLogin.style.display = authenticated ? 'none' : 'block';
+            btnLogout.style.display = authenticated ? 'block' : 'none';
+
+            // User info display (using textContent for XSS safety)
+            if (authenticated) {
+                const email = auth.getUserEmail();
+                const role = getHighestRole();
+
+                // Set email as plain text (safe)
+                userEmail.textContent = email || '';
+
+                // Set role badge via class manipulation (safe)
+                userRoleBadge.textContent = role;
+                userRoleBadge.className = `role-badge role-${role}`;
+                userRoleBadge.style.display = 'inline-block';
+            } else {
+                userEmail.textContent = '';
+                userRoleBadge.style.display = 'none';
+            }
+
+            // Protected content visibility
+            navProtected.style.display = authenticated ? 'inline' : 'none';
+            protectedContent.classList.toggle('visible', authenticated);
+
+            // Admin panel (role-based)
+            const canAdmin = authenticated && hasAdminAccess();
+            navAdmin.style.display = canAdmin ? 'inline' : 'none';
+            adminPanel.classList.toggle('visible', canAdmin);
+
+            // Update role display (plain text, safe)
+            if (authenticated) {
+                const roles = getUserRoles();
+                userRoles.textContent = roles.length ? roles.join(', ') : 'No roles assigned';
+            }
+        }
+
+        // =====================================================================
+        // AUTH EVENT HANDLERS
+        // =====================================================================
+
+        // Subscribe to auth state changes
+        auth.onAuthStateChange((authenticated) => {
+            console.log('[Auth] State changed:', authenticated);
+            updateUI();
+            loginModal.classList.remove('visible');
+        });
+
+        // Login button - show modal
+        btnLogin.addEventListener('click', () => {
+            loginModal.classList.add('visible');
+        });
+
+        // Close modal on backdrop click
+        loginModal.addEventListener('click', (e) => {
+            if (e.target === loginModal) {
+                loginModal.classList.remove('visible');
+            }
+        });
+
+        // Password login form submission
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = $('#email').value;
+            const password = $('#password').value;
+
+            // Populate hidden username field for password managers
+            $('#username-hidden').value = email;
+
+            try {
+                await auth.loginWithPassword(email, password);
+            } catch (err) {
+                alert('Login failed: ' + err.message);
+            }
+        });
+
+        // Passkey login
+        btnPasskey.addEventListener('click', async () => {
+            const email = $('#email').value;
+            if (!email) {
+                alert('Please enter your email first');
+                return;
+            }
+            try {
+                await auth.loginWithPasskey(email);
+            } catch (err) {
+                alert('Passkey login failed: ' + err.message);
+            }
+        });
+
+        // Hosted UI login (OAuth flow)
+        btnHostedUI.addEventListener('click', (e) => {
+            e.preventDefault();
+            const email = $('#email').value;
+            auth.loginWithHostedUI(email || undefined);
+        });
+
+        // Logout
+        btnLogout.addEventListener('click', () => {
+            auth.logout();
+        });
+
+        // =====================================================================
+        // ADMIN ACTIONS
+        // =====================================================================
+
+        /**
+         * Admin action: Trigger static site rebuild.
+         * Requires editor, publisher, or admin role.
+         */
+        $('#btn-rebuild')?.addEventListener('click', async () => {
+            if (!hasAdminAccess()) {
+                alert('Permission denied');
+                return;
+            }
+
+            // Ensure valid tokens before API call
+            const tokens = await auth.ensureValidTokens();
+            if (!tokens) {
+                alert('Session expired. Please login again.');
+                return;
+            }
+
+            // Example: Call your static site rebuild API
+            console.log('[Admin] Triggering static site rebuild...');
+            alert('Static site rebuild triggered! (Demo)');
+
+            // Real implementation would call your API:
+            // const response = await fetch('/api/rebuild', {
+            //     method: 'POST',
+            //     headers: {
+            //         'Authorization': `Bearer ${tokens.access_token}`,
+            //         'Content-Type': 'application/json'
+            //     }
+            // });
+            // if (!response.ok) throw new Error('Rebuild failed');
+        });
+
+        /**
+         * Admin action: Invalidate CDN cache.
+         * Requires editor, publisher, or admin role.
+         */
+        $('#btn-invalidate')?.addEventListener('click', async () => {
+            if (!hasAdminAccess()) {
+                alert('Permission denied');
+                return;
+            }
+            console.log('[Admin] Invalidating CDN cache...');
+            alert('CDN cache invalidated! (Demo)');
+        });
+
+        // =====================================================================
+        // INITIALIZATION
+        // =====================================================================
+
+        // Initial UI update
+        updateUI();
+
+        // Handle OAuth callback (if returning from Cognito hosted UI)
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('code')) {
+            try {
+                await auth.exchangeCodeForTokens();
+                // Clean URL (remove code and state params)
+                window.history.replaceState({}, '', window.location.pathname);
+            } catch (err) {
+                console.error('OAuth callback failed:', err);
+            }
+        }
+    </script>
+</body>
+</html>

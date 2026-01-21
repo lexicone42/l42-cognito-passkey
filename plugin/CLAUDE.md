@@ -192,5 +192,161 @@ Cookie domain is auto-detected based on current hostname, or can be explicitly c
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "2.0.0"
+console.log(VERSION); // "0.3.0"
 ```
+
+## Site Architecture Patterns
+
+This plugin supports two primary site architecture patterns. See `plugin/templates/` for full implementations.
+
+### 1. Static Site Pattern (`static-site-pattern.html`)
+
+Architecture for content-focused sites:
+- `site.domain/` → Public static content (CDN-cached)
+- `site.domain/auth/` → Protected area requiring login
+- `site.domain/admin/` → Admin area for editors/publishers
+
+**Roles**: `readonly`, `user`, `editor`, `reviewer`, `publisher`, `admin`
+
+**Flow**:
+1. Anonymous users browse static site freely
+2. Login redirects to protected content
+3. Editors/Publishers push changes that rebuild static site
+
+### 2. Multi-User WASM Pattern (`wasm-multiuser-pattern.html`)
+
+Architecture for real-time collaborative applications:
+- WebSocket connections for player synchronization
+- WASM modules for game logic (client-side)
+- Session-based gameplay with DM control
+
+**Roles**: `player`, `moderator`, `dm`, `admin`
+
+**Hierarchy**:
+- **Player** (level 10): Basic participant, chat, move character
+- **Moderator** (level 30): Mute/kick players
+- **DM** (level 50): Full session control, spawn NPCs, reveal areas
+- **Admin** (level 100): System administration
+
+### 3. Admin Panel Pattern (`admin-panel-pattern.html`)
+
+Architecture for user management interfaces:
+- Admin-only access (Cognito `admin` group required)
+- User CRUD via Cognito AdminUser* APIs
+- Requires backend Lambda + API Gateway
+
+**Features**:
+- User listing with search/filter
+- Email invitations with role assignment
+- User enable/disable
+- Password reset initiation
+- Audit logging
+
+**Required Backend**:
+```javascript
+// API Gateway endpoints (Cognito authorizer)
+GET  /admin/users          // List users
+POST /admin/users          // Create user (invite)
+PUT  /admin/users/:id      // Update user
+PUT  /admin/users/:id/status  // Enable/disable
+POST /admin/users/:id/reset   // Reset password
+GET  /admin/audit          // Audit logs
+```
+
+## RBAC System
+
+See `plugin/templates/rbac-roles.js` for the complete role definitions.
+
+### Core Roles (Always Required)
+
+| Role | Level | Description |
+|------|-------|-------------|
+| `admin` | 100 | Full system access with user management |
+| `readonly` | 10 | View-only access to all resources |
+| `user` | 20 | Standard authenticated user |
+
+### Top 20 Standard Roles
+
+The RBAC system includes skeleton definitions for common roles:
+
+**Content/CMS**: `editor`, `reviewer`, `publisher`
+**Gaming/WASM**: `player`, `dm`, `moderator`
+**API/Developer**: `api_reader`, `api_writer`, `developer`
+**Organization**: `team_member`, `team_lead`, `org_admin`
+**E-commerce**: `customer`, `vip_customer`, `support_agent`
+**Analytics**: `analyst`, `auditor`
+**System**: `service_account`, `billing_admin`
+
+### Permission Checking
+
+```javascript
+import { hasPermission, hasRoleLevel, canManageRole } from './rbac-roles.js';
+
+// Check specific permission
+if (hasPermission('editor', 'publish:content')) {
+    // Allow publishing
+}
+
+// Check role hierarchy
+if (hasRoleLevel('dm', 'moderator')) {
+    // DM has at least moderator level
+}
+
+// Check if user can manage another user's role
+if (canManageRole('admin', 'editor')) {
+    // Admin can manage editors
+}
+```
+
+### Cognito Group Mapping
+
+```javascript
+import { getCognitoGroupConfig } from './rbac-roles.js';
+
+// Generate Cognito group configuration for CDK
+const groups = getCognitoGroupConfig(['admin', 'editor', 'readonly']);
+// Returns: [{ groupName: 'admin', description: '...', precedence: 0 }, ...]
+```
+
+## Security Notes
+
+### XSS Prevention
+All templates use `textContent` for user-controlled data to prevent XSS:
+
+```javascript
+// SAFE - always use textContent for user data
+userEmail.textContent = auth.getUserEmail();
+roleBadge.textContent = userRole;
+
+// For dynamic element creation, use DOM methods
+const span = document.createElement('span');
+span.textContent = untrustedData;  // Safe
+parent.appendChild(span);
+```
+
+Never inject user-controlled strings directly into HTML. See templates for safe patterns.
+
+## Testing
+
+Each template has an accompanying test file:
+- `plugin/templates/static-site-pattern.test.js` (27 tests)
+- `plugin/templates/wasm-multiuser-pattern.test.js` (29 tests)
+- `plugin/templates/admin-panel-pattern.test.js` (41 tests)
+- `plugin/templates/rbac-roles.js` (includes `hasPermission`, `getRoleHierarchy`, etc.)
+
+**Total: 97 tests**
+
+Run tests with:
+```bash
+npm test
+# or
+npx vitest run plugin/templates/
+```
+
+## Backlog
+
+See `BACKLOG.md` in the project root for planned features:
+- Contentful CMS integration
+- Additional RBAC role templates
+- Multi-tenant support
+- Distributed development coordination

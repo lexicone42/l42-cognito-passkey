@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<!--
+  L42 Cognito Passkey - Admin Panel Pattern Template
+
+  Architecture:
+  ==============
+  - Admin-only interface for user management
+  - Requires 'admin' Cognito group membership
+  - Server-side verification via Lambda/API Gateway
+
+  Features:
+  =========
+  - User listing with search/filter
+  - User invitation via email
+  - Role assignment (Cognito groups)
+  - User disable/enable
+  - Password reset initiation
+  - Audit log viewing
+
+  Security Notes:
+  ===============
+  - All actions require server-side verification
+  - Admin role checked client-side for UI, server-side for actions
+  - Uses textContent for all user-controlled data (XSS prevention)
+  - CSRF protection via Cognito tokens
+
+  Required Cognito Setup:
+  =======================
+  - Admin group with appropriate IAM permissions
+  - Lambda functions for user management
+  - API Gateway with Cognito authorizer
+
+  Testing:
+  ========
+  See /templates/admin-panel-pattern.test.js for unit tests.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - L42 Template</title>
+
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline';
+        connect-src 'self'
+            https://cognito-idp.us-west-2.amazonaws.com
+            https://cognito-identity.us-west-2.amazonaws.com
+            https://*.amazoncognito.com
+            https://*.execute-api.us-west-2.amazonaws.com;
+        form-action 'self' https://*.amazoncognito.com;
+    ">
+
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface-hover: #334155;
+            --primary: #3b82f6;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --border: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* Layout */
+        .admin-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 1.5rem;
+        }
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 2rem;
+        }
+        .sidebar-header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        .nav-section {
+            margin-bottom: 1.5rem;
+        }
+        .nav-section-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.05em;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 6px;
+            color: var(--text);
+            text-decoration: none;
+            margin-bottom: 0.25rem;
+            cursor: pointer;
+        }
+        .nav-item:hover { background: var(--surface-hover); }
+        .nav-item.active { background: var(--primary); }
+
+        /* Main Content */
+        .main-content {
+            padding: 2rem;
+            overflow-y: auto;
+        }
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+        .page-title { font-size: 1.5rem; font-weight: 600; }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .card-title { font-weight: 600; }
+
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+        .stat-label { color: var(--muted); font-size: 0.875rem; }
+
+        /* Table */
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            font-weight: 600;
+            color: var(--muted);
+            font-size: 0.875rem;
+        }
+        tr:hover { background: var(--surface-hover); }
+
+        /* Buttons */
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-warning { background: var(--warning); color: black; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+
+        /* Forms */
+        .form-group { margin-bottom: 1rem; }
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--muted);
+        }
+        .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.875rem;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .badge-admin { background: var(--danger); }
+        .badge-editor { background: var(--warning); color: black; }
+        .badge-user { background: var(--primary); }
+        .badge-readonly { background: var(--muted); }
+        .badge-active { background: var(--success); }
+        .badge-disabled { background: var(--danger); }
+
+        /* Search */
+        .search-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .search-input {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal.visible { display: flex; }
+        .modal-content {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 500px;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+        .modal-title { font-size: 1.25rem; font-weight: 600; }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 1.5rem;
+        }
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        /* User Actions */
+        .user-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        /* Access Denied */
+        .access-denied {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            text-align: center;
+            padding: 2rem;
+        }
+        .access-denied h1 { font-size: 2rem; margin-bottom: 1rem; }
+        .access-denied p { color: var(--muted); margin-bottom: 2rem; }
+    </style>
+</head>
+<body>
+    <!-- Access Denied (shown to non-admins) -->
+    <div class="access-denied" id="access-denied">
+        <h1>🔒 Access Denied</h1>
+        <p>You need administrator privileges to access this panel.</p>
+        <button class="btn btn-primary" id="btn-login">Login as Admin</button>
+    </div>
+
+    <!-- Admin Layout (shown to admins) -->
+    <div class="admin-layout" id="admin-layout" style="display: none;">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <span>⚙️</span>
+                <h1>Admin Panel</h1>
+            </div>
+
+            <nav>
+                <div class="nav-section">
+                    <div class="nav-section-title">Management</div>
+                    <a class="nav-item active" data-page="users">👥 Users</a>
+                    <a class="nav-item" data-page="invites">📧 Invitations</a>
+                    <a class="nav-item" data-page="roles">🏷️ Roles</a>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">System</div>
+                    <a class="nav-item" data-page="audit">📋 Audit Log</a>
+                    <a class="nav-item" data-page="settings">⚙️ Settings</a>
+                </div>
+            </nav>
+
+            <div style="margin-top: auto; padding-top: 2rem;">
+                <div style="color: var(--muted); font-size: 0.875rem; margin-bottom: 0.5rem;">
+                    Logged in as:
+                </div>
+                <div id="admin-email" style="font-weight: 500;"></div>
+                <button class="btn btn-outline" style="margin-top: 1rem; width: 100%;" id="btn-logout">
+                    Logout
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Users Page -->
+            <div id="page-users">
+                <div class="page-header">
+                    <h2 class="page-title">User Management</h2>
+                    <button class="btn btn-primary" id="btn-invite-user">
+                        ➕ Invite User
+                    </button>
+                </div>
+
+                <!-- Stats -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-total">-</div>
+                        <div class="stat-label">Total Users</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-active">-</div>
+                        <div class="stat-label">Active Users</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-admins">-</div>
+                        <div class="stat-label">Administrators</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-pending">-</div>
+                        <div class="stat-label">Pending Invites</div>
+                    </div>
+                </div>
+
+                <!-- Search -->
+                <div class="search-bar">
+                    <input type="text" class="search-input" id="user-search" placeholder="Search users by email...">
+                    <select class="form-input" style="width: auto;" id="role-filter">
+                        <option value="">All Roles</option>
+                        <option value="admin">Admin</option>
+                        <option value="editor">Editor</option>
+                        <option value="user">User</option>
+                        <option value="readonly">Read Only</option>
+                    </select>
+                </div>
+
+                <!-- User Table -->
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Last Login</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="user-table-body">
+                                <!-- Users populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Invitations Page (hidden by default) -->
+            <div id="page-invites" style="display: none;">
+                <div class="page-header">
+                    <h2 class="page-title">Pending Invitations</h2>
+                    <button class="btn btn-primary" id="btn-bulk-invite">
+                        📧 Bulk Invite
+                    </button>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Invited By</th>
+                                    <th>Sent</th>
+                                    <th>Expires</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="invite-table-body">
+                                <!-- Invites populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Roles Page (hidden by default) -->
+            <div id="page-roles" style="display: none;">
+                <div class="page-header">
+                    <h2 class="page-title">Role Management</h2>
+                </div>
+                <div class="card">
+                    <p style="color: var(--muted);">
+                        Roles are managed via Cognito User Pool Groups.
+                        See documentation for CDK/boto3 setup instructions.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Audit Log Page (hidden by default) -->
+            <div id="page-audit" style="display: none;">
+                <div class="page-header">
+                    <h2 class="page-title">Audit Log</h2>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Actor</th>
+                                    <th>Action</th>
+                                    <th>Target</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-table-body">
+                                <!-- Audit logs populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page (hidden by default) -->
+            <div id="page-settings" style="display: none;">
+                <div class="page-header">
+                    <h2 class="page-title">Settings</h2>
+                </div>
+                <div class="card">
+                    <h3 style="margin-bottom: 1rem;">Cognito Configuration</h3>
+                    <div class="form-group">
+                        <label class="form-label">User Pool ID</label>
+                        <input type="text" class="form-input" id="setting-pool-id" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Region</label>
+                        <input type="text" class="form-input" id="setting-region" readonly>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Invite User Modal -->
+    <div class="modal" id="invite-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Invite User</h3>
+                <button class="modal-close" id="close-invite-modal">&times;</button>
+            </div>
+            <form id="invite-form">
+                <div class="form-group">
+                    <label class="form-label">Email Address</label>
+                    <input type="email" class="form-input" id="invite-email" required placeholder="user@example.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Role</label>
+                    <select class="form-input" id="invite-role">
+                        <option value="readonly">Read Only</option>
+                        <option value="user" selected>User</option>
+                        <option value="editor">Editor</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Welcome Message (optional)</label>
+                    <textarea class="form-input" id="invite-message" rows="3" placeholder="Custom welcome message..."></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" id="cancel-invite">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Send Invitation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div class="modal" id="edit-user-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Edit User</h3>
+                <button class="modal-close" id="close-edit-modal">&times;</button>
+            </div>
+            <form id="edit-user-form">
+                <input type="hidden" id="edit-user-id">
+                <div class="form-group">
+                    <label class="form-label">Email Address</label>
+                    <input type="email" class="form-input" id="edit-email" readonly>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Role</label>
+                    <select class="form-input" id="edit-role">
+                        <option value="readonly">Read Only</option>
+                        <option value="user">User</option>
+                        <option value="editor">Editor</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <select class="form-input" id="edit-status">
+                        <option value="active">Active</option>
+                        <option value="disabled">Disabled</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" id="cancel-edit">Cancel</button>
+                    <button type="button" class="btn btn-warning" id="btn-reset-password">Reset Password</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module">
+        /**
+         * L42 Cognito Passkey - Admin Panel Pattern
+         *
+         * This script demonstrates admin panel functionality with
+         * user management, invitations, and role assignment.
+         *
+         * Required Backend:
+         * - Lambda functions for user CRUD operations
+         * - API Gateway with Cognito authorizer
+         * - Admin group membership check on server side
+         *
+         * @module admin-panel-auth
+         */
+
+        // =====================================================================
+        // AUTH CONFIGURATION
+        // =====================================================================
+
+        const AUTH_URL = window.location.hostname === 'localhost'
+            ? '/auth/auth.js'
+            : '/auth/auth.js';  // Always self-hosted
+
+        const auth = await import(AUTH_URL);
+
+        // =====================================================================
+        // API CONFIGURATION
+        // =====================================================================
+
+        // Replace with your API Gateway endpoint
+        const API_BASE = window.L42_ADMIN_API || 'https://api.example.com/admin';
+
+        // =====================================================================
+        // STATE
+        // =====================================================================
+
+        let users = [];
+        let invites = [];
+        let auditLogs = [];
+        let currentPage = 'users';
+
+        // =====================================================================
+        // DOM ELEMENTS
+        // =====================================================================
+
+        const $ = (sel) => document.querySelector(sel);
+        const $$ = (sel) => document.querySelectorAll(sel);
+
+        const accessDenied = $('#access-denied');
+        const adminLayout = $('#admin-layout');
+        const adminEmail = $('#admin-email');
+        const userTableBody = $('#user-table-body');
+        const inviteModal = $('#invite-modal');
+        const editUserModal = $('#edit-user-modal');
+
+        // =====================================================================
+        // API HELPERS
+        // =====================================================================
+
+        /**
+         * Make authenticated API request
+         * @param {string} endpoint - API endpoint
+         * @param {Object} options - Fetch options
+         * @returns {Promise<Object>} Response data
+         */
+        async function apiRequest(endpoint, options = {}) {
+            const tokens = await auth.ensureValidTokens();
+            if (!tokens) {
+                throw new Error('Not authenticated');
+            }
+
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                ...options,
+                headers: {
+                    'Authorization': `Bearer ${tokens.access_token}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.message || `API error: ${response.status}`);
+            }
+
+            return response.json();
+        }
+
+        // =====================================================================
+        // USER MANAGEMENT
+        // =====================================================================
+
+        /**
+         * Load users from API
+         */
+        async function loadUsers() {
+            try {
+                // In real implementation, call API
+                // users = await apiRequest('/users');
+
+                // Demo data
+                users = [
+                    { id: '1', email: 'admin@example.com', role: 'admin', status: 'active', created: '2026-01-01', lastLogin: '2026-01-21' },
+                    { id: '2', email: 'editor@example.com', role: 'editor', status: 'active', created: '2026-01-10', lastLogin: '2026-01-20' },
+                    { id: '3', email: 'user@example.com', role: 'user', status: 'active', created: '2026-01-15', lastLogin: '2026-01-19' },
+                    { id: '4', email: 'readonly@example.com', role: 'readonly', status: 'disabled', created: '2026-01-18', lastLogin: null }
+                ];
+
+                renderUserTable(users);
+                updateStats();
+            } catch (error) {
+                console.error('Failed to load users:', error);
+            }
+        }
+
+        /**
+         * Render user table with safe DOM manipulation
+         * @param {Array} userList - Users to render
+         */
+        function renderUserTable(userList) {
+            userTableBody.textContent = '';  // Safe clear
+
+            userList.forEach(user => {
+                const row = document.createElement('tr');
+
+                // Email cell
+                const emailCell = document.createElement('td');
+                emailCell.textContent = user.email;  // Safe: textContent
+
+                // Role cell with badge
+                const roleCell = document.createElement('td');
+                const roleBadge = document.createElement('span');
+                roleBadge.className = `badge badge-${user.role}`;
+                roleBadge.textContent = user.role;  // Safe: textContent
+                roleCell.appendChild(roleBadge);
+
+                // Status cell
+                const statusCell = document.createElement('td');
+                const statusBadge = document.createElement('span');
+                statusBadge.className = `badge badge-${user.status}`;
+                statusBadge.textContent = user.status;  // Safe: textContent
+                statusCell.appendChild(statusBadge);
+
+                // Created cell
+                const createdCell = document.createElement('td');
+                createdCell.textContent = user.created;  // Safe: textContent
+
+                // Last login cell
+                const lastLoginCell = document.createElement('td');
+                lastLoginCell.textContent = user.lastLogin || 'Never';  // Safe: textContent
+
+                // Actions cell
+                const actionsCell = document.createElement('td');
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'user-actions';
+
+                const editBtn = document.createElement('button');
+                editBtn.className = 'btn btn-sm btn-outline';
+                editBtn.textContent = '✏️';
+                editBtn.title = 'Edit user';
+                editBtn.addEventListener('click', () => openEditModal(user));
+
+                const toggleBtn = document.createElement('button');
+                toggleBtn.className = `btn btn-sm ${user.status === 'active' ? 'btn-warning' : 'btn-success'}`;
+                toggleBtn.textContent = user.status === 'active' ? '🚫' : '✅';
+                toggleBtn.title = user.status === 'active' ? 'Disable user' : 'Enable user';
+                toggleBtn.addEventListener('click', () => toggleUserStatus(user));
+
+                actionsDiv.appendChild(editBtn);
+                actionsDiv.appendChild(toggleBtn);
+                actionsCell.appendChild(actionsDiv);
+
+                row.appendChild(emailCell);
+                row.appendChild(roleCell);
+                row.appendChild(statusCell);
+                row.appendChild(createdCell);
+                row.appendChild(lastLoginCell);
+                row.appendChild(actionsCell);
+
+                userTableBody.appendChild(row);
+            });
+        }
+
+        /**
+         * Update dashboard stats
+         */
+        function updateStats() {
+            $('#stat-total').textContent = users.length;
+            $('#stat-active').textContent = users.filter(u => u.status === 'active').length;
+            $('#stat-admins').textContent = users.filter(u => u.role === 'admin').length;
+            $('#stat-pending').textContent = invites.length;
+        }
+
+        /**
+         * Filter users by search and role
+         */
+        function filterUsers() {
+            const search = $('#user-search').value.toLowerCase();
+            const roleFilter = $('#role-filter').value;
+
+            const filtered = users.filter(user => {
+                const matchesSearch = user.email.toLowerCase().includes(search);
+                const matchesRole = !roleFilter || user.role === roleFilter;
+                return matchesSearch && matchesRole;
+            });
+
+            renderUserTable(filtered);
+        }
+
+        // =====================================================================
+        // USER ACTIONS
+        // =====================================================================
+
+        /**
+         * Open edit user modal
+         * @param {Object} user - User to edit
+         */
+        function openEditModal(user) {
+            $('#edit-user-id').value = user.id;
+            $('#edit-email').value = user.email;
+            $('#edit-role').value = user.role;
+            $('#edit-status').value = user.status;
+            editUserModal.classList.add('visible');
+        }
+
+        /**
+         * Toggle user active/disabled status
+         * @param {Object} user - User to toggle
+         */
+        async function toggleUserStatus(user) {
+            const newStatus = user.status === 'active' ? 'disabled' : 'active';
+            const action = newStatus === 'disabled' ? 'disable' : 'enable';
+
+            if (!confirm(`Are you sure you want to ${action} ${user.email}?`)) {
+                return;
+            }
+
+            try {
+                // In real implementation, call API
+                // await apiRequest(`/users/${user.id}/status`, {
+                //     method: 'PUT',
+                //     body: JSON.stringify({ status: newStatus })
+                // });
+
+                // Demo: update local state
+                user.status = newStatus;
+                renderUserTable(users);
+                updateStats();
+                console.log(`[Admin] User ${user.email} ${action}d`);
+            } catch (error) {
+                console.error('Failed to update user status:', error);
+                alert('Failed to update user status');
+            }
+        }
+
+        /**
+         * Send password reset email
+         * @param {string} userId - User ID
+         */
+        async function resetPassword(userId) {
+            const user = users.find(u => u.id === userId);
+            if (!confirm(`Send password reset email to ${user.email}?`)) {
+                return;
+            }
+
+            try {
+                // In real implementation, call Cognito AdminResetUserPassword
+                // await apiRequest(`/users/${userId}/reset-password`, { method: 'POST' });
+
+                alert(`Password reset email sent to ${user.email}`);
+                console.log(`[Admin] Password reset initiated for ${user.email}`);
+            } catch (error) {
+                console.error('Failed to reset password:', error);
+                alert('Failed to send password reset email');
+            }
+        }
+
+        // =====================================================================
+        // INVITATIONS
+        // =====================================================================
+
+        /**
+         * Send user invitation
+         * @param {string} email - Email to invite
+         * @param {string} role - Role to assign
+         * @param {string} message - Optional welcome message
+         */
+        async function sendInvitation(email, role, message) {
+            try {
+                // In real implementation, call API which:
+                // 1. Creates Cognito user with temporary password
+                // 2. Adds user to appropriate group
+                // 3. Sends custom invitation email
+
+                // await apiRequest('/invites', {
+                //     method: 'POST',
+                //     body: JSON.stringify({ email, role, message })
+                // });
+
+                console.log(`[Admin] Invitation sent to ${email} with role ${role}`);
+                alert(`Invitation sent to ${email}`);
+
+                inviteModal.classList.remove('visible');
+                $('#invite-form').reset();
+            } catch (error) {
+                console.error('Failed to send invitation:', error);
+                alert('Failed to send invitation');
+            }
+        }
+
+        // =====================================================================
+        // NAVIGATION
+        // =====================================================================
+
+        /**
+         * Switch between pages
+         * @param {string} page - Page name
+         */
+        function switchPage(page) {
+            currentPage = page;
+
+            // Update nav active state
+            $$('.nav-item').forEach(item => {
+                item.classList.toggle('active', item.dataset.page === page);
+            });
+
+            // Show/hide pages
+            $$('[id^="page-"]').forEach(el => {
+                el.style.display = el.id === `page-${page}` ? 'block' : 'none';
+            });
+        }
+
+        // =====================================================================
+        // UI UPDATES
+        // =====================================================================
+
+        /**
+         * Update UI based on auth state
+         */
+        function updateUI() {
+            const authenticated = auth.isAuthenticated();
+            const isAdmin = auth.isAdmin();
+
+            if (!authenticated) {
+                accessDenied.style.display = 'flex';
+                adminLayout.style.display = 'none';
+                return;
+            }
+
+            if (!isAdmin) {
+                accessDenied.style.display = 'flex';
+                adminLayout.style.display = 'none';
+                return;
+            }
+
+            // User is authenticated admin
+            accessDenied.style.display = 'none';
+            adminLayout.style.display = 'grid';
+
+            // Display admin email safely
+            adminEmail.textContent = auth.getUserEmail() || 'Admin';
+
+            // Load data
+            loadUsers();
+        }
+
+        // =====================================================================
+        // EVENT HANDLERS
+        // =====================================================================
+
+        // Auth state changes
+        auth.onAuthStateChange(() => {
+            updateUI();
+        });
+
+        // Navigation
+        $$('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (item.dataset.page) {
+                    switchPage(item.dataset.page);
+                }
+            });
+        });
+
+        // Search and filter
+        $('#user-search').addEventListener('input', filterUsers);
+        $('#role-filter').addEventListener('change', filterUsers);
+
+        // Invite modal
+        $('#btn-invite-user').addEventListener('click', () => {
+            inviteModal.classList.add('visible');
+        });
+        $('#close-invite-modal').addEventListener('click', () => {
+            inviteModal.classList.remove('visible');
+        });
+        $('#cancel-invite').addEventListener('click', () => {
+            inviteModal.classList.remove('visible');
+        });
+        $('#invite-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const email = $('#invite-email').value;
+            const role = $('#invite-role').value;
+            const message = $('#invite-message').value;
+            sendInvitation(email, role, message);
+        });
+
+        // Edit user modal
+        $('#close-edit-modal').addEventListener('click', () => {
+            editUserModal.classList.remove('visible');
+        });
+        $('#cancel-edit').addEventListener('click', () => {
+            editUserModal.classList.remove('visible');
+        });
+        $('#btn-reset-password').addEventListener('click', () => {
+            const userId = $('#edit-user-id').value;
+            resetPassword(userId);
+        });
+        $('#edit-user-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userId = $('#edit-user-id').value;
+            const role = $('#edit-role').value;
+            const status = $('#edit-status').value;
+
+            // In real implementation, call API
+            const user = users.find(u => u.id === userId);
+            if (user) {
+                user.role = role;
+                user.status = status;
+                renderUserTable(users);
+                updateStats();
+            }
+
+            editUserModal.classList.remove('visible');
+            console.log(`[Admin] User ${userId} updated`);
+        });
+
+        // Login button
+        $('#btn-login').addEventListener('click', () => {
+            auth.loginWithHostedUI();
+        });
+
+        // Logout button
+        $('#btn-logout').addEventListener('click', () => {
+            auth.logout();
+            updateUI();
+        });
+
+        // =====================================================================
+        // INITIALIZATION
+        // =====================================================================
+
+        updateUI();
+
+        // Handle OAuth callback
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('code')) {
+            try {
+                await auth.exchangeCodeForTokens();
+                window.history.replaceState({}, '', window.location.pathname);
+                updateUI();
+            } catch (err) {
+                console.error('OAuth callback failed:', err);
+            }
+        }
+    </script>
+</body>
+</html>

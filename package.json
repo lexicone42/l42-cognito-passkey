@@ -1,6 +1,6 @@
 {
   "name": "l42-cognito-passkey",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AWS Cognito authentication with WebAuthn/Passkey support - self-hosted, configurable",
   "type": "module",
   "main": "src/auth.js",
@@ -17,7 +17,8 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "echo \"No tests yet - contributions welcome!\"",
+    "test": "npx vitest run plugin/templates/",
+    "test:watch": "npx vitest plugin/templates/",
     "lint": "echo \"No linter configured yet\""
   },
   "repository": {
