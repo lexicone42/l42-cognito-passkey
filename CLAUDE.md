@@ -217,6 +217,40 @@ The RBAC system has 22 property-based tests using fast-check:
 - Permission inheritance
 - Cognito group alias consistency
 
+## Upgrade Notes
+
+### v0.5.2 (Security Release)
+
+**`loginWithHostedUI()` is now async**
+
+```javascript
+// Before (still works - redirect happens before promise resolves)
+loginWithHostedUI(email);
+
+// After (recommended for clarity)
+await loginWithHostedUI(email);
+```
+
+The function now generates a PKCE code challenge before redirecting. Since the redirect happens immediately, existing synchronous calls will continue to work, but TypeScript/ESLint may flag the unhandled promise.
+
+**New validations that may break existing configs:**
+- `redirectUri` must use HTTPS (except localhost)
+- `cognitoDomain` format is now validated
+
+### v0.4.0
+
+**`decodeJwtPayload()` renamed to `UNSAFE_decodeJwtPayload()`**
+
+```javascript
+// Before (still works, emits deprecation warning)
+const claims = auth.decodeJwtPayload(token);
+
+// After
+const claims = auth.UNSAFE_decodeJwtPayload(token);
+```
+
+See `docs/upgrade-prompt.md` for a complete v0.4.0 migration guide.
+
 ## Future Plans
 
 - **AWS Cedar Integration** - See `docs/cedar-integration.md`

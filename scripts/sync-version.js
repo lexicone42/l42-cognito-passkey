@@ -145,3 +145,15 @@ for (const update of updates) {
 }
 
 console.log(`\nVersion sync complete: ${filesUpdated} file(s) updated to v${newVersion}`);
+
+// Reminder for manual updates
+console.log(`
+╔══════════════════════════════════════════════════════════════════╗
+║  REMEMBER: Update these files manually if there are breaking     ║
+║  changes or upgrade notes for this version:                      ║
+║                                                                  ║
+║  1. CHANGELOG.md      - Add version entry with changes           ║
+║  2. CLAUDE.md         - Add to "Upgrade Notes" section           ║
+║  3. docs/upgrade-prompt.md - Update if major breaking changes    ║
+╚══════════════════════════════════════════════════════════════════╝
+`);

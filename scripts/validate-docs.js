@@ -133,6 +133,32 @@ for (const { doc, refs } of fileReferences) {
 }
 
 // ============================================================================
+// 4. Check upgrade notes exist for current version
+// ============================================================================
+
+const claudeMdPath = path.join(ROOT, 'CLAUDE.md');
+if (fs.existsSync(claudeMdPath)) {
+  const claudeContent = fs.readFileSync(claudeMdPath, 'utf8');
+  const upgradeNotesPattern = new RegExp(`### v${expectedVersion.replace(/\./g, '\\.')}`, 'i');
+
+  if (upgradeNotesPattern.test(claudeContent)) {
+    console.log(`  ✓ CLAUDE.md: Upgrade notes for v${expectedVersion}`);
+  } else {
+    // Check if CHANGELOG has this version (if so, might need upgrade notes)
+    const changelogPath = path.join(ROOT, 'CHANGELOG.md');
+    if (fs.existsSync(changelogPath)) {
+      const changelog = fs.readFileSync(changelogPath, 'utf8');
+      const hasBreakingChanges = changelog.includes(`## [${expectedVersion}]`) &&
+        (changelog.includes('Breaking') || changelog.includes('async') || changelog.includes('renamed'));
+
+      if (hasBreakingChanges) {
+        warnings.push(`CLAUDE.md: No upgrade notes for v${expectedVersion} (CHANGELOG suggests breaking changes)`);
+      }
+    }
+  }
+}
+
+// ============================================================================
 // Report results
 // ============================================================================
 
