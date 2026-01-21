@@ -1,0 +1,46 @@
+{
+  "name": "l42-cognito-passkey",
+  "version": "0.2.0",
+  "description": "AWS Cognito authentication with WebAuthn/Passkey support - self-hosted, configurable",
+  "type": "module",
+  "main": "src/auth.js",
+  "module": "src/auth.js",
+  "exports": {
+    ".": {
+      "import": "./src/auth.js"
+    }
+  },
+  "files": [
+    "src/auth.js",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "echo \"No tests yet - contributions welcome!\"",
+    "lint": "echo \"No linter configured yet\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lexicone42/l42-cognito-passkey.git"
+  },
+  "keywords": [
+    "cognito",
+    "aws",
+    "authentication",
+    "webauthn",
+    "passkey",
+    "fido2",
+    "oauth",
+    "jwt"
+  ],
+  "author": "Lexicone42",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/lexicone42/l42-cognito-passkey/issues"
+  },
+  "homepage": "https://github.com/lexicone42/l42-cognito-passkey#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

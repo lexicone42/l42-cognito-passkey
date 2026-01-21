@@ -1,0 +1,14 @@
+{
+  "name": "l42-cognito-passkey",
+  "version": "0.2.0",
+  "description": "AWS Cognito + WebAuthn passkey authentication - self-hosted, configurable",
+  "author": "Lexicone42",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/lexicone42/l42-cognito-passkey",
+  "commands": [
+    "commands/setup-auth.md"
+  ],
+  "agents": [
+    "agents/auth-setup.md"
+  ]
+}

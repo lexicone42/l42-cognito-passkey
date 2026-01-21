@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline';
+        connect-src 'self' https://cognito-idp.us-west-2.amazonaws.com https://*.amazoncognito.com;
+    ">
+    <title>L42 Auth - Basic Example</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #252542;
+            --text: #eee;
+            --text-muted: #888;
+            --accent: #e94560;
+            --success: #4ade80;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: var(--accent);
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 1rem;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-muted);
+        }
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background: var(--bg);
+            color: var(--text);
+            font-size: 1rem;
+        }
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-top: 0.5rem;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        .btn-secondary {
+            background: #333;
+            color: var(--text);
+        }
+        .btn-success {
+            background: var(--success);
+            color: black;
+        }
+        .btn-danger {
+            background: #7f1d1d;
+            color: #fca5a5;
+            padding: 0.25rem 0.5rem;
+            width: auto;
+        }
+        .user-info {
+            text-align: center;
+        }
+        .user-email {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .user-groups {
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+        .hidden { display: none; }
+        .error {
+            background: #7f1d1d;
+            color: #fca5a5;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        .status {
+            text-align: center;
+            padding: 1rem;
+            color: var(--text-muted);
+        }
+        .passkey-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>L42 Auth Demo</h1>
+
+        <!-- Loading State -->
+        <div id="loading" class="card">
+            <p class="status">Loading...</p>
+        </div>
+
+        <!-- Login Form -->
+        <div id="login-section" class="card hidden">
+            <div id="error" class="error hidden"></div>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn-primary">Login with Password</button>
+            </form>
+
+            <button id="passkey-btn" class="btn-secondary">Login with Passkey</button>
+            <button id="hosted-ui-btn" class="btn-secondary">Login with Hosted UI</button>
+        </div>
+
+        <!-- Authenticated Section -->
+        <div id="auth-section" class="card hidden">
+            <div class="user-info">
+                <p class="user-email" id="user-email"></p>
+                <p class="user-groups" id="user-groups"></p>
+                <button id="logout-btn" class="btn-primary">Logout</button>
+            </div>
+        </div>
+
+        <!-- Passkey Management -->
+        <div id="passkey-section" class="card hidden">
+            <h3 style="margin-bottom: 1rem;">Passkey Management</h3>
+            <button id="register-passkey-btn" class="btn-success">Register New Passkey</button>
+            <div id="passkey-list" style="margin-top: 1rem;"></div>
+        </div>
+    </div>
+
+    <!--
+        CONFIGURATION
+        Replace with your Cognito details
+    -->
+    <script>
+    window.L42_AUTH_CONFIG = {
+        clientId: 'YOUR_CLIENT_ID',
+        domain: 'YOUR_APP.auth.us-west-2.amazoncognito.com',
+        region: 'us-west-2',
+        redirectUri: window.location.origin + '/callback.html',
+        scopes: ['openid', 'email', 'aws.cognito.signin.user.admin']
+    };
+    </script>
+
+    <script type="module">
+        import {
+            isAuthenticated,
+            getUserEmail,
+            getUserGroups,
+            hasAdminScope,
+            loginWithPassword,
+            loginWithPasskey,
+            loginWithHostedUI,
+            logout,
+            listPasskeys,
+            registerPasskey,
+            deletePasskey,
+            onAuthStateChange
+        } from '../../src/auth.js';
+
+        // Elements
+        const loadingEl = document.getElementById('loading');
+        const loginSection = document.getElementById('login-section');
+        const authSection = document.getElementById('auth-section');
+        const passkeySection = document.getElementById('passkey-section');
+        const errorEl = document.getElementById('error');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const userEmailEl = document.getElementById('user-email');
+        const userGroupsEl = document.getElementById('user-groups');
+        const passkeyListEl = document.getElementById('passkey-list');
+
+        // Show/hide sections
+        function showLogin() {
+            loadingEl.classList.add('hidden');
+            loginSection.classList.remove('hidden');
+            authSection.classList.add('hidden');
+            passkeySection.classList.add('hidden');
+        }
+
+        function showAuthenticated() {
+            loadingEl.classList.add('hidden');
+            loginSection.classList.add('hidden');
+            authSection.classList.remove('hidden');
+
+            userEmailEl.textContent = getUserEmail() || 'Unknown';
+            const groups = getUserGroups();
+            userGroupsEl.textContent = groups.length > 0
+                ? 'Groups: ' + groups.join(', ')
+                : 'No groups';
+
+            // Show passkey management if admin scope
+            if (hasAdminScope()) {
+                passkeySection.classList.remove('hidden');
+                loadPasskeys();
+            } else {
+                passkeySection.classList.add('hidden');
+            }
+        }
+
+        function showError(message) {
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+        }
+
+        function hideError() {
+            errorEl.classList.add('hidden');
+        }
+
+        // Create passkey item element safely
+        function createPasskeyItem(pk) {
+            const div = document.createElement('div');
+            div.className = 'passkey-item';
+
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = pk.FriendlyName || pk.CredentialId.substring(0, 20) + '...';
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'btn-danger';
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.addEventListener('click', async () => {
+                if (confirm('Delete this passkey?')) {
+                    try {
+                        await deletePasskey(pk.CredentialId);
+                        loadPasskeys();
+                    } catch (error) {
+                        alert('Failed to delete: ' + error.message);
+                    }
+                }
+            });
+
+            div.appendChild(nameSpan);
+            div.appendChild(deleteBtn);
+            return div;
+        }
+
+        // Load passkeys
+        async function loadPasskeys() {
+            // Clear existing content
+            while (passkeyListEl.firstChild) {
+                passkeyListEl.removeChild(passkeyListEl.firstChild);
+            }
+
+            try {
+                const passkeys = await listPasskeys();
+                if (passkeys.length === 0) {
+                    const p = document.createElement('p');
+                    p.style.color = '#888';
+                    p.textContent = 'No passkeys registered';
+                    passkeyListEl.appendChild(p);
+                } else {
+                    passkeys.forEach(pk => {
+                        passkeyListEl.appendChild(createPasskeyItem(pk));
+                    });
+                }
+            } catch (error) {
+                const p = document.createElement('p');
+                p.style.color = '#f87171';
+                p.textContent = error.message;
+                passkeyListEl.appendChild(p);
+            }
+        }
+
+        // Auth state change handler
+        onAuthStateChange((isAuth) => {
+            if (isAuth) {
+                showAuthenticated();
+            } else {
+                showLogin();
+            }
+        });
+
+        // Initialize
+        if (isAuthenticated()) {
+            showAuthenticated();
+        } else {
+            showLogin();
+        }
+
+        // Login form handler
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideError();
+
+            try {
+                await loginWithPassword(emailInput.value, passwordInput.value);
+            } catch (error) {
+                showError(error.message);
+            }
+        });
+
+        // Passkey login
+        document.getElementById('passkey-btn').addEventListener('click', async () => {
+            hideError();
+            const email = emailInput.value;
+            if (!email) {
+                showError('Enter your email first');
+                return;
+            }
+
+            try {
+                await loginWithPasskey(email);
+            } catch (error) {
+                if (error.name !== 'NotAllowedError') {
+                    showError(error.message);
+                }
+            }
+        });
+
+        // Hosted UI login
+        document.getElementById('hosted-ui-btn').addEventListener('click', () => {
+            loginWithHostedUI(emailInput.value || undefined);
+        });
+
+        // Logout
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            logout();
+        });
+
+        // Register passkey
+        document.getElementById('register-passkey-btn').addEventListener('click', async () => {
+            try {
+                await registerPasskey();
+                loadPasskeys();
+            } catch (error) {
+                alert('Failed to register passkey: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>

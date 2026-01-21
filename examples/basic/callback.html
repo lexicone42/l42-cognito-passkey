@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline';
+        connect-src 'self' https://cognito-idp.us-west-2.amazonaws.com https://*.amazoncognito.com;
+    ">
+    <title>Authentication Callback</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+        }
+        .container { text-align: center; }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid #333;
+            border-top-color: #e94560;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status { color: #888; }
+        .error { color: #f87171; }
+        .success { color: #4ade80; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner" id="spinner"></div>
+        <p class="status" id="status">Completing authentication...</p>
+    </div>
+
+    <script>
+    window.L42_AUTH_CONFIG = {
+        clientId: 'YOUR_CLIENT_ID',
+        domain: 'YOUR_APP.auth.us-west-2.amazoncognito.com',
+        region: 'us-west-2',
+        redirectUri: window.location.origin + '/callback.html',
+        scopes: ['openid', 'email', 'aws.cognito.signin.user.admin']
+    };
+    </script>
+
+    <script type="module">
+        import { exchangeCodeForTokens } from '../../src/auth.js';
+
+        const spinner = document.getElementById('spinner');
+        const status = document.getElementById('status');
+
+        async function processCallback() {
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+            const state = params.get('state');
+            const error = params.get('error');
+
+            if (error) {
+                spinner.style.display = 'none';
+                status.className = 'error';
+                status.textContent = params.get('error_description') || error;
+                setTimeout(() => window.location.href = 'index.html', 3000);
+                return;
+            }
+
+            try {
+                if (code) {
+                    await exchangeCodeForTokens(code, state);
+                }
+                spinner.style.display = 'none';
+                status.className = 'success';
+                status.textContent = 'Success! Redirecting...';
+                setTimeout(() => window.location.href = 'index.html', 500);
+            } catch (error) {
+                spinner.style.display = 'none';
+                status.className = 'error';
+                status.textContent = error.message || 'Authentication failed';
+                setTimeout(() => window.location.href = 'index.html', 3000);
+            }
+        }
+
+        processCallback();
+    </script>
+</body>
+</html>

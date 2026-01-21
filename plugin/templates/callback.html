@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!--
+        Content Security Policy Template
+        Replace {REGION} with your AWS region (e.g., us-west-2)
+        Replace {COGNITO_DOMAIN} with your Cognito domain
+    -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline';
+        connect-src 'self' https://cognito-idp.{REGION}.amazonaws.com https://cognito-identity.{REGION}.amazonaws.com https://*.amazoncognito.com https://{COGNITO_DOMAIN};
+        frame-ancestors 'none';
+    ">
+    <meta name="robots" content="noindex,nofollow">
+    <title>Authentication Callback</title>
+    <style>
+        :root {
+            --bg-dark: #1a1a2e;
+            --text: #eee;
+            --text-muted: #888;
+            --accent: #e94560;
+            --error: #f87171;
+            --success: #4ade80;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'SF Mono', 'Consolas', monospace;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .callback-container {
+            text-align: center;
+            max-width: 400px;
+            padding: 2rem;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status-text { color: var(--text-muted); font-size: 0.9rem; }
+        .status-text.error { color: var(--error); }
+        .status-text.success { color: var(--success); }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="callback-container">
+        <div id="loading-state">
+            <div class="spinner"></div>
+            <p class="status-text">Completing authentication...</p>
+        </div>
+        <div id="success-state" class="hidden">
+            <p class="status-text success">Authentication successful!</p>
+            <p class="status-text" style="margin-top: 0.5rem;">Redirecting...</p>
+        </div>
+        <div id="error-state" class="hidden">
+            <p class="status-text error" id="error-message">Authentication failed</p>
+            <p class="status-text" style="margin-top: 0.5rem;">Redirecting to login...</p>
+        </div>
+    </div>
+
+    <!--
+        REQUIRED: Set your configuration before the auth import.
+        Replace the placeholder values with your Cognito details.
+    -->
+    <script>
+    window.L42_AUTH_CONFIG = {
+        clientId: '{CLIENT_ID}',
+        domain: '{COGNITO_DOMAIN}',
+        region: '{REGION}',
+        redirectUri: window.location.origin + '/callback',
+        scopes: ['openid', 'email', 'aws.cognito.signin.user.admin']
+    };
+    </script>
+
+    <script type="module">
+        // Import from your local copy of auth.js
+        import { exchangeCodeForTokens } from '/auth/auth.js';
+
+        const loadingState = document.getElementById('loading-state');
+        const successState = document.getElementById('success-state');
+        const errorState = document.getElementById('error-state');
+        const errorMessage = document.getElementById('error-message');
+
+        function showSuccess() {
+            loadingState.classList.add('hidden');
+            successState.classList.remove('hidden');
+        }
+
+        function showError(message) {
+            loadingState.classList.add('hidden');
+            errorState.classList.remove('hidden');
+            errorMessage.textContent = message || 'Authentication failed';
+        }
+
+        async function processCallback() {
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+            const state = params.get('state');
+            const error = params.get('error');
+
+            if (error) {
+                showError(params.get('error_description') || error);
+                setTimeout(() => window.location.href = '/', 3000);
+                return;
+            }
+
+            try {
+                if (code) {
+                    await exchangeCodeForTokens(code, state);
+                }
+                showSuccess();
+
+                const redirectTo = sessionStorage.getItem('l42_redirect_after_login') || '/';
+                sessionStorage.removeItem('l42_redirect_after_login');
+
+                setTimeout(() => window.location.href = redirectTo, 1000);
+            } catch (error) {
+                console.error('[Auth Callback] Error:', error);
+
+                let message = 'Authentication failed';
+                if (error.message) {
+                    if (error.message.includes('state') || error.message.includes('CSRF')) {
+                        message = 'Security validation failed. Please try again.';
+                    } else if (error.message.includes('configured')) {
+                        message = 'Auth not configured. Check L42_AUTH_CONFIG.';
+                    } else {
+                        message = error.message;
+                    }
+                }
+
+                showError(message);
+                setTimeout(() => window.location.href = '/', 3000);
+            }
+        }
+
+        processCallback();
+    </script>
+</body>
+</html>
