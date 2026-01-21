@@ -1,5 +1,12 @@
 # L42 Cognito Passkey
 
+[![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-blueviolet?logo=anthropic&logoColor=white)](https://claude.ai/code)
+[![CI](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml/badge.svg)](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/package-json/v/lexicone42/l42-cognito-passkey)](https://github.com/lexicone42/l42-cognito-passkey/releases)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
+[![Tests](https://img.shields.io/badge/tests-130%20passing-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
+
 AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configurable, no build step required.
 
 ## Features
@@ -122,13 +129,27 @@ client.set_user_pool_mfa_config(
 
 **Note:** CDK/CloudFormation don't support WebAuthn configuration yet. Use boto3 or AWS Console.
 
-## Claude Code Plugin
+## Claude Code Integration
 
-This repo includes a Claude Code plugin for guided setup:
+This project was built with [Claude Code](https://claude.ai/code) and includes a plugin for guided setup.
+
+### For Claude Code Instances
+
+See [`CLAUDE.md`](CLAUDE.md) for integration guidelines, security patterns, and RBAC documentation.
+
+### Plugin Commands
 
 ```bash
 # Add the plugin directory to your Claude Code config
 # Then use /setup-auth in your project
+```
+
+### Development with Claude Code
+
+```bash
+pnpm test                 # Run all 130 tests
+pnpm validate-docs        # Check documentation consistency
+pnpm release:patch        # Bump version (0.5.1 → 0.5.2)
 ```
 
 ## Version
