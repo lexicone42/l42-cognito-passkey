@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-01-21
+
+### Security
+
+- **PKCE Implementation**: Added Proof Key for Code Exchange to prevent authorization code interception attacks
+  - Generates cryptographically secure code verifier (RFC 7636 compliant)
+  - SHA-256 code challenge sent with authorization request
+  - Code verifier stored in sessionStorage and cleared after use
+
+- **HTTPS Enforcement**: Redirect URIs must use HTTPS (except localhost for development)
+  - Prevents token interception via network sniffing
+
+- **Domain Validation**: Added cognitoDomain format validation
+  - Prevents open redirect attacks via malicious authorization endpoints
+  - Accepts standard Cognito domains and valid custom domains
+
+- **Cookie Security Documentation**: Documented HttpOnly limitation
+  - Client-side `document.cookie` cannot set HttpOnly (browser limitation)
+  - Mitigations: Secure flag, SameSite=Lax, short-lived tokens
+
+### Added
+
+- **OAuth Security Test Suite**: 38 new tests covering:
+  - PKCE code verifier/challenge generation
+  - CSRF state parameter validation
+  - Redirect URI validation
+  - Token exchange security
+  - Cookie security flags
+  - HTTPS enforcement
+  - Cognito domain validation
+
+### Changed
+
+- `loginWithHostedUI()` is now async (generates PKCE challenge)
+- Total tests: 168 (was 130)
+
 ## [0.5.1] - 2026-01-21
 
 ### Added
