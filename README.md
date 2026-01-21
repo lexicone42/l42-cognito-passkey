@@ -135,7 +135,37 @@ This repo includes a Claude Code plugin for guided setup:
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.3.0"
+console.log(VERSION); // "0.4.0"
+```
+
+## Migration Guide
+
+### v0.3.x → v0.4.0
+
+**`decodeJwtPayload()` Renamed**
+
+The function `decodeJwtPayload()` has been renamed to `UNSAFE_decodeJwtPayload()` to clearly indicate that it returns **unverified claims**. The old name still works but emits a deprecation warning.
+
+```javascript
+// Before (still works, but warns)
+const claims = auth.decodeJwtPayload(token);
+
+// After (recommended)
+const claims = auth.UNSAFE_decodeJwtPayload(token);
+```
+
+**Why?** This prevents developers from accidentally using JWT claims for authorization decisions. The `UNSAFE_` prefix reminds you that these claims are for display purposes only.
+
+**New Security Helpers**
+
+Use `requireServerAuthorization()` for protected actions:
+
+```javascript
+// Enforces server-side validation
+const result = await auth.requireServerAuthorization('admin:delete-user');
+if (!result.authorized) {
+    throw new Error(result.reason);
+}
 ```
 
 ## License

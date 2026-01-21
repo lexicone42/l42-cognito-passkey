@@ -10,6 +10,78 @@
  */
 
 // =============================================================================
+// COGNITO GROUP NAME MAPPING
+// =============================================================================
+
+/**
+ * Canonical Cognito group names with their accepted aliases.
+ * Use isInCognitoGroup() for consistent group membership checks.
+ *
+ * This centralizes group name handling to prevent mismatches between
+ * singular/plural forms (e.g., 'admin' vs 'admins').
+ */
+export const COGNITO_GROUPS = {
+    ADMIN: { canonical: 'admin', aliases: ['admin', 'admins', 'administrators'] },
+    READONLY: { canonical: 'readonly', aliases: ['readonly', 'read-only', 'viewer', 'viewers'] },
+    USER: { canonical: 'users', aliases: ['user', 'users', 'member', 'members'] },
+    EDITOR: { canonical: 'editors', aliases: ['editor', 'editors'] },
+    REVIEWER: { canonical: 'reviewers', aliases: ['reviewer', 'reviewers'] },
+    PUBLISHER: { canonical: 'publishers', aliases: ['publisher', 'publishers'] },
+    PLAYER: { canonical: 'players', aliases: ['player', 'players'] },
+    DM: { canonical: 'dms', aliases: ['dm', 'dms', 'dungeon-master', 'game-master', 'gm'] },
+    MODERATOR: { canonical: 'moderators', aliases: ['moderator', 'moderators', 'mod', 'mods'] },
+    DEVELOPER: { canonical: 'developers', aliases: ['developer', 'developers', 'dev', 'devs'] },
+    ANALYST: { canonical: 'analysts', aliases: ['analyst', 'analysts'] },
+    AUDITOR: { canonical: 'auditors', aliases: ['auditor', 'auditors'] },
+    SUPPORT: { canonical: 'support-agents', aliases: ['support', 'support-agent', 'support-agents'] },
+    BILLING: { canonical: 'billing-admins', aliases: ['billing', 'billing-admin', 'billing-admins'] }
+};
+
+/**
+ * Check if user's groups include a specific role (handles aliases).
+ *
+ * @param {string[]} userGroups - Array of Cognito group names from token
+ * @param {string} groupKey - Key from COGNITO_GROUPS (e.g., 'ADMIN', 'EDITOR')
+ * @returns {boolean} True if user is in the specified group
+ *
+ * @example
+ * const groups = auth.getUserGroups(); // ['admins', 'developers']
+ * isInCognitoGroup(groups, 'ADMIN');   // true (admins is an alias)
+ * isInCognitoGroup(groups, 'EDITOR');  // false
+ */
+export function isInCognitoGroup(userGroups, groupKey) {
+    const groupConfig = COGNITO_GROUPS[groupKey];
+    if (!groupConfig) {
+        console.warn(`Unknown Cognito group key: ${groupKey}`);
+        return false;
+    }
+    const normalizedUserGroups = userGroups.map(g => g.toLowerCase());
+    return groupConfig.aliases.some(alias => normalizedUserGroups.includes(alias.toLowerCase()));
+}
+
+/**
+ * Get the canonical group name for a given key.
+ * Use this when creating Cognito groups via CDK/CloudFormation.
+ *
+ * @param {string} groupKey - Key from COGNITO_GROUPS
+ * @returns {string} Canonical group name
+ */
+export function getCanonicalGroupName(groupKey) {
+    return COGNITO_GROUPS[groupKey]?.canonical || groupKey.toLowerCase();
+}
+
+/**
+ * Check if user has any of the specified roles (handles aliases).
+ *
+ * @param {string[]} userGroups - Array of Cognito group names from token
+ * @param {string[]} groupKeys - Array of keys from COGNITO_GROUPS
+ * @returns {boolean} True if user is in any of the specified groups
+ */
+export function isInAnyCognitoGroup(userGroups, groupKeys) {
+    return groupKeys.some(key => isInCognitoGroup(userGroups, key));
+}
+
+// =============================================================================
 // CORE ROLES (Always Required)
 // =============================================================================
 
@@ -511,13 +583,21 @@ export const CONTENTFUL_ROLE_MAPPING = {
 // =============================================================================
 
 export default {
+    // Cognito group handling (v0.3.0+)
+    COGNITO_GROUPS,
+    isInCognitoGroup,
+    isInAnyCognitoGroup,
+    getCanonicalGroupName,
+    // Role definitions
     CORE_ROLES,
     STANDARD_ROLES,
     SITE_PATTERNS,
+    // Permission helpers
     hasPermission,
     getRolesForPattern,
     getRoleHierarchy,
     canManageRole,
     getCognitoGroupConfig,
+    // Future integrations
     CONTENTFUL_ROLE_MAPPING
 };

@@ -2,6 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-01-21
+
+### Security Improvements
+
+- **`UNSAFE_decodeJwtPayload()`**: Renamed from `decodeJwtPayload()` to clearly indicate
+  the function returns UNVERIFIED claims. The old function name still works but emits
+  a deprecation warning. This prevents developers from accidentally using JWT claims
+  for authorization decisions.
+
+- **`requireServerAuthorization()`**: New helper that enforces server-side authorization
+  checks. Makes the secure path (server validation) the easy path:
+  ```javascript
+  const result = await auth.requireServerAuthorization('admin:delete-user');
+  if (!result.authorized) throw new Error(result.reason);
+  ```
+
+- **`UI_ONLY_hasRole()`**: Explicitly named function for client-side role checks that
+  are ONLY for UI display purposes (showing/hiding buttons). The name reminds developers
+  this is not for authorization.
+
+- **ccTLD Cookie Domain Fix**: Cookie domain detection now correctly handles country-code
+  TLDs like `.co.uk`, `.com.au`, `.co.jp` (30+ public suffixes supported). Previously,
+  `app.example.co.uk` would incorrectly set domain to `.co.uk`.
+
+### Added
+
+- **Cognito Group Aliases**: `COGNITO_GROUPS` constant centralizes group name handling
+  with alias support. Handles singular/plural variations automatically:
+  ```javascript
+  import { isInCognitoGroup } from './rbac-roles.js';
+  isInCognitoGroup(groups, 'ADMIN'); // matches 'admin', 'admins', 'administrators'
+  ```
+
+- **`isInCognitoGroup()`**: Case-insensitive group membership check with alias support
+- **`isInAnyCognitoGroup()`**: Check membership in any of multiple groups
+- **`getCanonicalGroupName()`**: Get standard group name for Cognito configuration
+
+- **Property-Based Tests**: 22 new tests using fast-check that verify RBAC invariants:
+  - Role hierarchy transitivity
+  - Admin supremacy (level 100, wildcard permissions)
+  - Permission inheritance
+  - Cognito group alias consistency
+  - Role management anti-reflexivity
+
+- **CLAUDE.md**: Integration guide for Claude Code instances
+- **docs/cedar-integration.md**: AWS Cedar + Verified Permissions design document
+
+### Changed
+
+- `decodeJwtPayload()` now emits deprecation warning (use `UNSAFE_decodeJwtPayload()`)
+- `parseJwt()` now emits deprecation warning (use `UNSAFE_decodeJwtPayload()`)
+
+### Developer Experience
+
+- Added `fast-check` as dev dependency for property-based testing
+- All 119 tests pass (97 existing + 22 new property-based)
+
 ## [0.3.0] - 2026-01-21
 
 ### Added

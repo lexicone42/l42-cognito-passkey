@@ -1,6 +1,6 @@
 {
   "name": "l42-cognito-passkey",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "AWS Cognito authentication with WebAuthn/Passkey support - self-hosted, configurable",
   "type": "module",
   "main": "src/auth.js",
@@ -43,5 +43,8 @@
   "homepage": "https://github.com/lexicone42/l42-cognito-passkey#readme",
   "engines": {
     "node": ">=14.0.0"
+  },
+  "devDependencies": {
+    "fast-check": "^4.5.3"
   }
 }

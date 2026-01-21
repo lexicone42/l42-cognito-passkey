@@ -12,7 +12,7 @@
  * @license Apache-2.0
  */
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 // ==================== CONFIGURATION ====================
 
@@ -83,7 +83,45 @@ function requireConfig() {
 }
 
 /**
+ * Common public suffixes (ccTLDs with second-level domains).
+ * These require 3 parts minimum for a valid registrable domain.
+ * @see https://publicsuffix.org/list/
+ */
+const PUBLIC_SUFFIXES = [
+    // UK
+    'co.uk', 'org.uk', 'me.uk', 'ltd.uk', 'plc.uk',
+    // Australia
+    'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au',
+    // Brazil
+    'com.br', 'net.br', 'org.br',
+    // Japan
+    'co.jp', 'or.jp', 'ne.jp', 'ac.jp',
+    // New Zealand
+    'co.nz', 'org.nz', 'net.nz',
+    // South Africa
+    'co.za', 'org.za', 'net.za',
+    // India
+    'co.in', 'org.in', 'net.in',
+    // Hong Kong
+    'com.hk', 'org.hk', 'edu.hk',
+    // Singapore
+    'com.sg', 'org.sg', 'edu.sg',
+    // Germany (rare but exists)
+    'com.de',
+    // France
+    'asso.fr', 'com.fr',
+    // Spain
+    'com.es', 'org.es',
+    // Mexico
+    'com.mx', 'org.mx',
+    // Argentina
+    'com.ar', 'org.ar'
+];
+
+/**
  * Get the effective cookie domain based on current hostname.
+ * Handles ccTLDs (country-code TLDs) with public suffixes correctly.
+ *
  * @returns {string|null} Cookie domain or null (for current domain only)
  */
 function getCookieDomain() {
@@ -103,11 +141,24 @@ function getCookieDomain() {
         return null;
     }
 
-    // Extract registrable domain (last two parts, or three for co.uk etc.)
-    // Simple heuristic: if domain has 2+ parts, use parent domain with dot prefix
     const parts = hostname.split('.');
+
+    // Check if hostname ends with a known public suffix
+    // e.g., app.example.co.uk -> needs .example.co.uk (3 parts)
+    const lastTwo = parts.slice(-2).join('.');
+    if (PUBLIC_SUFFIXES.includes(lastTwo)) {
+        // This is a public suffix - need at least 3 parts
+        if (parts.length < 3) {
+            // Hostname IS the public suffix (e.g., co.uk) - can't set domain
+            console.warn(`Cookie domain cannot be set for public suffix: ${hostname}`);
+            return null;
+        }
+        // Return the registrable domain (e.g., .example.co.uk)
+        return '.' + parts.slice(-3).join('.');
+    }
+
+    // Standard TLD - use last 2 parts
     if (parts.length >= 2) {
-        // Use parent domain for cross-subdomain cookies
         return '.' + parts.slice(-2).join('.');
     }
 
@@ -287,30 +338,45 @@ export function clearTokens() {
 }
 
 /**
- * Decode a JWT token payload (NO signature verification).
+ * Decode a JWT token payload WITHOUT signature verification.
  *
- * SECURITY WARNING: This function does NOT verify the JWT signature.
+ * ⚠️  SECURITY WARNING ⚠️
+ * This function does NOT verify the JWT signature.
  * The returned claims are UNVERIFIED and UNTRUSTED.
- * Do NOT use for authorization decisions - use only for display purposes
- * (e.g., showing user email in UI). Server-side validation handles actual auth.
+ *
+ * ❌ NEVER use for authorization decisions
+ * ✅ ONLY use for display purposes (e.g., showing user email in UI)
+ *
+ * Server-side validation handles actual authentication and authorization.
+ * For authorization checks, use ensureValidTokens() and verify on your server.
  *
  * @param {string} token - JWT token string
- * @returns {Object} Decoded payload (UNVERIFIED - do not trust for auth)
+ * @returns {Object} Decoded payload (UNVERIFIED - do not trust for auth decisions)
  */
-export function decodeJwtPayload(token) {
+export function UNSAFE_decodeJwtPayload(token) {
     const base64Url = token.split('.')[1];
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
     return JSON.parse(atob(base64));
 }
 
 /**
- * @deprecated Use decodeJwtPayload() instead. This alias will be removed in v3.0.
+ * @deprecated Use UNSAFE_decodeJwtPayload() instead. This alias will be removed in v1.0.
+ * @param {string} token - JWT token string
+ * @returns {Object} Decoded payload (UNVERIFIED)
+ */
+export function decodeJwtPayload(token) {
+    console.warn('decodeJwtPayload() is deprecated. Use UNSAFE_decodeJwtPayload() to acknowledge the security implications.');
+    return UNSAFE_decodeJwtPayload(token);
+}
+
+/**
+ * @deprecated Use UNSAFE_decodeJwtPayload() instead. This alias will be removed in v1.0.
  * @param {string} token - JWT token string
  * @returns {Object} Decoded payload (UNVERIFIED)
  */
 export function parseJwt(token) {
-    console.warn('parseJwt() is deprecated. Use decodeJwtPayload() instead.');
-    return decodeJwtPayload(token);
+    console.warn('parseJwt() is deprecated. Use UNSAFE_decodeJwtPayload() instead.');
+    return UNSAFE_decodeJwtPayload(token);
 }
 
 /**
@@ -320,7 +386,7 @@ export function parseJwt(token) {
  */
 export function isTokenExpired(tokens) {
     try {
-        return Date.now() >= decodeJwtPayload(tokens.id_token).exp * 1000;
+        return Date.now() >= UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000;
     } catch {
         return true;
     }
@@ -334,7 +400,7 @@ export function isTokenExpired(tokens) {
 export function shouldRefreshToken(tokens) {
     if (!tokens || !tokens.id_token || !tokens.refresh_token) return false;
     try {
-        const exp = decodeJwtPayload(tokens.id_token).exp * 1000;
+        const exp = UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000;
         const authMethod = tokens.auth_method || 'password';
         const refreshConfig = REFRESH_CONFIG[authMethod] || REFRESH_CONFIG.password;
         return Date.now() >= (exp - refreshConfig.refreshBefore);
@@ -352,7 +418,7 @@ function detectAuthMethod(tokens) {
     if (tokens.auth_method) return tokens.auth_method;
 
     try {
-        const claims = decodeJwtPayload(tokens.id_token);
+        const claims = UNSAFE_decodeJwtPayload(tokens.id_token);
         const amr = claims.amr || [];
         if (amr.includes('webauthn') || amr.includes('mfa')) {
             return 'passkey';
@@ -451,7 +517,7 @@ export function getIdTokenClaims() {
     const tokens = getTokens();
     if (!tokens || !tokens.id_token) return null;
     try {
-        return decodeJwtPayload(tokens.id_token);
+        return UNSAFE_decodeJwtPayload(tokens.id_token);
     } catch {
         return null;
     }
@@ -474,7 +540,7 @@ export function hasAdminScope() {
     const tokens = getTokens();
     if (!tokens || !tokens.access_token) return false;
     try {
-        const payload = decodeJwtPayload(tokens.access_token);
+        const payload = UNSAFE_decodeJwtPayload(tokens.access_token);
         const scope = payload.scope || '';
         return scope.includes('aws.cognito.signin.user.admin');
     } catch {
@@ -951,6 +1017,105 @@ export async function deletePasskey(credentialId) {
     });
 }
 
+// ==================== SERVER-SIDE AUTHORIZATION ====================
+
+/**
+ * Require server-side authorization for sensitive actions.
+ *
+ * ⚠️  SECURITY: Client-side role checks are for UI only!
+ * ALL authorization decisions MUST be validated on the server.
+ *
+ * This helper enforces the pattern of server-side validation by making
+ * it the easy path. Use this before any sensitive operation.
+ *
+ * @param {string} action - The action being authorized (e.g., 'admin:delete-user')
+ * @param {Object} [options] - Optional configuration
+ * @param {string} [options.endpoint='/api/authorize'] - Authorization endpoint
+ * @param {Object} [options.context={}] - Additional context for authorization
+ * @returns {Promise<{authorized: boolean, reason?: string}>} Authorization result
+ * @throws {Error} If not authenticated or network error
+ *
+ * @example
+ * // Before sensitive admin action
+ * async function deleteUser(userId) {
+ *     const authResult = await requireServerAuthorization('admin:delete-user', {
+ *         context: { targetUserId: userId }
+ *     });
+ *
+ *     if (!authResult.authorized) {
+ *         throw new Error(`Not authorized: ${authResult.reason}`);
+ *     }
+ *
+ *     // Proceed with deletion...
+ * }
+ */
+export async function requireServerAuthorization(action, options = {}) {
+    const { endpoint = '/api/authorize', context = {} } = options;
+
+    const tokens = await ensureValidTokens();
+    if (!tokens) {
+        throw new Error('Authentication required for this action');
+    }
+
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${tokens.access_token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ action, context })
+        });
+
+        if (response.status === 401) {
+            clearTokens();
+            throw new Error('Session expired. Please log in again.');
+        }
+
+        if (response.status === 403) {
+            const data = await response.json().catch(() => ({}));
+            return {
+                authorized: false,
+                reason: data.reason || 'Permission denied'
+            };
+        }
+
+        if (!response.ok) {
+            throw new Error(`Authorization check failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return {
+            authorized: data.authorized === true,
+            reason: data.reason
+        };
+    } catch (error) {
+        if (error.message.includes('Authentication') || error.message.includes('Session')) {
+            throw error;
+        }
+        throw new Error(`Authorization check failed: ${error.message}`);
+    }
+}
+
+/**
+ * Client-side role check for UI display purposes ONLY.
+ *
+ * ⚠️  WARNING: This is for UI hints only (showing/hiding buttons).
+ * NEVER use this for actual authorization - use requireServerAuthorization().
+ *
+ * @param {string} requiredRole - Role to check
+ * @returns {boolean} True if user appears to have role (UNTRUSTED)
+ */
+export function UI_ONLY_hasRole(requiredRole) {
+    const groups = getUserGroups();
+    // Normalize to handle singular/plural variations
+    const normalizedGroups = groups.map(g => g.toLowerCase());
+    const normalizedRole = requiredRole.toLowerCase();
+    return normalizedGroups.includes(normalizedRole) ||
+           normalizedGroups.includes(normalizedRole + 's') ||
+           normalizedGroups.includes(normalizedRole.replace(/s$/, ''));
+}
+
 // ==================== AUTH STATE CHANGE LISTENERS ====================
 
 const authStateListeners = new Set();
@@ -984,8 +1149,9 @@ export default {
     getTokens,
     setTokens,
     clearTokens,
-    decodeJwtPayload,
-    parseJwt,
+    UNSAFE_decodeJwtPayload,
+    decodeJwtPayload,  // deprecated alias
+    parseJwt,          // deprecated alias
     isTokenExpired,
     shouldRefreshToken,
     refreshTokens,
@@ -1007,5 +1173,8 @@ export default {
     listPasskeys,
     registerPasskey,
     deletePasskey,
-    onAuthStateChange
+    onAuthStateChange,
+    // Server-side authorization (v0.3.0+)
+    requireServerAuthorization,
+    UI_ONLY_hasRole
 };
