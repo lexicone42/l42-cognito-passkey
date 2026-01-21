@@ -192,7 +192,7 @@ Cookie domain is auto-detected based on current hostname, or can be explicitly c
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.3.0"
+console.log(VERSION); // "0.4.0"
 ```
 
 ## Site Architecture Patterns
