@@ -1,0 +1,93 @@
+name: Integration Feedback
+description: Report issues from integrating l42-cognito-passkey into your site
+labels: ["integration-issue"]
+body:
+  - type: input
+    id: site
+    attributes:
+      label: Site/Project Name
+      description: Which site or project is this feedback from?
+      placeholder: "e.g., lexicone.com, my-game-app"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Library Version
+      description: "Check with: console.log(auth.VERSION)"
+      placeholder: "0.4.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Issue Category
+      options:
+        - Setup/Configuration
+        - Login Flow (password)
+        - Login Flow (passkey)
+        - OAuth/Callback
+        - Token Management
+        - RBAC/Permissions
+        - Cookies/Sessions
+        - Documentation
+        - Upgrade from older version
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the issue you encountered
+      placeholder: "When I try to... it does... instead of..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "I expected it to..."
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Configure with...
+        2. Click login...
+        3. See error...
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround (if any)
+      description: Did you find a way around this issue?
+
+  - type: dropdown
+    id: blocker
+    attributes:
+      label: Is this blocking your integration?
+      options:
+        - "Yes - can't proceed without fix"
+        - "Partially - have workaround but it's ugly"
+        - "No - nice to have"
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser/Environment
+      placeholder: "Chrome 120, Safari 17, Node 20"
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Relevant code
+      description: Any code snippets that show the issue
+      render: javascript
