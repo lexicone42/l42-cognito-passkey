@@ -87,7 +87,9 @@ const updates = [
     patterns: [
       // Match VERSION constant examples like: VERSION === '0.4.0' or // "0.4.0"
       { regex: /VERSION\s*===?\s*['"][\d.]+(-[\w.]+)?['"]/g, replacement: `VERSION === '${newVersion}'` },
-      { regex: /\/\/\s*"[\d.]+(-[\w.]+)?"/g, replacement: `// "${newVersion}"` }
+      { regex: /\/\/\s*"[\d.]+(-[\w.]+)?"/g, replacement: `// "${newVersion}"` },
+      // Match static version badge: version-0.5.1-blue
+      { regex: /version-[\d.]+(-[\w.]+)?-blue/g, replacement: `version-${newVersion}-blue` }
     ]
   }
 ];
