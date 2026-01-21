@@ -32,6 +32,8 @@ jobs:
         run: pnpm test
 
       - name: Check version consistency
-        run: |
-          # Ensure the version consistency tests pass
-          pnpm test -- plugin/templates/version-consistency.test.js
+        run: pnpm test -- plugin/templates/version-consistency.test.js
+
+      - name: Validate documentation
+        if: matrix.node-version == 20
+        run: pnpm validate-docs

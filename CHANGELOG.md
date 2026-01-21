@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-01-21
+
+### Added
+
+- **Documentation Validation**: `pnpm validate-docs` script checks:
+  - Version references in CLAUDE.md files match package.json
+  - Test counts are accurate
+  - Referenced files exist
+
+- **Updated CLAUDE.md Files**: Comprehensive Claude Code integration guides with:
+  - Current version and test counts
+  - Release commands (patch/minor/major)
+  - Security patterns and best practices
+  - RBAC system documentation
+  - Troubleshooting guides
+
+### Changed
+
+- CI now runs documentation validation on Node 20
+- Version sync script now updates CLAUDE.md version references
+- Plugin name standardized to `l42-cognito-passkey`
+
 ## [0.5.0] - 2026-01-21
 
 ### Added

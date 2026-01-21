@@ -2,6 +2,10 @@
 
 This plugin provides quick setup for AWS Cognito authentication with WebAuthn passkey support.
 
+**Plugin Name**: `l42-cognito-passkey`
+**Current Version**: 0.5.1
+**Tests**: 130 passing
+
 ## Overview
 
 The l42-cognito-passkey system provides:
@@ -72,7 +76,7 @@ getTokens()           // Get current tokens
 getAuthMethod()       // Get auth method ('password' or 'passkey')
 getUserEmail()        // Get user's email from claims
 getUserGroups()       // Get user's Cognito groups
-isAdmin()             // Check if user is in admin group
+isAdmin()             // Check if user is in admin group (UI only!)
 isReadonly()          // Check if user is in readonly group
 hasAdminScope()       // Check if token has admin scope
 
@@ -83,7 +87,11 @@ refreshTokens()             // Refresh tokens using refresh token
 ensureValidTokens()         // Get valid tokens, refreshing if needed
 
 // JWT utilities (UNVERIFIED - display only!)
-decodeJwtPayload(token)     // Decode JWT payload (no signature verification)
+UNSAFE_decodeJwtPayload(token)  // Decode JWT payload (no signature verification)
+
+// Server-side authorization (REQUIRED for real authorization)
+requireServerAuthorization(action, options)  // Call server to validate permissions
+UI_ONLY_hasRole(role)  // Explicitly named for UI-only checks
 
 // Login methods
 loginWithPassword(email, password)  // Standard login (1-day cookie)
@@ -192,12 +200,12 @@ Cookie domain is auto-detected based on current hostname, or can be explicitly c
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.4.0"
+console.log(VERSION); // "0.5.1"
 ```
 
 ## Site Architecture Patterns
 
-This plugin supports two primary site architecture patterns. See `plugin/templates/` for full implementations.
+This plugin supports three primary site architecture patterns. See `plugin/templates/` for full implementations.
 
 ### 1. Static Site Pattern (`static-site-pattern.html`)
 
@@ -207,11 +215,6 @@ Architecture for content-focused sites:
 - `site.domain/admin/` → Admin area for editors/publishers
 
 **Roles**: `readonly`, `user`, `editor`, `reviewer`, `publisher`, `admin`
-
-**Flow**:
-1. Anonymous users browse static site freely
-2. Login redirects to protected content
-3. Editors/Publishers push changes that rebuild static site
 
 ### 2. Multi-User WASM Pattern (`wasm-multiuser-pattern.html`)
 
@@ -234,13 +237,6 @@ Architecture for user management interfaces:
 - Admin-only access (Cognito `admin` group required)
 - User CRUD via Cognito AdminUser* APIs
 - Requires backend Lambda + API Gateway
-
-**Features**:
-- User listing with search/filter
-- Email invitations with role assignment
-- User enable/disable
-- Password reset initiation
-- Audit logging
 
 **Required Backend**:
 ```javascript
@@ -265,17 +261,20 @@ See `plugin/templates/rbac-roles.js` for the complete role definitions.
 | `readonly` | 10 | View-only access to all resources |
 | `user` | 20 | Standard authenticated user |
 
-### Top 20 Standard Roles
+### Cognito Group Checking
 
-The RBAC system includes skeleton definitions for common roles:
+Use `isInCognitoGroup()` for consistent group checking with alias support:
 
-**Content/CMS**: `editor`, `reviewer`, `publisher`
-**Gaming/WASM**: `player`, `dm`, `moderator`
-**API/Developer**: `api_reader`, `api_writer`, `developer`
-**Organization**: `team_member`, `team_lead`, `org_admin`
-**E-commerce**: `customer`, `vip_customer`, `support_agent`
-**Analytics**: `analyst`, `auditor`
-**System**: `service_account`, `billing_admin`
+```javascript
+import { isInCognitoGroup, COGNITO_GROUPS } from './rbac-roles.js';
+
+const groups = auth.getUserGroups();
+
+// Handles aliases: 'admin', 'admins', 'administrators'
+if (isInCognitoGroup(groups, 'ADMIN')) {
+    // User is admin
+}
+```
 
 ### Permission Checking
 
@@ -291,21 +290,6 @@ if (hasPermission('editor', 'publish:content')) {
 if (hasRoleLevel('dm', 'moderator')) {
     // DM has at least moderator level
 }
-
-// Check if user can manage another user's role
-if (canManageRole('admin', 'editor')) {
-    // Admin can manage editors
-}
-```
-
-### Cognito Group Mapping
-
-```javascript
-import { getCognitoGroupConfig } from './rbac-roles.js';
-
-// Generate Cognito group configuration for CDK
-const groups = getCognitoGroupConfig(['admin', 'editor', 'readonly']);
-// Returns: [{ groupName: 'admin', description: '...', precedence: 0 }, ...]
 ```
 
 ## Security Notes
@@ -317,36 +301,42 @@ All templates use `textContent` for user-controlled data to prevent XSS:
 // SAFE - always use textContent for user data
 userEmail.textContent = auth.getUserEmail();
 roleBadge.textContent = userRole;
-
-// For dynamic element creation, use DOM methods
-const span = document.createElement('span');
-span.textContent = untrustedData;  // Safe
-parent.appendChild(span);
 ```
 
-Never inject user-controlled strings directly into HTML. See templates for safe patterns.
+### Client-Side RBAC is UI Only
+Always use `requireServerAuthorization()` for real authorization:
+
+```javascript
+// WRONG - client-side only
+if (auth.isAdmin()) { deleteUser(id); }
+
+// CORRECT - server validates
+const result = await auth.requireServerAuthorization('admin:delete-user');
+if (result.authorized) { deleteUser(id); }
+```
 
 ## Testing
 
 Each template has an accompanying test file:
-- `plugin/templates/static-site-pattern.test.js` (27 tests)
-- `plugin/templates/wasm-multiuser-pattern.test.js` (29 tests)
-- `plugin/templates/admin-panel-pattern.test.js` (41 tests)
-- `plugin/templates/rbac-roles.js` (includes `hasPermission`, `getRoleHierarchy`, etc.)
+- `plugin/templates/static-site-pattern.test.js`
+- `plugin/templates/wasm-multiuser-pattern.test.js`
+- `plugin/templates/admin-panel-pattern.test.js`
+- `plugin/templates/rbac-roles.property.test.js` (22 property-based tests)
+- `plugin/templates/version-consistency.test.js`
 
-**Total: 97 tests**
+**Total: 130 tests**
 
 Run tests with:
 ```bash
-npm test
-# or
-npx vitest run plugin/templates/
+pnpm test
 ```
 
-## Backlog
+## Release Process
 
-See `BACKLOG.md` in the project root for planned features:
-- Contentful CMS integration
-- Additional RBAC role templates
-- Multi-tenant support
-- Distributed development coordination
+```bash
+pnpm release:patch    # Bug fixes
+pnpm release:minor    # New features
+pnpm release:major    # Breaking changes
+```
+
+See `docs/RELEASING.md` for complete release process.

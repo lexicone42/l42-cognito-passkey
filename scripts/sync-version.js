@@ -55,20 +55,20 @@ const updates = [
     file: 'plugin/CLAUDE.md',
     optional: true,
     patterns: [
-      // Match "Version: X.Y.Z" or "version X.Y.Z" at start of line or after whitespace
-      { regex: /^(#+\s*)?Version:?\s*[\d.]+(-[\w.]+)?/gmi, replacement: `$1Version: ${newVersion}` },
+      // Match "**Current Version**: X.Y.Z" or "**Version**: X.Y.Z" (markdown bold)
+      { regex: /\*\*(?:Current )?Version\*\*:\s*[\d.]+(-[\w.]+)?/gi, replacement: `**Current Version**: ${newVersion}` },
       { regex: /l42-cognito-passkey@[\d.]+(-[\w.]+)?/g, replacement: `l42-cognito-passkey@${newVersion}` },
-      // Match "Current version: X.Y.Z"
-      { regex: /Current version:\s*[\d.]+(-[\w.]+)?/gi, replacement: `Current version: ${newVersion}` }
+      // Match VERSION example: // "0.5.0"
+      { regex: /\/\/\s*"[\d.]+(-[\w.]+)?"/g, replacement: `// "${newVersion}"` }
     ]
   },
   {
     file: 'CLAUDE.md',
     optional: true,
     patterns: [
-      { regex: /^(#+\s*)?Version:?\s*[\d.]+(-[\w.]+)?/gmi, replacement: `$1Version: ${newVersion}` },
-      { regex: /l42-cognito-passkey@[\d.]+(-[\w.]+)?/g, replacement: `l42-cognito-passkey@${newVersion}` },
-      { regex: /Current version:\s*[\d.]+(-[\w.]+)?/gi, replacement: `Current version: ${newVersion}` }
+      // Match "**Current Version**: X.Y.Z" or "**Version**: X.Y.Z" (markdown bold)
+      { regex: /\*\*(?:Current )?Version\*\*:\s*[\d.]+(-[\w.]+)?/gi, replacement: `**Current Version**: ${newVersion}` },
+      { regex: /l42-cognito-passkey@[\d.]+(-[\w.]+)?/g, replacement: `l42-cognito-passkey@${newVersion}` }
     ]
   },
   {
