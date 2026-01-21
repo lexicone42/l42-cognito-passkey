@@ -225,6 +225,20 @@ export function configure(options = {}) {
     if (!newConfig.cognitoDomain || typeof newConfig.cognitoDomain !== 'string') {
         throw new Error('configure() requires cognitoDomain: must be a non-empty string');
     }
+    // Validate cognitoDomain format to prevent open redirect attacks
+    // Format: custom-prefix.auth.region.amazoncognito.com OR custom domain
+    const cognitoDomain = newConfig.cognitoDomain.toLowerCase();
+    const isAmazonCognito = /^[a-z0-9-]+\.auth\.[a-z0-9-]+\.amazoncognito\.com$/.test(cognitoDomain);
+    const isValidCustomDomain = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(cognitoDomain) &&
+        !cognitoDomain.includes('..') &&
+        !cognitoDomain.includes('://');
+    if (!isAmazonCognito && !isValidCustomDomain) {
+        throw new Error(
+            'Invalid cognitoDomain format.\n' +
+            'Expected: "your-app.auth.region.amazoncognito.com" or a valid custom domain.\n' +
+            'Do not include protocol (https://).'
+        );
+    }
     if (!newConfig.cognitoRegion || typeof newConfig.cognitoRegion !== 'string') {
         throw new Error('Invalid cognitoRegion: must be a non-empty string');
     }
@@ -237,6 +251,15 @@ export function configure(options = {}) {
         try {
             const url = new URL(newConfig.redirectUri);
             const hostname = url.hostname.toLowerCase();
+            const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+            // HTTPS required for non-localhost (prevents token interception)
+            if (!isLocalhost && url.protocol !== 'https:') {
+                throw new Error(
+                    'Invalid redirectUri: HTTPS is required for non-localhost URLs.\n' +
+                    'HTTP is only allowed for localhost development.'
+                );
+            }
 
             // Store allowedDomains first so isDomainAllowed can use it
             config.allowedDomains = newConfig.allowedDomains;
@@ -287,6 +310,22 @@ export function getTokens() {
  * Store authentication tokens.
  * Also sets a cookie for server-side validation (e.g., Lambda@Edge).
  * Cookie lifetime varies by auth method: 1 day for password, 30 days for passkey.
+ *
+ * SECURITY NOTE: Cookie is NOT HttpOnly
+ * -----------------------------------
+ * The cookie is set via document.cookie (client-side), which cannot set HttpOnly.
+ * HttpOnly cookies can only be set via server-side Set-Cookie headers.
+ *
+ * Mitigations in place:
+ * - Secure flag: Cookie only sent over HTTPS
+ * - SameSite=Lax: CSRF protection
+ * - Short-lived tokens: ID tokens expire quickly (Cognito default: 1 hour)
+ * - Domain validation: Cookie domain restricted to current site
+ *
+ * For maximum security, consider:
+ * - Using server-side session management with HttpOnly cookies
+ * - Implementing a BFF (Backend for Frontend) pattern
+ *
  * @param {Object} tokens - Tokens to store (should include auth_method)
  */
 export function setTokens(tokens) {
@@ -809,23 +848,77 @@ function verifyOAuthState(state) {
     return stored && stored === state;
 }
 
+// ==================== PKCE (Proof Key for Code Exchange) ====================
+
+const PKCE_VERIFIER_KEY = 'l42_pkce_verifier';
+
+/**
+ * Generate a cryptographically secure code verifier for PKCE.
+ * RFC 7636 requires 43-128 characters from unreserved URI characters.
+ * @returns {string} Random code verifier (64 characters)
+ */
+function generateCodeVerifier() {
+    const array = new Uint8Array(48); // 48 bytes = 64 base64url chars
+    crypto.getRandomValues(array);
+    // Base64url encoding without padding
+    return btoa(String.fromCharCode(...array))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+
+/**
+ * Generate SHA-256 code challenge from verifier for PKCE.
+ * @param {string} verifier - Code verifier
+ * @returns {Promise<string>} Base64url-encoded SHA-256 hash
+ */
+async function generateCodeChallenge(verifier) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    // Base64url encoding without padding
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+
+function storeCodeVerifier(verifier) {
+    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+}
+
+function getAndClearCodeVerifier() {
+    const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
+    sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+    return verifier;
+}
+
 /**
  * Redirect to Cognito Hosted UI for login.
+ * Uses PKCE (Proof Key for Code Exchange) for enhanced security.
  * Use this for OAuth flow with full scopes (needed for passkey management).
  * @param {string} [email] - Optional email hint
+ * @returns {Promise<void>}
  */
-export function loginWithHostedUI(email) {
+export async function loginWithHostedUI(email) {
     requireConfig();
 
     const state = generateOAuthState();
     storeOAuthState(state);
+
+    // PKCE: Generate code verifier and challenge
+    const codeVerifier = generateCodeVerifier();
+    storeCodeVerifier(codeVerifier);
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
 
     const params = new URLSearchParams({
         client_id: config.clientId,
         response_type: 'code',
         scope: config.scopes,
         redirect_uri: getRedirectUri(),
-        state: state
+        state: state,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256'
     });
     if (email) {
         params.set('login_hint', email);
@@ -835,16 +928,23 @@ export function loginWithHostedUI(email) {
 
 /**
  * Exchange authorization code for tokens (call from callback page).
+ * Uses PKCE code_verifier for enhanced security.
  * @param {string} code - Authorization code from OAuth redirect
  * @param {string} state - State parameter from OAuth redirect (for CSRF verification)
  * @returns {Promise<Object>} Tokens
- * @throws {Error} If state verification fails or token exchange fails
+ * @throws {Error} If state/PKCE verification fails or token exchange fails
  */
 export async function exchangeCodeForTokens(code, state) {
     requireConfig();
 
     if (!state || !verifyOAuthState(state)) {
         throw new Error('Invalid OAuth state - possible CSRF attack');
+    }
+
+    // PKCE: Retrieve and clear the code verifier
+    const codeVerifier = getAndClearCodeVerifier();
+    if (!codeVerifier) {
+        throw new Error('Missing PKCE code verifier - OAuth flow may have been interrupted');
     }
 
     const res = await fetch('https://' + config.cognitoDomain + '/oauth2/token', {
@@ -854,7 +954,8 @@ export async function exchangeCodeForTokens(code, state) {
             grant_type: 'authorization_code',
             client_id: config.clientId,
             code: code,
-            redirect_uri: getRedirectUri()
+            redirect_uri: getRedirectUri(),
+            code_verifier: codeVerifier
         })
     });
 

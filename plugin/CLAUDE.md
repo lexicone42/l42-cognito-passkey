@@ -4,7 +4,7 @@ This plugin provides quick setup for AWS Cognito authentication with WebAuthn pa
 
 **Plugin Name**: `l42-cognito-passkey`
 **Current Version**: 0.5.1
-**Tests**: 130 passing
+**Tests**: 168 passing
 
 ## Overview
 
@@ -324,7 +324,7 @@ Each template has an accompanying test file:
 - `plugin/templates/rbac-roles.property.test.js` (22 property-based tests)
 - `plugin/templates/version-consistency.test.js`
 
-**Total: 130 tests**
+**Total: 168 tests**
 
 Run tests with:
 ```bash
