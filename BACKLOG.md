@@ -2,6 +2,19 @@
 
 Planned features and integrations for future development.
 
+## Current Focus: v1.0 Release
+
+### Real-World Site Integration
+**Status**: In Progress
+**Goal**: Validate library with actual production sites before 1.0 release.
+
+See `docs/integration-feedback.md` for:
+- Minimal integration checklist
+- Structured feedback template
+- Common issues and solutions
+
+---
+
 ## Priority: High
 
 ### Token Refresh Implementation
@@ -89,17 +102,48 @@ Planned features and integrations for future development.
 - Platform authenticator detection
 - Graceful fallback to password
 
+## Post-1.0: Advanced Authorization
+
+### AWS Cedar Integration
+**Status**: Design complete, implementation post-1.0
+**Description**: Externalized authorization via Amazon Verified Permissions.
+**Design Doc**: `docs/cedar-integration.md`
+
+Benefits:
+- Formal policy verification
+- Externalized policies (update without deploy)
+- Native Cognito token support
+- ABAC beyond simple role checks
+
+### Semgrep Security Rules
+**Status**: Post-1.0
+**Description**: Custom Semgrep rules for security patterns.
+- XSS prevention (innerHTML vs textContent)
+- Auth check enforcement
+- Token handling patterns
+
+---
+
 ## Completed
 
-### v1.1.0 (Current)
+### v0.4.0 (Current)
+- [x] `UNSAFE_decodeJwtPayload()` rename for security clarity
+- [x] `requireServerAuthorization()` helper
+- [x] ccTLD cookie domain fix (30+ public suffixes)
+- [x] `COGNITO_GROUPS` with alias support
+- [x] 22 property-based tests for RBAC
+- [x] CLAUDE.md integration guide
+- [x] Cedar integration design doc
+
+### v0.3.0
 - [x] RBAC role system with 20 standard roles
 - [x] Static site pattern template
 - [x] Multi-user WASM pattern template
-- [x] Test files for all templates
+- [x] Admin panel pattern template
+- [x] 97 unit tests for all templates
 - [x] XSS-safe DOM manipulation patterns
-- [x] Comprehensive CLAUDE.md documentation
 
-### v1.0.0
+### v0.2.0
 - [x] Password authentication
 - [x] WebAuthn passkey support
 - [x] OAuth2 CSRF protection
