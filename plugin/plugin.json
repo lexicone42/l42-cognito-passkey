@@ -1,6 +1,6 @@
 {
   "name": "l42-cognito-passkey",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "AWS Cognito + WebAuthn passkey authentication - self-hosted, configurable",
   "author": "Lexicone42",
   "license": "Apache-2.0",
