@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2] - 2026-01-21
+
+### Added
+
+- **Security Hardening Guide**: `docs/security-hardening.md` with:
+  - localStorage token storage risk assessment
+  - CSP configuration with nonces (not just allowlists)
+  - Backend for Frontend (BFF) pattern implementation
+  - Token Handler pattern for lighter-weight security
+  - Web Worker token isolation approach
+  - DPoP (Demonstrating Proof-of-Possession) future roadmap
+  - Threat model-based recommendations (low/medium/high risk)
+  - Implementation checklists by risk level
+
+### Documentation
+
+- Comprehensive research on 2024-2025 token theft incidents
+- Analysis of CSP bypass techniques and mitigations
+- Code examples for Express.js BFF implementation
+
 ## [0.6.1] - 2026-01-21
 
 ### Added
