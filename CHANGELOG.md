@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.7] - 2026-01-21
+
+### Fixed
+
+- **onAuthStateChange reload loop**: Token refresh no longer triggers `onAuthStateChange(true)`
+  - Previously, `setTokens()` always notified listeners, causing infinite reload loops
+  - Added `options.isRefresh` flag to skip notification during token refresh
+  - `onAuthStateChange` now only fires on new login or logout, not token refresh
+
+### Added
+
+- **OCSF Security Logging**: Structured security events for AWS Security Lake integration
+  - Configure via `securityLogger: 'console'` or custom function
+  - Events for: login, logout, token refresh, passkey add/delete
+  - OCSF v1.0 schema with Authentication (3001) and Account Change (3002) classes
+  - See `docs/ocsf-logging.md` for integration guides
+
+### Changed
+
+- **Documentation reorganization**
+  - Created `docs/migration.md` with complete v0.3→v0.5.x upgrade guide
+  - Streamlined README from 203→127 lines, focused on quick start
+  - Updated `docs/api-reference.md` with UNSAFE_ prefix and best practices
+
 ## [0.5.6] - 2026-01-21
 
 ### Added
