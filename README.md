@@ -96,6 +96,7 @@ onAuthStateChange(callback)
 | [Cognito Setup](docs/cognito-setup.md) | AWS Cognito configuration (CDK, CloudFormation, boto3) |
 | [API Reference](docs/api-reference.md) | Complete function documentation |
 | [Migration Guide](docs/migration.md) | Upgrading between versions |
+| [Accessibility](docs/accessibility.md) | ARIA patterns, keyboard navigation, screen readers |
 | [OCSF Logging](docs/ocsf-logging.md) | AWS Security Lake / SIEM integration |
 | [Claude Workflow](docs/claude-workflow.md) | Claude-to-Claude collaboration via GitHub |
 | [Releasing](docs/RELEASING.md) | Release process for maintainers |

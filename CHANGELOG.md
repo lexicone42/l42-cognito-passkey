@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-01-21
+
+### Added
+
+- **Accessibility Guide**: `docs/accessibility.md` with comprehensive patterns for:
+  - ARIA live regions for error announcements
+  - Keyboard navigation for login forms
+  - WebAuthn/passkey fallback guidance
+  - Session timeout warnings
+  - Focus management after login/logout
+  - Screen reader testing checklist
+
 ## [0.6.0] - 2026-01-21
 
 ### Added
