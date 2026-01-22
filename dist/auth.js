@@ -532,6 +532,7 @@ export function clearTokens() {
     document.cookie = cookieStr;
 
     notifyAuthStateChange(false);
+    notifyLogout();
 }
 
 /**
@@ -931,6 +932,7 @@ export async function loginWithPassword(email, password) {
                 auth_method: 'password'
             };
             setTokens(tokens);
+            notifyLogin(tokens, 'password');
 
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,
@@ -1071,6 +1073,7 @@ export async function loginWithPasskey(email) {
                 auth_method: 'passkey'
             };
             setTokens(tokens);
+            notifyLogin(tokens, 'passkey');
 
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,
@@ -1288,9 +1291,10 @@ export async function exchangeCodeForTokens(code, state) {
         access_token: data.access_token,
         id_token: data.id_token,
         refresh_token: data.refresh_token,
-        auth_method: 'passkey'
+        auth_method: 'oauth'
     };
     setTokens(tokens);
+    notifyLogin(tokens, 'oauth');
 
     // Extract email from the new token for logging
     const claims = UNSAFE_decodeJwtPayload(tokens.id_token);
@@ -1619,6 +1623,8 @@ export function UI_ONLY_hasRole(requiredRole) {
 // ==================== AUTH STATE CHANGE LISTENERS ====================
 
 const authStateListeners = new Set();
+const loginListeners = new Set();
+const logoutListeners = new Set();
 
 function notifyAuthStateChange(isAuth) {
     authStateListeners.forEach(callback => {
@@ -1631,13 +1637,79 @@ function notifyAuthStateChange(isAuth) {
 }
 
 /**
+ * Notify login listeners when a user logs in.
+ * @param {Object} tokens - The authentication tokens
+ * @param {string} method - The auth method used ('password', 'passkey', 'oauth')
+ */
+function notifyLogin(tokens, method) {
+    loginListeners.forEach(callback => {
+        try {
+            callback(tokens, method);
+        } catch (e) {
+            console.error('Login listener error:', e);
+        }
+    });
+}
+
+/**
+ * Notify logout listeners when a user logs out.
+ */
+function notifyLogout() {
+    logoutListeners.forEach(callback => {
+        try {
+            callback();
+        } catch (e) {
+            console.error('Logout listener error:', e);
+        }
+    });
+}
+
+/**
  * Subscribe to authentication state changes.
+ * Note: This fires on login and logout, but NOT on token refresh (v0.5.7+).
+ * For more explicit control, use onLogin() and onLogout().
+ *
  * @param {Function} callback - Called with boolean isAuthenticated
  * @returns {Function} Unsubscribe function
  */
 export function onAuthStateChange(callback) {
     authStateListeners.add(callback);
     return () => authStateListeners.delete(callback);
+}
+
+/**
+ * Subscribe to login events.
+ * Only fires on actual login (password, passkey, or OAuth), never on token refresh.
+ *
+ * @param {Function} callback - Called with (tokens, method) where method is 'password', 'passkey', or 'oauth'
+ * @returns {Function} Unsubscribe function
+ *
+ * @example
+ * const unsubscribe = onLogin((tokens, method) => {
+ *     console.log('User logged in via:', method);
+ *     window.location.href = '/dashboard';
+ * });
+ */
+export function onLogin(callback) {
+    loginListeners.add(callback);
+    return () => loginListeners.delete(callback);
+}
+
+/**
+ * Subscribe to logout events.
+ * Fires when the user logs out or tokens are cleared.
+ *
+ * @param {Function} callback - Called with no arguments
+ * @returns {Function} Unsubscribe function
+ *
+ * @example
+ * const unsubscribe = onLogout(() => {
+ *     showLoginScreen();
+ * });
+ */
+export function onLogout(callback) {
+    logoutListeners.add(callback);
+    return () => logoutListeners.delete(callback);
 }
 
 // ==================== DEFAULT EXPORT ====================
@@ -1674,6 +1746,8 @@ export default {
     registerPasskey,
     deletePasskey,
     onAuthStateChange,
+    onLogin,
+    onLogout,
     // Server-side authorization (v0.3.0+)
     requireServerAuthorization,
     UI_ONLY_hasRole

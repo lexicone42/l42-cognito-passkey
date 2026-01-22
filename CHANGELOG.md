@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.8] - 2026-01-21
+
+### Added
+
+- **`onLogin(callback)`**: Subscribe to login events with tokens and auth method
+  - Only fires on actual login (password, passkey, OAuth), never on token refresh
+  - Callback receives `(tokens, method)` where method is 'password', 'passkey', or 'oauth'
+  - Returns unsubscribe function
+- **`onLogout(callback)`**: Subscribe to logout events
+  - Fires when user logs out or tokens are cleared
+  - Returns unsubscribe function
+- **Claude-to-Claude workflow**: `docs/claude-workflow.md` for GitHub issue collaboration
+
+### Changed
+
+- **OAuth auth_method**: `exchangeCodeForTokens()` now sets `auth_method: 'oauth'` (was 'passkey')
+
 ## [0.5.7] - 2026-01-21
 
 ### Fixed

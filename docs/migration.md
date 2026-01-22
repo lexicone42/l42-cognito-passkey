@@ -11,6 +11,37 @@ Complete migration guide for l42-cognito-passkey version upgrades.
 | v0.5.2 | v0.5.3 | localStorage for OAuth state (Safari/Firefox fix) |
 | v0.5.3 | v0.5.4+ | Dist file sync fix, CI safeguards |
 | v0.5.6 | v0.5.7 | `onAuthStateChange` no longer fires on token refresh |
+| v0.5.7 | v0.5.8 | New `onLogin()` and `onLogout()` event handlers |
+
+---
+
+## v0.5.7 → v0.5.8
+
+### New onLogin and onLogout Event Handlers
+
+v0.5.8 adds explicit event handlers for login and logout, providing clearer semantics than `onAuthStateChange`:
+
+```javascript
+import { onLogin, onLogout } from '/auth/auth.js';
+
+// Called on actual login (never on token refresh)
+onLogin((tokens, method) => {
+    console.log('User logged in via:', method); // 'password', 'passkey', 'oauth'
+    window.location.href = '/dashboard';
+});
+
+// Called on logout
+onLogout(() => {
+    showLoginScreen();
+});
+```
+
+**Benefits:**
+- `onLogin` only fires on actual login, never on token refresh
+- Callback receives auth method ('password', 'passkey', 'oauth')
+- No need to understand `onAuthStateChange` nuances
+
+**Breaking Change:** `exchangeCodeForTokens()` now sets `auth_method: 'oauth'` instead of 'passkey'. This only affects code that checks `getAuthMethod()` after OAuth login.
 
 ---
 

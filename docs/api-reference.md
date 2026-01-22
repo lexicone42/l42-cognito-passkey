@@ -423,20 +423,35 @@ try {
 
 ## Events
 
-### onAuthStateChange(callback)
+### onLogin(callback)
 
-Subscribe to authentication state changes. Best used for **logout detection** and reactive UI updates.
+Subscribe to login events. Only fires on actual login, never on token refresh. **(v0.5.8+)**
 
 ```javascript
-import { onAuthStateChange } from '/auth/auth.js';
+import { onLogin } from '/auth/auth.js';
 
-const unsubscribe = onAuthStateChange((isAuthenticated) => {
-    if (!isAuthenticated) {
-        // User logged out - show login UI
-        showLogin();
-    }
-    // Note: Don't handle isAuthenticated:true for navigation
-    // Use the Promise return value from login functions instead
+const unsubscribe = onLogin((tokens, method) => {
+    console.log('User logged in via:', method); // 'password', 'passkey', or 'oauth'
+    window.location.href = '/dashboard';
+});
+
+// Later: unsubscribe();
+```
+
+**Parameters:**
+- `callback(tokens, method)` - Called with tokens object and auth method string
+
+**Returns:** `Function` - unsubscribe function
+
+### onLogout(callback)
+
+Subscribe to logout events. Fires when user logs out or tokens are cleared. **(v0.5.8+)**
+
+```javascript
+import { onLogout } from '/auth/auth.js';
+
+const unsubscribe = onLogout(() => {
+    showLoginScreen();
 });
 
 // Later: unsubscribe();
@@ -444,22 +459,28 @@ const unsubscribe = onAuthStateChange((isAuthenticated) => {
 
 **Returns:** `Function` - unsubscribe function
 
-> **Best Practice**: For login flows, use the Promise return value from `loginWithPassword()` or `loginWithPasskey()` to handle success:
->
-> ```javascript
-> try {
->     await loginWithPasskey(email);
->     window.location.reload(); // Handle redirect directly
-> } catch (error) {
->     showError(error.message);
-> }
-> ```
->
-> The `onAuthStateChange` listener is best for:
-> - Detecting logout (session expiry, manual logout)
-> - Updating reactive UI elements (nav, user info)
->
-> It is **not** called during token refresh (v0.5.7+), preventing reload loops.
+### onAuthStateChange(callback)
+
+Subscribe to authentication state changes. For new code, prefer `onLogin()` and `onLogout()`.
+
+```javascript
+import { onAuthStateChange } from '/auth/auth.js';
+
+const unsubscribe = onAuthStateChange((isAuthenticated) => {
+    if (isAuthenticated) {
+        showDashboard();
+    } else {
+        showLogin();
+    }
+});
+
+// Later: unsubscribe();
+```
+
+**Returns:** `Function` - unsubscribe function
+
+> **Note (v0.5.7+):** This is not called during token refresh, preventing reload loops.
+> For clearer semantics, use `onLogin()` and `onLogout()` instead.
 
 ## JWT Utilities
 

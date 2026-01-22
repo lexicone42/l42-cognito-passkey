@@ -279,3 +279,22 @@ If integrating this library into a project and encountering issues:
 3. Tag with `integration-feedback`
 
 See `docs/integration-feedback.md` for the quick checklist.
+
+## Claude-to-Claude Workflow
+
+For Claude Code instances integrating this library:
+
+**Reporting Issues:**
+```bash
+gh issue create --repo lexicone42/l42-cognito-passkey \
+  --title "bug: Brief description" \
+  --label "bug"
+```
+
+**Processing Issues (Maintainers):**
+```bash
+pnpm process-issue <number>
+cat .claude/issues/issue-<number>.md
+```
+
+See `docs/claude-workflow.md` for the complete workflow.

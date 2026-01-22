@@ -97,6 +97,7 @@ onAuthStateChange(callback)
 | [API Reference](docs/api-reference.md) | Complete function documentation |
 | [Migration Guide](docs/migration.md) | Upgrading between versions |
 | [OCSF Logging](docs/ocsf-logging.md) | AWS Security Lake / SIEM integration |
+| [Claude Workflow](docs/claude-workflow.md) | Claude-to-Claude collaboration via GitHub |
 | [Releasing](docs/RELEASING.md) | Release process for maintainers |
 
 ## Security
