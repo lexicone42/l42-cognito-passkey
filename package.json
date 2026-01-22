@@ -17,8 +17,8 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "npx vitest run plugin/templates/",
-    "test:watch": "npx vitest plugin/templates/",
+    "test": "vitest run plugin/templates/",
+    "test:watch": "vitest plugin/templates/",
     "lint": "echo \"No linter configured yet\"",
     "validate-docs": "node scripts/validate-docs.js",
     "check-dist": "node scripts/check-dist-sync.js",
@@ -57,6 +57,8 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
-    "fast-check": "^4.5.3"
+    "fast-check": "^4.5.3",
+    "jsdom": "^27.4.0",
+    "vitest": "^4.0.17"
   }
 }

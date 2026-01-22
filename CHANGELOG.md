@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-01-21
+
+### Added
+
+- **Token Storage Modes**: New `tokenStorage` configuration option
+  - `'localStorage'` (default): Current behavior, tokens persist across page reloads
+  - `'memory'`: Tokens stored in memory only, lost on page reload
+  - Foundation for v0.8.0 handler mode (server-side token storage)
+
+- **Token Store Abstraction**: Internal refactoring for pluggable storage backends
+  - `LocalStorageTokenStore`: Default storage using localStorage
+  - `MemoryTokenStore`: In-memory storage for session-only authentication
+  - `getTokenStore()`: Factory function for storage selection
+
+- **Token Storage Tests**: 33 new tests covering:
+  - localStorage mode behavior
+  - memory mode behavior
+  - store selection logic
+  - configuration validation
+  - security properties
+  - token lifecycle
+
+### Changed
+
+- `getTokens()`, `setTokens()`, `clearTokens()` now use storage abstraction
+- Total tests: 207 (was 174)
+
+### Security
+
+- Memory mode tokens are not accessible via `localStorage` or `sessionStorage` APIs
+- Note: Memory mode tokens are still in JavaScript memory; XSS can access via `getTokens()`
+- For full XSS protection, use Token Handler mode (v0.8.0) or BFF pattern
+
+### Configuration
+
+```javascript
+// Memory mode (tokens lost on page reload)
+configure({
+    clientId: 'xxx',
+    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
+    tokenStorage: 'memory'
+});
+```
+
+### Related
+
+- Part of Token Handler roadmap: #4 (v0.7.0), #5 (v0.8.0), #6 (v0.9.0)
+- See `docs/v1-token-storage-proposal.md` for full security architecture
+
 ## [0.6.2] - 2026-01-21
 
 ### Added

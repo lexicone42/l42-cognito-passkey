@@ -17,7 +17,8 @@ configure({
     cognitoRegion: 'us-west-2',           // default: 'us-west-2'
     redirectUri: '/callback',              // default: origin + '/callback'
     scopes: 'openid email aws.cognito.signin.user.admin',
-    tokenKey: 'l42_auth_tokens',          // localStorage key
+    tokenKey: 'l42_auth_tokens',          // storage key
+    tokenStorage: 'localStorage',          // 'localStorage' or 'memory' (v0.7.0+)
     cookieName: 'l42_id_token',           // cookie name
     cookieDomain: '.myapp.com',           // auto-detected if not set
     allowedDomains: ['myapp.com']         // auto-allows current domain if not set

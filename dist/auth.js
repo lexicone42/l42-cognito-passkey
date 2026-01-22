@@ -27,11 +27,75 @@ const DEFAULT_CONFIG = {
     cookieDomain: null,         // Auto-detected if not set
     allowedDomains: null,       // Auto-allow current domain if not set
     relyingPartyId: null,       // For WebAuthn - usually your domain
+    // Token storage mode: 'localStorage' (default) or 'memory'
+    // - localStorage: Persists across page reloads (XSS-accessible)
+    // - memory: Lost on page reload (more secure, no persistence)
+    tokenStorage: 'localStorage',
     // Structured logging for OCSF/Security Lake integration
     // Set to a function(event) to receive OCSF-formatted security events
     // Set to 'console' for console.log output, or null to disable
     securityLogger: null
 };
+
+// ==================== TOKEN STORAGE ABSTRACTION ====================
+
+/**
+ * Token store interface - abstracts where tokens are stored.
+ * Implementations: LocalStorageTokenStore, MemoryTokenStore
+ * Future: HandlerTokenStore (v0.8.0)
+ */
+
+/**
+ * LocalStorage-based token store (default).
+ * Tokens persist across page reloads but are accessible to XSS.
+ */
+const LocalStorageTokenStore = {
+    get(tokenKey) {
+        try {
+            return JSON.parse(localStorage.getItem(tokenKey));
+        } catch {
+            return null;
+        }
+    },
+    set(tokenKey, tokens) {
+        localStorage.setItem(tokenKey, JSON.stringify(tokens));
+    },
+    clear(tokenKey) {
+        localStorage.removeItem(tokenKey);
+    }
+};
+
+/**
+ * Memory-based token store.
+ * Tokens are lost on page reload but are not accessible to XSS via storage APIs.
+ * Note: Tokens are still in JavaScript memory, so XSS can access them via getTokens().
+ */
+const MemoryTokenStore = {
+    _tokens: null,
+    get(_tokenKey) {
+        return this._tokens;
+    },
+    set(_tokenKey, tokens) {
+        this._tokens = tokens;
+    },
+    clear(_tokenKey) {
+        this._tokens = null;
+    }
+};
+
+/**
+ * Get the active token store based on configuration.
+ * @returns {Object} Token store with get/set/clear methods
+ */
+function getTokenStore() {
+    switch (config.tokenStorage) {
+        case 'memory':
+            return MemoryTokenStore;
+        case 'localStorage':
+        default:
+            return LocalStorageTokenStore;
+    }
+}
 
 // ==================== OCSF SECURITY EVENT SCHEMA ====================
 // Open Cybersecurity Schema Framework (OCSF) for AWS Security Lake integration
@@ -354,7 +418,10 @@ function isDomainAllowed(hostname) {
  * @param {string} options.clientId - REQUIRED: Cognito app client ID
  * @param {string} options.cognitoDomain - REQUIRED: Cognito domain (e.g., 'myapp.auth.us-west-2.amazoncognito.com')
  * @param {string} [options.cognitoRegion='us-west-2'] - AWS region
- * @param {string} [options.tokenKey='l42_auth_tokens'] - localStorage key for tokens
+ * @param {string} [options.tokenKey='l42_auth_tokens'] - Key for token storage
+ * @param {string} [options.tokenStorage='localStorage'] - Token storage mode:
+ *   - 'localStorage': Persists across page reloads (default)
+ *   - 'memory': Lost on page reload, more secure for session-only use
  * @param {string} [options.redirectUri] - OAuth callback URL (defaults to current origin + /callback)
  * @param {string} [options.scopes] - OAuth scopes
  * @param {string[]} [options.allowedDomains] - Allowed redirect domains (auto-allows current domain if not set)
@@ -390,6 +457,15 @@ export function configure(options = {}) {
     }
     if (!newConfig.tokenKey || typeof newConfig.tokenKey !== 'string') {
         throw new Error('Invalid tokenKey: must be a non-empty string');
+    }
+
+    // Validate tokenStorage option
+    const validStorageModes = ['localStorage', 'memory'];
+    if (newConfig.tokenStorage && !validStorageModes.includes(newConfig.tokenStorage)) {
+        throw new Error(
+            `Invalid tokenStorage: '${newConfig.tokenStorage}'.\n` +
+            `Valid options: ${validStorageModes.join(', ')}`
+        );
     }
 
     // Validate redirectUri if provided
@@ -445,11 +521,7 @@ export function isConfigured() {
  * @returns {Object|null} Tokens object or null if not authenticated
  */
 export function getTokens() {
-    try {
-        return JSON.parse(localStorage.getItem(config.tokenKey));
-    } catch {
-        return null;
-    }
+    return getTokenStore().get(config.tokenKey);
 }
 
 /**
@@ -484,7 +556,7 @@ export function getTokens() {
  */
 export function setTokens(tokens, options = {}) {
     requireConfig();
-    localStorage.setItem(config.tokenKey, JSON.stringify(tokens));
+    getTokenStore().set(config.tokenKey, tokens);
 
     // Set cookie for server-side validation
     if (tokens && tokens.id_token) {
@@ -521,7 +593,7 @@ export function getAuthMethod() {
  * Also clears the server-side validation cookie.
  */
 export function clearTokens() {
-    localStorage.removeItem(config.tokenKey);
+    getTokenStore().clear(config.tokenKey);
 
     // Clear the cookie
     const domain = getCookieDomain();
