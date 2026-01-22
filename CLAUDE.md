@@ -219,6 +219,12 @@ The RBAC system has 22 property-based tests using fast-check:
 
 ## Upgrade Notes
 
+### v0.5.4 (Dist Sync)
+
+**If you're using dist/auth.js, update now** - v0.5.3's dist file was not synced with src.
+
+v0.5.4 includes all fixes from v0.5.2 and v0.5.3 in both src/ and dist/.
+
 ### v0.5.3 (Bug Fix)
 
 **OAuth state now uses localStorage instead of sessionStorage**

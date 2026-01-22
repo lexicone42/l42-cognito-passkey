@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.4] - 2026-01-21
+
+### Fixed
+
+- **dist/auth.js sync**: The dist file was not updated with v0.5.2 and v0.5.3 changes
+  - Now includes PKCE, HTTPS enforcement, cognitoDomain validation, and localStorage fix
+
 ## [0.5.3] - 2026-01-21
 
 ### Fixed
