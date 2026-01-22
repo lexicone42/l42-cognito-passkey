@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Check dist/auth.js is in sync with src
+        run: node scripts/check-dist-sync.js
+
       - name: Run tests
         run: pnpm test
 

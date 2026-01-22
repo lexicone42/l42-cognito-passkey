@@ -1,0 +1,40 @@
+#!/bin/sh
+#
+# Pre-commit hook to verify dist/auth.js is in sync with src/auth.js
+#
+# Install this hook by running:
+#   cp scripts/hooks/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Or use the setup script:
+#   node scripts/setup-hooks.js
+
+echo "Checking dist/auth.js sync..."
+
+# Check if src/auth.js is being committed
+if git diff --cached --name-only | grep -q "^src/auth.js$"; then
+  # src is being modified, check if dist is also being updated
+  if ! git diff --cached --name-only | grep -q "^dist/auth.js$"; then
+    echo ""
+    echo "ERROR: src/auth.js is being committed but dist/auth.js is not."
+    echo ""
+    echo "You need to sync dist with src before committing:"
+    echo "  cp src/auth.js dist/auth.js"
+    echo "  git add dist/auth.js"
+    echo ""
+    echo "Or run: node scripts/check-dist-sync.js --fix && git add dist/auth.js"
+    echo ""
+    exit 1
+  fi
+fi
+
+# Verify they are actually in sync (in case both are staged but different)
+node scripts/check-dist-sync.js
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "Run: node scripts/check-dist-sync.js --fix && git add dist/auth.js"
+  echo ""
+  exit 1
+fi
+
+echo "✓ Pre-commit checks passed"

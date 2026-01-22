@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.5] - 2026-01-21
+
+### Added
+
+- **Pre-commit hook**: Prevents committing src/auth.js without syncing dist/auth.js
+  - Install with: `pnpm setup-hooks`
+- **CI check**: Verifies dist/auth.js is in sync with src/auth.js
+- **Auto-sync on release**: `npm version` now automatically syncs dist with src
+
+### Scripts
+
+- `pnpm check-dist` - Verify dist is in sync
+- `pnpm sync-dist` - Auto-fix by copying src to dist
+- `pnpm setup-hooks` - Install git hooks
+
 ## [0.5.4] - 2026-01-21
 
 ### Fixed
