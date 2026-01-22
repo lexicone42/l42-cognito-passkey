@@ -3,7 +3,7 @@
 This plugin provides quick setup for AWS Cognito authentication with WebAuthn passkey support.
 
 **Plugin Name**: `l42-cognito-passkey`
-**Current Version**: 0.5.5
+**Current Version**: 0.5.6
 **Tests**: 174 passing
 
 ## Overview
@@ -200,7 +200,7 @@ Cookie domain is auto-detected based on current hostname, or can be explicitly c
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.5.5"
+console.log(VERSION); // "0.5.6"
 ```
 
 ## Site Architecture Patterns
