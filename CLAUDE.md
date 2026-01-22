@@ -6,7 +6,7 @@ L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for A
 
 **Current Version**: 0.7.0
 **License**: Apache-2.0
-**Tests**: 174 (including 22 property-based tests)
+**Tests**: 207 (including 22 property-based tests + 33 token storage tests)
 
 ## Quick Start for Claude Instances
 
