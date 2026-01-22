@@ -78,7 +78,37 @@ const updates = [
       // Only match "Current version: X.Y.Z" or "l42-cognito-passkey@X.Y.Z" patterns
       // NOT arbitrary version numbers like "removed in v3.0"
       { regex: /Current version:\s*[\d.]+(-[\w.]+)?/gi, replacement: `Current version: ${newVersion}` },
-      { regex: /l42-cognito-passkey@[\d.]+(-[\w.]+)?/g, replacement: `l42-cognito-passkey@${newVersion}` }
+      { regex: /l42-cognito-passkey@[\d.]+(-[\w.]+)?/g, replacement: `l42-cognito-passkey@${newVersion}` },
+      // Match VERSION example comments like: // "0.5.6"
+      { regex: /console\.log\(VERSION\);\s*\/\/\s*"[\d.]+(-[\w.]+)?"/g, replacement: `console.log(VERSION); // "${newVersion}"` }
+    ]
+  },
+  {
+    file: 'docs/integration-feedback.md',
+    optional: true,
+    patterns: [
+      // Match version in example: // Should be 0.5.6
+      { regex: /Should be [\d.]+(-[\w.]+)?/g, replacement: `Should be ${newVersion}` }
+    ]
+  },
+  {
+    file: 'docs/ocsf-logging.md',
+    optional: true,
+    patterns: [
+      // Match version in JSON example: "version": "0.5.6"
+      { regex: /"version":\s*"[\d.]+(-[\w.]+)?"/g, replacement: `"version": "${newVersion}"` }
+    ]
+  },
+  {
+    file: 'docs/claude-workflow.md',
+    optional: true,
+    patterns: [
+      // Match Library version: in templates
+      { regex: /Library version:\s*[\d.]+(-[\w.]+)?/g, replacement: `Library version: ${newVersion}` },
+      // Match Version tested: in templates
+      { regex: /Version tested\*\*:\s*[\d.]+(-[\w.]+)?/g, replacement: `Version tested**: ${newVersion}` },
+      // Match "Fixed in vX.Y.Z." patterns (with period)
+      { regex: /Fixed in v[\d]+\.[\d]+\.[\d]+(-[\w.]+)?\./g, replacement: `Fixed in v${newVersion}.` }
     ]
   },
   {
