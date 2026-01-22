@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.6] - 2026-01-21
+
+### Added
+
+- **GitHub Issue Processor**: `pnpm process-issue <number>` fetches and sanitizes GitHub issues
+  - Uses `execFileSync` (no shell) to prevent command injection
+  - Validates issue number as positive integer
+  - Sanitizes all text content (removes control chars, limits length)
+  - Detects suspicious patterns (shell injection, path traversal, script tags)
+  - Verifies repository before fetching (prevents wrong-repo attacks)
+  - Creates `.claude/issues/issue-<number>.md` with bug fix workflow checklist
+  - Outputs are gitignored to prevent accidental commits
+
+### Security
+
+- Defense-in-depth against hostile GitHub issue content
+- Unicode normalization to prevent homograph attacks
+
 ## [0.5.5] - 2026-01-21
 
 ### Added

@@ -24,6 +24,7 @@
     "check-dist": "node scripts/check-dist-sync.js",
     "sync-dist": "node scripts/check-dist-sync.js --fix",
     "setup-hooks": "node scripts/setup-hooks.js",
+    "process-issue": "node scripts/process-issue.js",
     "preversion": "pnpm test && node scripts/check-dist-sync.js",
     "version": "node scripts/sync-version.js && cp src/auth.js dist/auth.js && git add -A",
     "postversion": "git push && git push --tags",
