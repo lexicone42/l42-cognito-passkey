@@ -4,7 +4,7 @@
 
 L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for AWS Cognito with WebAuthn/Passkey support. It's designed to be copied into projects (no CDN dependency) and used as an ES module.
 
-**Current Version**: 0.5.6
+**Current Version**: 0.5.7
 **License**: Apache-2.0
 **Tests**: 174 (including 22 property-based tests)
 
