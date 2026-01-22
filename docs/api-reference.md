@@ -62,7 +62,7 @@ Library version string.
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.4.0"
+console.log(VERSION); // "0.5.6"
 ```
 
 ## Authentication State
@@ -445,19 +445,26 @@ const unsubscribe = onAuthStateChange((isAuthenticated) => {
 
 ## JWT Utilities
 
-### decodeJwtPayload(token)
+### UNSAFE_decodeJwtPayload(token)
 
 Decode JWT payload. **Does NOT verify signature - use for display only.**
 
-```javascript
-import { decodeJwtPayload } from '/auth/auth.js';
+The `UNSAFE_` prefix reminds you that these claims are **unverified** and should never be used for authorization decisions.
 
-const payload = decodeJwtPayload(tokens.id_token);
+```javascript
+import { UNSAFE_decodeJwtPayload } from '/auth/auth.js';
+
+const payload = UNSAFE_decodeJwtPayload(tokens.id_token);
+// Use ONLY for display purposes
 console.log(payload.email, payload.exp);
 ```
 
 **Returns:** `Object`
 
+### decodeJwtPayload(token) [DEPRECATED]
+
+Alias for `UNSAFE_decodeJwtPayload`. Emits deprecation warning. Will be removed in v1.0.
+
 ### parseJwt(token) [DEPRECATED]
 
-Alias for `decodeJwtPayload`. Will be removed in v3.0.
+Alias for `UNSAFE_decodeJwtPayload`. Will be removed in v1.0.

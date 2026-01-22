@@ -18,14 +18,6 @@ AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configura
 - Self-hosted - copy to your project, no CDN dependency
 - ES module - zero build step required
 
-## Security
-
-- **PKCE** (Proof Key for Code Exchange) - Prevents authorization code interception
-- **CSRF Protection** - State parameter validated on every OAuth callback
-- **HTTPS Enforcement** - Redirect URIs must use HTTPS (except localhost)
-- **Domain Validation** - Cognito domain format validated to prevent open redirects
-- **Secure Cookies** - Secure flag + SameSite=Lax for server-side validation cookie
-
 ## Quick Start
 
 ### 1. Copy auth.js to your project
@@ -62,103 +54,57 @@ if (isAuthenticated()) {
 
 Copy `plugin/templates/callback.html` to your project and update the configuration.
 
-### 4. Configure Cognito
-
-See [Cognito Setup Guide](docs/cognito-setup.md) for required AWS configuration.
-
 ## API Reference
 
-See [API Reference](docs/api-reference.md) for complete documentation.
+See [docs/api-reference.md](docs/api-reference.md) for complete documentation.
 
 ### Core Functions
 
 ```javascript
 // Configuration
-configure(options)    // Configure the library (or use window.L42_AUTH_CONFIG)
-isConfigured()        // Check if configured
+configure(options)        // Configure the library
+isConfigured()           // Check if configured
 
-// Authentication state
-isAuthenticated()     // Check if logged in
-getTokens()           // Get current tokens
-getUserEmail()        // Get user's email
-getUserGroups()       // Get Cognito groups
-isAdmin()             // Check admin group membership
-isReadonly()          // Check readonly group membership
+// Authentication
+isAuthenticated()        // Check if logged in
+getTokens()              // Get current tokens
+getUserEmail()           // Get user's email
+getUserGroups()          // Get Cognito groups
 
-// Login methods
-loginWithPassword(email, password)  // Password login
-loginWithPasskey(email)             // WebAuthn passkey login
-loginWithHostedUI(email?)           // Cognito hosted UI
+// Login
+loginWithPassword(email, password)
+loginWithPasskey(email)
+loginWithHostedUI(email?)
 
-// Logout
-logout()              // Clear session
+// Session
+logout()
+ensureValidTokens()      // Auto-refresh if needed
 
-// Token management
-ensureValidTokens()   // Auto-refresh if needed (call before API requests)
-
-// Passkey management (requires admin scope)
-listPasskeys()        // List registered passkeys
-registerPasskey()     // Register new passkey
-deletePasskey(id)     // Delete passkey
+// Passkey management
+listPasskeys()
+registerPasskey()
+deletePasskey(id)
 
 // Events
-onAuthStateChange(callback)  // Subscribe to auth changes
+onAuthStateChange(callback)
 ```
 
-## Cognito Requirements
+## Documentation
 
-### User Pool Client
+| Guide | Description |
+|-------|-------------|
+| [Cognito Setup](docs/cognito-setup.md) | AWS Cognito configuration (CDK, CloudFormation, boto3) |
+| [API Reference](docs/api-reference.md) | Complete function documentation |
+| [Migration Guide](docs/migration.md) | Upgrading between versions |
+| [OCSF Logging](docs/ocsf-logging.md) | AWS Security Lake / SIEM integration |
+| [Releasing](docs/RELEASING.md) | Release process for maintainers |
 
-- OAuth scopes: `openid`, `email`, `aws.cognito.signin.user.admin`
-- Auth flows: `ALLOW_USER_PASSWORD_AUTH`, `ALLOW_USER_AUTH`, `ALLOW_REFRESH_TOKEN_AUTH`
+## Security
 
-### User Pool (WebAuthn - requires boto3)
-
-```python
-import boto3
-client = boto3.client('cognito-idp', region_name='us-west-2')
-
-# Enable WebAuthn
-client.update_user_pool(
-    UserPoolId='your-pool-id',
-    Policies={'SignInPolicy': {'AllowedFirstAuthFactors': ['PASSWORD', 'WEB_AUTHN']}}
-)
-
-# Configure relying party
-client.set_user_pool_mfa_config(
-    UserPoolId='your-pool-id',
-    WebAuthnConfiguration={
-        'RelyingPartyId': 'your-domain.com',
-        'UserVerification': 'preferred'
-    },
-    MfaConfiguration='OPTIONAL'
-)
-```
-
-**Note:** CDK/CloudFormation don't support WebAuthn configuration yet. Use boto3 or AWS Console.
-
-## Claude Code Integration
-
-This project was built with [Claude Code](https://claude.ai/code) and includes a plugin for guided setup.
-
-### For Claude Code Instances
-
-See [`CLAUDE.md`](CLAUDE.md) for integration guidelines, security patterns, and RBAC documentation.
-
-### Plugin Commands
-
-```bash
-# Add the plugin directory to your Claude Code config
-# Then use /setup-auth in your project
-```
-
-### Development with Claude Code
-
-```bash
-pnpm test                 # Run all 174 tests
-pnpm validate-docs        # Check documentation consistency
-pnpm release:patch        # Bump version (0.5.1 → 0.5.2)
-```
+- **PKCE** - Proof Key for Code Exchange prevents authorization code interception
+- **CSRF Protection** - State parameter validated on every OAuth callback
+- **HTTPS Enforcement** - Redirect URIs must use HTTPS (except localhost)
+- **Domain Validation** - Cognito domain format validated to prevent open redirects
 
 ## Version
 
@@ -167,34 +113,13 @@ import { VERSION } from '/auth/auth.js';
 console.log(VERSION); // "0.5.6"
 ```
 
-## Migration Guide
+## Claude Code Integration
 
-### v0.3.x → v0.4.0
+This project was built with [Claude Code](https://claude.ai/code). See [`CLAUDE.md`](CLAUDE.md) for integration guidelines, security patterns, and RBAC documentation.
 
-**`decodeJwtPayload()` Renamed**
-
-The function `decodeJwtPayload()` has been renamed to `UNSAFE_decodeJwtPayload()` to clearly indicate that it returns **unverified claims**. The old name still works but emits a deprecation warning.
-
-```javascript
-// Before (still works, but warns)
-const claims = auth.decodeJwtPayload(token);
-
-// After (recommended)
-const claims = auth.UNSAFE_decodeJwtPayload(token);
-```
-
-**Why?** This prevents developers from accidentally using JWT claims for authorization decisions. The `UNSAFE_` prefix reminds you that these claims are for display purposes only.
-
-**New Security Helpers**
-
-Use `requireServerAuthorization()` for protected actions:
-
-```javascript
-// Enforces server-side validation
-const result = await auth.requireServerAuthorization('admin:delete-user');
-if (!result.authorized) {
-    throw new Error(result.reason);
-}
+```bash
+pnpm test            # Run all 174 tests
+pnpm release:patch   # Bump version (0.5.5 → 0.5.6)
 ```
 
 ## License

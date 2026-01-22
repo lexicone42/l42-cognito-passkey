@@ -26,8 +26,154 @@ const DEFAULT_CONFIG = {
     cookieName: 'l42_id_token',
     cookieDomain: null,         // Auto-detected if not set
     allowedDomains: null,       // Auto-allow current domain if not set
-    relyingPartyId: null        // For WebAuthn - usually your domain
+    relyingPartyId: null,       // For WebAuthn - usually your domain
+    // Structured logging for OCSF/Security Lake integration
+    // Set to a function(event) to receive OCSF-formatted security events
+    // Set to 'console' for console.log output, or null to disable
+    securityLogger: null
 };
+
+// ==================== OCSF SECURITY EVENT SCHEMA ====================
+// Open Cybersecurity Schema Framework (OCSF) for AWS Security Lake integration
+// See: https://schema.ocsf.io/
+
+/**
+ * OCSF Event Class UIDs
+ */
+const OCSF_CLASS = {
+    AUTHENTICATION: 3001,       // Authentication events (login, logout, token refresh)
+    ACCOUNT_CHANGE: 3002        // Account changes (passkey add/delete)
+};
+
+/**
+ * OCSF Activity IDs for Authentication (class 3001)
+ */
+const OCSF_AUTH_ACTIVITY = {
+    LOGON: 1,
+    LOGOFF: 2,
+    AUTHENTICATION_TICKET: 3,   // Initial token grant
+    SERVICE_TICKET: 4           // Token refresh
+};
+
+/**
+ * OCSF Activity IDs for Account Change (class 3002)
+ */
+const OCSF_ACCOUNT_ACTIVITY = {
+    CREATE: 1,                  // Passkey registered
+    DELETE: 4                   // Passkey deleted
+};
+
+/**
+ * OCSF Status IDs
+ */
+const OCSF_STATUS = {
+    SUCCESS: 1,
+    FAILURE: 2
+};
+
+/**
+ * OCSF Severity IDs
+ */
+const OCSF_SEVERITY = {
+    INFORMATIONAL: 1,
+    LOW: 2,
+    MEDIUM: 3,
+    HIGH: 4,
+    CRITICAL: 5
+};
+
+/**
+ * Authentication protocol IDs (OCSF auth_protocol_id)
+ */
+const OCSF_AUTH_PROTOCOL = {
+    UNKNOWN: 0,
+    PASSWORD: 2,                // Username/Password
+    OAUTH2: 10,                 // OAuth 2.0 / OIDC
+    FIDO2: 99                   // WebAuthn/Passkey (custom, not in OCSF 1.0)
+};
+
+/**
+ * Log a security event in OCSF format.
+ * Events are sent to the configured securityLogger.
+ *
+ * @param {Object} params - Event parameters
+ * @param {number} params.class_uid - OCSF event class
+ * @param {number} params.activity_id - Activity within the class
+ * @param {string} params.activity_name - Human-readable activity name
+ * @param {number} params.status_id - Success or failure
+ * @param {number} params.severity_id - Event severity
+ * @param {string} [params.user_email] - Actor's email
+ * @param {number} [params.auth_protocol_id] - Authentication protocol
+ * @param {string} [params.auth_protocol] - Protocol name
+ * @param {string} [params.message] - Additional message
+ * @param {Object} [params.metadata] - Additional metadata
+ */
+function logSecurityEvent({
+    class_uid,
+    activity_id,
+    activity_name,
+    status_id,
+    severity_id,
+    user_email = null,
+    auth_protocol_id = OCSF_AUTH_PROTOCOL.UNKNOWN,
+    auth_protocol = 'Unknown',
+    message = null,
+    metadata = {}
+}) {
+    const logger = config.securityLogger;
+    if (!logger) return;
+
+    const event = {
+        // OCSF base event
+        class_uid,
+        class_name: class_uid === OCSF_CLASS.AUTHENTICATION ? 'Authentication' : 'Account Change',
+        activity_id,
+        activity_name,
+        severity_id,
+        severity: ['Unknown', 'Informational', 'Low', 'Medium', 'High', 'Critical'][severity_id] || 'Unknown',
+        status_id,
+        status: status_id === OCSF_STATUS.SUCCESS ? 'Success' : 'Failure',
+        time: Date.now(),
+        // Product info
+        metadata: {
+            product: {
+                name: 'l42-cognito-passkey',
+                version: VERSION,
+                vendor_name: 'L42'
+            },
+            ...metadata
+        },
+        // Actor
+        actor: user_email ? {
+            user: {
+                email_addr: user_email,
+                type_id: 1,  // User
+                type: 'User'
+            }
+        } : undefined,
+        // Auth-specific fields (for class 3001)
+        ...(class_uid === OCSF_CLASS.AUTHENTICATION ? {
+            auth_protocol_id,
+            auth_protocol
+        } : {}),
+        // Message
+        message
+    };
+
+    // Remove undefined fields
+    Object.keys(event).forEach(key => event[key] === undefined && delete event[key]);
+
+    if (logger === 'console') {
+        console.log('[L42-AUTH-OCSF]', JSON.stringify(event));
+    } else if (typeof logger === 'function') {
+        try {
+            logger(event);
+        } catch (e) {
+            // Don't let logger errors break auth flow
+            console.error('Security logger error:', e);
+        }
+    }
+}
 
 // Token refresh configuration by auth method
 const REFRESH_CONFIG = {
@@ -477,31 +623,66 @@ function detectAuthMethod(tokens) {
 export async function refreshTokens() {
     requireConfig();
     const currentTokens = getTokens();
+    const email = getUserEmail();
+
     if (!currentTokens || !currentTokens.refresh_token) {
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.SERVICE_TICKET,
+            activity_name: 'Service Ticket',
+            status_id: OCSF_STATUS.FAILURE,
+            severity_id: OCSF_SEVERITY.LOW,
+            user_email: email,
+            message: 'No refresh token available'
+        });
         throw new Error('No refresh token available');
     }
 
-    const res = await cognitoRequest('InitiateAuth', {
-        AuthFlow: 'REFRESH_TOKEN_AUTH',
-        ClientId: config.clientId,
-        AuthParameters: {
-            REFRESH_TOKEN: currentTokens.refresh_token
+    try {
+        const res = await cognitoRequest('InitiateAuth', {
+            AuthFlow: 'REFRESH_TOKEN_AUTH',
+            ClientId: config.clientId,
+            AuthParameters: {
+                REFRESH_TOKEN: currentTokens.refresh_token
+            }
+        });
+
+        if (res.AuthenticationResult) {
+            const authMethod = detectAuthMethod(currentTokens);
+
+            const newTokens = {
+                access_token: res.AuthenticationResult.AccessToken,
+                id_token: res.AuthenticationResult.IdToken,
+                refresh_token: res.AuthenticationResult.RefreshToken || currentTokens.refresh_token,
+                auth_method: authMethod
+            };
+            setTokens(newTokens);
+
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.SERVICE_TICKET,
+                activity_name: 'Service Ticket',
+                status_id: OCSF_STATUS.SUCCESS,
+                severity_id: OCSF_SEVERITY.INFORMATIONAL,
+                user_email: email,
+                message: 'Token refresh successful'
+            });
+
+            return newTokens;
         }
-    });
-
-    if (res.AuthenticationResult) {
-        const authMethod = detectAuthMethod(currentTokens);
-
-        const newTokens = {
-            access_token: res.AuthenticationResult.AccessToken,
-            id_token: res.AuthenticationResult.IdToken,
-            refresh_token: res.AuthenticationResult.RefreshToken || currentTokens.refresh_token,
-            auth_method: authMethod
-        };
-        setTokens(newTokens);
-        return newTokens;
+        throw new Error('Token refresh failed');
+    } catch (e) {
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.SERVICE_TICKET,
+            activity_name: 'Service Ticket',
+            status_id: OCSF_STATUS.FAILURE,
+            severity_id: OCSF_SEVERITY.MEDIUM,
+            user_email: email,
+            message: 'Token refresh failed: ' + e.message
+        });
+        throw e;
     }
-    throw new Error('Token refresh failed');
 }
 
 /**
@@ -718,28 +899,69 @@ export function getRedirectUri() {
 export async function loginWithPassword(email, password) {
     requireConfig();
 
-    const res = await cognitoRequest('InitiateAuth', {
-        AuthFlow: 'USER_PASSWORD_AUTH',
-        ClientId: config.clientId,
-        AuthParameters: {
-            USERNAME: email,
-            PASSWORD: password
-        }
-    });
+    try {
+        const res = await cognitoRequest('InitiateAuth', {
+            AuthFlow: 'USER_PASSWORD_AUTH',
+            ClientId: config.clientId,
+            AuthParameters: {
+                USERNAME: email,
+                PASSWORD: password
+            }
+        });
 
-    if (res.AuthenticationResult) {
-        const tokens = {
-            access_token: res.AuthenticationResult.AccessToken,
-            id_token: res.AuthenticationResult.IdToken,
-            refresh_token: res.AuthenticationResult.RefreshToken,
-            auth_method: 'password'
-        };
-        setTokens(tokens);
-        return tokens;
-    } else if (res.ChallengeName) {
-        throw new Error('Additional verification required: ' + res.ChallengeName);
+        if (res.AuthenticationResult) {
+            const tokens = {
+                access_token: res.AuthenticationResult.AccessToken,
+                id_token: res.AuthenticationResult.IdToken,
+                refresh_token: res.AuthenticationResult.RefreshToken,
+                auth_method: 'password'
+            };
+            setTokens(tokens);
+
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                activity_name: 'Logon',
+                status_id: OCSF_STATUS.SUCCESS,
+                severity_id: OCSF_SEVERITY.INFORMATIONAL,
+                user_email: email,
+                auth_protocol_id: OCSF_AUTH_PROTOCOL.PASSWORD,
+                auth_protocol: 'Password',
+                message: 'User logged in with password'
+            });
+
+            return tokens;
+        } else if (res.ChallengeName) {
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                activity_name: 'Logon',
+                status_id: OCSF_STATUS.FAILURE,
+                severity_id: OCSF_SEVERITY.LOW,
+                user_email: email,
+                auth_protocol_id: OCSF_AUTH_PROTOCOL.PASSWORD,
+                auth_protocol: 'Password',
+                message: 'MFA challenge required: ' + res.ChallengeName
+            });
+            throw new Error('Additional verification required: ' + res.ChallengeName);
+        }
+        throw new Error('Authentication failed');
+    } catch (e) {
+        if (!e.message.includes('Additional verification required')) {
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                activity_name: 'Logon',
+                status_id: OCSF_STATUS.FAILURE,
+                severity_id: OCSF_SEVERITY.MEDIUM,
+                user_email: email,
+                auth_protocol_id: OCSF_AUTH_PROTOCOL.PASSWORD,
+                auth_protocol: 'Password',
+                message: 'Password authentication failed: ' + e.message
+            });
+        }
+        throw e;
     }
-    throw new Error('Authentication failed');
 }
 
 /**
@@ -750,82 +972,124 @@ export async function loginWithPassword(email, password) {
 export async function loginWithPasskey(email) {
     requireConfig();
 
-    // Step 1: Initiate auth with USER_AUTH and PREFERRED_CHALLENGE=WEB_AUTHN
-    const initRes = await cognitoRequest('InitiateAuth', {
-        AuthFlow: 'USER_AUTH',
-        ClientId: config.clientId,
-        AuthParameters: {
-            USERNAME: email,
-            PREFERRED_CHALLENGE: 'WEB_AUTHN'
+    try {
+        // Step 1: Initiate auth with USER_AUTH and PREFERRED_CHALLENGE=WEB_AUTHN
+        const initRes = await cognitoRequest('InitiateAuth', {
+            AuthFlow: 'USER_AUTH',
+            ClientId: config.clientId,
+            AuthParameters: {
+                USERNAME: email,
+                PREFERRED_CHALLENGE: 'WEB_AUTHN'
+            }
+        });
+
+        if (initRes.ChallengeName !== 'WEB_AUTHN') {
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                activity_name: 'Logon',
+                status_id: OCSF_STATUS.FAILURE,
+                severity_id: OCSF_SEVERITY.LOW,
+                user_email: email,
+                auth_protocol_id: OCSF_AUTH_PROTOCOL.FIDO2,
+                auth_protocol: 'WebAuthn/FIDO2',
+                message: 'Passkey not available for user'
+            });
+            throw new Error('Passkey not available. Register one first or use password.');
         }
-    });
 
-    if (initRes.ChallengeName !== 'WEB_AUTHN') {
-        throw new Error('Passkey not available. Register one first or use password.');
-    }
+        // Step 2: Parse WebAuthn challenge
+        const credentialOptions = JSON.parse(initRes.ChallengeParameters.CREDENTIAL_REQUEST_OPTIONS);
 
-    // Step 2: Parse WebAuthn challenge
-    const credentialOptions = JSON.parse(initRes.ChallengeParameters.CREDENTIAL_REQUEST_OPTIONS);
-
-    const publicKey = {
-        challenge: b64ToArrayBuffer(credentialOptions.challenge),
-        timeout: credentialOptions.timeout,
-        rpId: credentialOptions.rpId,
-        allowCredentials: credentialOptions.allowCredentials.map(function(cred) {
-            return {
-                id: b64ToArrayBuffer(cred.id),
-                type: cred.type,
-                transports: cred.transports
-            };
-        }),
-        userVerification: credentialOptions.userVerification
-    };
-
-    // Step 3: Get passkey assertion
-    const credential = await navigator.credentials.get({ publicKey: publicKey });
-
-    // Step 4: Build response
-    const assertionResponse = {
-        id: credential.id,
-        rawId: arrayBufferToB64(credential.rawId),
-        response: {
-            clientDataJSON: arrayBufferToB64(credential.response.clientDataJSON),
-            authenticatorData: arrayBufferToB64(credential.response.authenticatorData),
-            signature: arrayBufferToB64(credential.response.signature)
-        },
-        type: credential.type,
-        clientExtensionResults: credential.getClientExtensionResults() || {}
-    };
-
-    if (credential.response.userHandle) {
-        assertionResponse.response.userHandle = arrayBufferToB64(credential.response.userHandle);
-    }
-    if (credential.authenticatorAttachment) {
-        assertionResponse.authenticatorAttachment = credential.authenticatorAttachment;
-    }
-
-    // Step 5: Complete challenge
-    const authRes = await cognitoRequest('RespondToAuthChallenge', {
-        ChallengeName: 'WEB_AUTHN',
-        ClientId: config.clientId,
-        Session: initRes.Session,
-        ChallengeResponses: {
-            USERNAME: email,
-            CREDENTIAL: JSON.stringify(assertionResponse)
-        }
-    });
-
-    if (authRes.AuthenticationResult) {
-        const tokens = {
-            access_token: authRes.AuthenticationResult.AccessToken,
-            id_token: authRes.AuthenticationResult.IdToken,
-            refresh_token: authRes.AuthenticationResult.RefreshToken,
-            auth_method: 'passkey'
+        const publicKey = {
+            challenge: b64ToArrayBuffer(credentialOptions.challenge),
+            timeout: credentialOptions.timeout,
+            rpId: credentialOptions.rpId,
+            allowCredentials: credentialOptions.allowCredentials.map(function(cred) {
+                return {
+                    id: b64ToArrayBuffer(cred.id),
+                    type: cred.type,
+                    transports: cred.transports
+                };
+            }),
+            userVerification: credentialOptions.userVerification
         };
-        setTokens(tokens);
-        return tokens;
+
+        // Step 3: Get passkey assertion
+        const credential = await navigator.credentials.get({ publicKey: publicKey });
+
+        // Step 4: Build response
+        const assertionResponse = {
+            id: credential.id,
+            rawId: arrayBufferToB64(credential.rawId),
+            response: {
+                clientDataJSON: arrayBufferToB64(credential.response.clientDataJSON),
+                authenticatorData: arrayBufferToB64(credential.response.authenticatorData),
+                signature: arrayBufferToB64(credential.response.signature)
+            },
+            type: credential.type,
+            clientExtensionResults: credential.getClientExtensionResults() || {}
+        };
+
+        if (credential.response.userHandle) {
+            assertionResponse.response.userHandle = arrayBufferToB64(credential.response.userHandle);
+        }
+        if (credential.authenticatorAttachment) {
+            assertionResponse.authenticatorAttachment = credential.authenticatorAttachment;
+        }
+
+        // Step 5: Complete challenge
+        const authRes = await cognitoRequest('RespondToAuthChallenge', {
+            ChallengeName: 'WEB_AUTHN',
+            ClientId: config.clientId,
+            Session: initRes.Session,
+            ChallengeResponses: {
+                USERNAME: email,
+                CREDENTIAL: JSON.stringify(assertionResponse)
+            }
+        });
+
+        if (authRes.AuthenticationResult) {
+            const tokens = {
+                access_token: authRes.AuthenticationResult.AccessToken,
+                id_token: authRes.AuthenticationResult.IdToken,
+                refresh_token: authRes.AuthenticationResult.RefreshToken,
+                auth_method: 'passkey'
+            };
+            setTokens(tokens);
+
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                activity_name: 'Logon',
+                status_id: OCSF_STATUS.SUCCESS,
+                severity_id: OCSF_SEVERITY.INFORMATIONAL,
+                user_email: email,
+                auth_protocol_id: OCSF_AUTH_PROTOCOL.FIDO2,
+                auth_protocol: 'WebAuthn/FIDO2',
+                message: 'User logged in with passkey'
+            });
+
+            return tokens;
+        }
+        throw new Error('Passkey authentication failed');
+    } catch (e) {
+        // Log failure (if not already logged above)
+        if (!e.message.includes('Passkey not available')) {
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                activity_name: 'Logon',
+                status_id: OCSF_STATUS.FAILURE,
+                severity_id: e.name === 'NotAllowedError' ? OCSF_SEVERITY.LOW : OCSF_SEVERITY.MEDIUM,
+                user_email: email,
+                auth_protocol_id: OCSF_AUTH_PROTOCOL.FIDO2,
+                auth_protocol: 'WebAuthn/FIDO2',
+                message: 'Passkey authentication failed: ' + e.message
+            });
+        }
+        throw e;
     }
-    throw new Error('Passkey authentication failed');
 }
 
 /**
@@ -949,12 +1213,32 @@ export async function exchangeCodeForTokens(code, state) {
     requireConfig();
 
     if (!state || !verifyOAuthState(state)) {
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.AUTHENTICATION_TICKET,
+            activity_name: 'Authentication Ticket',
+            status_id: OCSF_STATUS.FAILURE,
+            severity_id: OCSF_SEVERITY.HIGH,
+            auth_protocol_id: OCSF_AUTH_PROTOCOL.OAUTH2,
+            auth_protocol: 'OAuth 2.0/OIDC',
+            message: 'Invalid OAuth state - possible CSRF attack'
+        });
         throw new Error('Invalid OAuth state - possible CSRF attack');
     }
 
     // PKCE: Retrieve and clear the code verifier
     const codeVerifier = getAndClearCodeVerifier();
     if (!codeVerifier) {
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.AUTHENTICATION_TICKET,
+            activity_name: 'Authentication Ticket',
+            status_id: OCSF_STATUS.FAILURE,
+            severity_id: OCSF_SEVERITY.MEDIUM,
+            auth_protocol_id: OCSF_AUTH_PROTOCOL.OAUTH2,
+            auth_protocol: 'OAuth 2.0/OIDC',
+            message: 'Missing PKCE code verifier - OAuth flow may have been interrupted'
+        });
         throw new Error('Missing PKCE code verifier - OAuth flow may have been interrupted');
     }
 
@@ -972,6 +1256,16 @@ export async function exchangeCodeForTokens(code, state) {
 
     if (!res.ok) {
         const errorText = await res.text();
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.AUTHENTICATION_TICKET,
+            activity_name: 'Authentication Ticket',
+            status_id: OCSF_STATUS.FAILURE,
+            severity_id: OCSF_SEVERITY.MEDIUM,
+            auth_protocol_id: OCSF_AUTH_PROTOCOL.OAUTH2,
+            auth_protocol: 'OAuth 2.0/OIDC',
+            message: 'Token exchange failed: ' + (errorText || res.status)
+        });
         throw new Error('Token exchange failed: ' + (errorText || res.status));
     }
 
@@ -983,6 +1277,22 @@ export async function exchangeCodeForTokens(code, state) {
         auth_method: 'passkey'
     };
     setTokens(tokens);
+
+    // Extract email from the new token for logging
+    const claims = UNSAFE_decodeJwtPayload(tokens.id_token);
+
+    logSecurityEvent({
+        class_uid: OCSF_CLASS.AUTHENTICATION,
+        activity_id: OCSF_AUTH_ACTIVITY.AUTHENTICATION_TICKET,
+        activity_name: 'Authentication Ticket',
+        status_id: OCSF_STATUS.SUCCESS,
+        severity_id: OCSF_SEVERITY.INFORMATIONAL,
+        user_email: claims?.email,
+        auth_protocol_id: OCSF_AUTH_PROTOCOL.OAUTH2,
+        auth_protocol: 'OAuth 2.0/OIDC',
+        message: 'OAuth token exchange successful'
+    });
+
     return tokens;
 }
 
@@ -990,7 +1300,18 @@ export async function exchangeCodeForTokens(code, state) {
  * Logout - clear tokens.
  */
 export function logout() {
+    const email = getUserEmail();
     clearTokens();
+
+    logSecurityEvent({
+        class_uid: OCSF_CLASS.AUTHENTICATION,
+        activity_id: OCSF_AUTH_ACTIVITY.LOGOFF,
+        activity_name: 'Logoff',
+        status_id: OCSF_STATUS.SUCCESS,
+        severity_id: OCSF_SEVERITY.INFORMATIONAL,
+        user_email: email,
+        message: 'User logged out'
+    });
 }
 
 // ==================== PASSKEY MANAGEMENT ====================
@@ -1023,6 +1344,8 @@ export async function listPasskeys() {
  */
 export async function registerPasskey() {
     const tokens = getTokens();
+    const email = getUserEmail();
+
     if (!tokens) throw new Error('Not authenticated');
     if (!hasAdminScope()) {
         throw new Error(
@@ -1031,80 +1354,104 @@ export async function registerPasskey() {
         );
     }
 
-    // Step 1: Get credential creation options
-    const startRes = await cognitoRequest('StartWebAuthnRegistration', {
-        AccessToken: tokens.access_token
-    });
-
-    // Step 2: Convert to WebAuthn format
-    const credOpts = startRes.CredentialCreationOptions;
-    const publicKeyOptions = {
-        challenge: b64ToArrayBuffer(credOpts.challenge),
-        rp: {
-            name: credOpts.rp.name,
-            id: credOpts.rp.id
-        },
-        user: {
-            id: b64ToArrayBuffer(credOpts.user.id),
-            name: credOpts.user.name,
-            displayName: credOpts.user.displayName
-        },
-        pubKeyCredParams: credOpts.pubKeyCredParams,
-        timeout: credOpts.timeout || 60000,
-        attestation: credOpts.attestation || 'none',
-        authenticatorSelection: credOpts.authenticatorSelection || {
-            authenticatorAttachment: 'platform',
-            residentKey: 'preferred',
-            userVerification: 'preferred'
-        }
-    };
-
-    if (credOpts.excludeCredentials) {
-        publicKeyOptions.excludeCredentials = credOpts.excludeCredentials.map(function(c) {
-            return {
-                type: c.type,
-                id: b64ToArrayBuffer(c.id),
-                transports: c.transports
-            };
+    try {
+        // Step 1: Get credential creation options
+        const startRes = await cognitoRequest('StartWebAuthnRegistration', {
+            AccessToken: tokens.access_token
         });
-    }
 
-    // Step 3: Create credential
-    const credential = await navigator.credentials.create({ publicKey: publicKeyOptions });
+        // Step 2: Convert to WebAuthn format
+        const credOpts = startRes.CredentialCreationOptions;
+        const publicKeyOptions = {
+            challenge: b64ToArrayBuffer(credOpts.challenge),
+            rp: {
+                name: credOpts.rp.name,
+                id: credOpts.rp.id
+            },
+            user: {
+                id: b64ToArrayBuffer(credOpts.user.id),
+                name: credOpts.user.name,
+                displayName: credOpts.user.displayName
+            },
+            pubKeyCredParams: credOpts.pubKeyCredParams,
+            timeout: credOpts.timeout || 60000,
+            attestation: credOpts.attestation || 'none',
+            authenticatorSelection: credOpts.authenticatorSelection || {
+                authenticatorAttachment: 'platform',
+                residentKey: 'preferred',
+                userVerification: 'preferred'
+            }
+        };
 
-    // Step 4: Format for Cognito
-    const credentialResponse = {
-        id: credential.id,
-        rawId: arrayBufferToB64(credential.rawId),
-        type: credential.type,
-        response: {
-            clientDataJSON: arrayBufferToB64(credential.response.clientDataJSON),
-            attestationObject: arrayBufferToB64(credential.response.attestationObject)
-        },
-        clientExtensionResults: credential.getClientExtensionResults() || {}
-    };
+        if (credOpts.excludeCredentials) {
+            publicKeyOptions.excludeCredentials = credOpts.excludeCredentials.map(function(c) {
+                return {
+                    type: c.type,
+                    id: b64ToArrayBuffer(c.id),
+                    transports: c.transports
+                };
+            });
+        }
 
-    if (credential.response.getTransports) {
-        credentialResponse.response.transports = credential.response.getTransports();
-    }
-    if (credential.authenticatorAttachment) {
-        credentialResponse.authenticatorAttachment = credential.authenticatorAttachment;
-    }
-    if (credential.response.getPublicKey) {
-        credentialResponse.response.publicKey = arrayBufferToB64(credential.response.getPublicKey());
-    }
-    if (credential.response.getPublicKeyAlgorithm) {
-        credentialResponse.response.publicKeyAlgorithm = credential.response.getPublicKeyAlgorithm();
-    }
-    if (credential.response.getAuthenticatorData) {
-        credentialResponse.response.authenticatorData = arrayBufferToB64(credential.response.getAuthenticatorData());
-    }
+        // Step 3: Create credential
+        const credential = await navigator.credentials.create({ publicKey: publicKeyOptions });
 
-    // Step 5: Complete registration
-    await cognitoRequest('CompleteWebAuthnRegistration', {
-        AccessToken: tokens.access_token,
-        Credential: credentialResponse
-    });
+        // Step 4: Format for Cognito
+        const credentialResponse = {
+            id: credential.id,
+            rawId: arrayBufferToB64(credential.rawId),
+            type: credential.type,
+            response: {
+                clientDataJSON: arrayBufferToB64(credential.response.clientDataJSON),
+                attestationObject: arrayBufferToB64(credential.response.attestationObject)
+            },
+            clientExtensionResults: credential.getClientExtensionResults() || {}
+        };
+
+        if (credential.response.getTransports) {
+            credentialResponse.response.transports = credential.response.getTransports();
+        }
+        if (credential.authenticatorAttachment) {
+            credentialResponse.authenticatorAttachment = credential.authenticatorAttachment;
+        }
+        if (credential.response.getPublicKey) {
+            credentialResponse.response.publicKey = arrayBufferToB64(credential.response.getPublicKey());
+        }
+        if (credential.response.getPublicKeyAlgorithm) {
+            credentialResponse.response.publicKeyAlgorithm = credential.response.getPublicKeyAlgorithm();
+        }
+        if (credential.response.getAuthenticatorData) {
+            credentialResponse.response.authenticatorData = arrayBufferToB64(credential.response.getAuthenticatorData());
+        }
+
+        // Step 5: Complete registration
+        await cognitoRequest('CompleteWebAuthnRegistration', {
+            AccessToken: tokens.access_token,
+            Credential: credentialResponse
+        });
+
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
+            activity_id: OCSF_ACCOUNT_ACTIVITY.CREATE,
+            activity_name: 'Create',
+            status_id: OCSF_STATUS.SUCCESS,
+            severity_id: OCSF_SEVERITY.INFORMATIONAL,
+            user_email: email,
+            message: 'Passkey registered successfully',
+            metadata: { credential_id: credential.id }
+        });
+    } catch (e) {
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
+            activity_id: OCSF_ACCOUNT_ACTIVITY.CREATE,
+            activity_name: 'Create',
+            status_id: OCSF_STATUS.FAILURE,
+            severity_id: e.name === 'NotAllowedError' ? OCSF_SEVERITY.LOW : OCSF_SEVERITY.MEDIUM,
+            user_email: email,
+            message: 'Passkey registration failed: ' + e.message
+        });
+        throw e;
+    }
 }
 
 /**
@@ -1115,6 +1462,8 @@ export async function registerPasskey() {
  */
 export async function deletePasskey(credentialId) {
     const tokens = getTokens();
+    const email = getUserEmail();
+
     if (!tokens) throw new Error('Not authenticated');
     if (!hasAdminScope()) {
         throw new Error(
@@ -1123,10 +1472,35 @@ export async function deletePasskey(credentialId) {
         );
     }
 
-    await cognitoRequest('DeleteWebAuthnCredential', {
-        AccessToken: tokens.access_token,
-        CredentialId: credentialId
-    });
+    try {
+        await cognitoRequest('DeleteWebAuthnCredential', {
+            AccessToken: tokens.access_token,
+            CredentialId: credentialId
+        });
+
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
+            activity_id: OCSF_ACCOUNT_ACTIVITY.DELETE,
+            activity_name: 'Delete',
+            status_id: OCSF_STATUS.SUCCESS,
+            severity_id: OCSF_SEVERITY.INFORMATIONAL,
+            user_email: email,
+            message: 'Passkey deleted',
+            metadata: { credential_id: credentialId }
+        });
+    } catch (e) {
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
+            activity_id: OCSF_ACCOUNT_ACTIVITY.DELETE,
+            activity_name: 'Delete',
+            status_id: OCSF_STATUS.FAILURE,
+            severity_id: OCSF_SEVERITY.MEDIUM,
+            user_email: email,
+            message: 'Passkey deletion failed: ' + e.message,
+            metadata: { credential_id: credentialId }
+        });
+        throw e;
+    }
 }
 
 // ==================== SERVER-SIDE AUTHORIZATION ====================

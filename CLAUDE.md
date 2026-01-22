@@ -263,7 +263,7 @@ const claims = auth.decodeJwtPayload(token);
 const claims = auth.UNSAFE_decodeJwtPayload(token);
 ```
 
-See `docs/upgrade-prompt.md` for a complete v0.4.0 migration guide.
+See `docs/migration.md` for the complete migration guide covering all versions.
 
 ## Future Plans
 
