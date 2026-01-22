@@ -63,7 +63,7 @@ Library version string.
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.6.2"
+console.log(VERSION); // "0.7.0"
 ```
 
 ## Authentication State
