@@ -474,7 +474,15 @@ export function getTokens() {
  *
  * @param {Object} tokens - Tokens to store (should include auth_method)
  */
-export function setTokens(tokens) {
+/**
+ * Store tokens in localStorage and set cookie for server-side validation.
+ *
+ * @param {Object} tokens - The tokens to store
+ * @param {Object} [options] - Options
+ * @param {boolean} [options.isRefresh=false] - If true, skip notifying auth state listeners
+ *   (prevents reload loops when token refresh triggers onAuthStateChange)
+ */
+export function setTokens(tokens, options = {}) {
     requireConfig();
     localStorage.setItem(config.tokenKey, JSON.stringify(tokens));
 
@@ -492,7 +500,11 @@ export function setTokens(tokens) {
         document.cookie = cookieStr;
     }
 
-    notifyAuthStateChange(true);
+    // Only notify listeners on new login, not on token refresh
+    // This prevents reload loops when listeners perform navigation
+    if (!options.isRefresh) {
+        notifyAuthStateChange(true);
+    }
 }
 
 /**
@@ -656,7 +668,9 @@ export async function refreshTokens() {
                 refresh_token: res.AuthenticationResult.RefreshToken || currentTokens.refresh_token,
                 auth_method: authMethod
             };
-            setTokens(newTokens);
+            // Pass isRefresh: true to prevent notifying auth state listeners
+            // This avoids reload loops when listeners perform navigation on auth changes
+            setTokens(newTokens, { isRefresh: true });
 
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,

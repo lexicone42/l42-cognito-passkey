@@ -10,6 +10,49 @@ Complete migration guide for l42-cognito-passkey version upgrades.
 | v0.4.x | v0.5.2 | PKCE, HTTPS enforcement, async `loginWithHostedUI()` |
 | v0.5.2 | v0.5.3 | localStorage for OAuth state (Safari/Firefox fix) |
 | v0.5.3 | v0.5.4+ | Dist file sync fix, CI safeguards |
+| v0.5.6 | v0.5.7 | `onAuthStateChange` no longer fires on token refresh |
+
+---
+
+## v0.5.6 → v0.5.7
+
+### onAuthStateChange No Longer Fires on Token Refresh
+
+Previously, `onAuthStateChange` would fire with `true` whenever tokens were refreshed. This caused issues:
+
+```javascript
+// BEFORE v0.5.7: This would cause infinite reload loops!
+onAuthStateChange((authenticated) => {
+    if (authenticated) {
+        window.location.reload(); // Token refresh triggers this → loop!
+    }
+});
+```
+
+**v0.5.7 Fix**: `onAuthStateChange` now only fires on:
+- New login (password, passkey, OAuth callback)
+- Logout
+
+It does **not** fire during token refresh.
+
+**Best Practice**: Use `onAuthStateChange` for logout detection, and handle login success via the Promise return value:
+
+```javascript
+// For logout detection
+onAuthStateChange((authenticated) => {
+    if (!authenticated) {
+        showLoginRequired();
+    }
+});
+
+// For login success - use the Promise
+try {
+    await loginWithPasskey(email);
+    window.location.reload(); // Direct handling
+} catch (error) {
+    showError(error.message);
+}
+```
 
 ---
 
