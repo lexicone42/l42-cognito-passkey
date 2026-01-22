@@ -24,7 +24,7 @@ gh issue create --repo lexicone42/l42-cognito-passkey \
 One-line description of the issue.
 
 ## Environment
-- Library version: 0.5.7
+- Library version: 0.6.0
 - Browser: Safari/Chrome/Firefox
 - Auth methods: Passkey, Password, OAuth
 
@@ -85,7 +85,7 @@ gh issue comment <number> --repo lexicone42/l42-cognito-passkey \
   --body "$(cat <<'EOF'
 ## Integration Test Results
 
-- **Version tested**: 0.5.8
+- **Version tested**: 0.6.0
 - **Result**: ✅ Working / ❌ Still failing
 
 ### Notes
@@ -131,7 +131,7 @@ Issues are auto-closed when commits with `Fixes #N` are merged. For manual closu
 
 ```bash
 gh issue close <number> --repo lexicone42/l42-cognito-passkey \
-  --comment "Fixed in v0.5.8. Please update and confirm."
+  --comment "Fixed in v0.6.0. Please update and confirm."
 ```
 
 ## Security Considerations

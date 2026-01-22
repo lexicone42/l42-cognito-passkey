@@ -120,7 +120,7 @@ This project was built with [Claude Code](https://claude.ai/code). See [`CLAUDE.
 
 ```bash
 pnpm test            # Run all 174 tests
-pnpm release:patch   # Bump version (0.5.5 → 0.5.6)
+pnpm release:patch   # Bump version (0.6.0 → 0.6.1)
 ```
 
 ## License

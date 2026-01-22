@@ -62,7 +62,7 @@ Library version string.
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.5.6"
+console.log(VERSION); // "0.6.0"
 ```
 
 ## Authentication State
@@ -425,7 +425,7 @@ try {
 
 ### onLogin(callback)
 
-Subscribe to login events. Only fires on actual login, never on token refresh. **(v0.5.8+)**
+Subscribe to login events. Only fires on actual login, never on token refresh. **(v0.6.0+)**
 
 ```javascript
 import { onLogin } from '/auth/auth.js';
@@ -445,7 +445,7 @@ const unsubscribe = onLogin((tokens, method) => {
 
 ### onLogout(callback)
 
-Subscribe to logout events. Fires when user logs out or tokens are cleared. **(v0.5.8+)**
+Subscribe to logout events. Fires when user logs out or tokens are cleared. **(v0.6.0+)**
 
 ```javascript
 import { onLogout } from '/auth/auth.js';
