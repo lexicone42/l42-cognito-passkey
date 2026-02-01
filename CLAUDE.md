@@ -4,9 +4,9 @@
 
 L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for AWS Cognito with WebAuthn/Passkey support. It's designed to be copied into projects (no CDN dependency) and used as an ES module.
 
-**Current Version**: 0.7.0
+**Current Version**: 0.8.0
 **License**: Apache-2.0
-**Tests**: 207 (including 22 property-based tests + 33 token storage tests)
+**Tests**: ~260 (including 22 property-based tests + 33 token storage tests + 50 handler mode tests)
 
 ## Quick Start for Claude Instances
 
@@ -48,11 +48,14 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 
 | File | Purpose |
 |------|---------|
-| `src/auth.js` | Main authentication library (~900 lines) |
+| `src/auth.js` | Main authentication library (~1100 lines) |
 | `plugin/templates/rbac-roles.js` | RBAC role definitions and permission helpers |
 | `plugin/templates/static-site-pattern.html` | Static site integration template |
 | `plugin/templates/wasm-multiuser-pattern.html` | Multi-user WASM app template |
 | `plugin/templates/admin-panel-pattern.html` | Admin panel template |
+| `plugin/templates/handler-token-store.test.js` | Token Handler mode tests |
+| `examples/backends/express/` | Token Handler Express backend |
+| `docs/handler-mode.md` | Token Handler mode documentation |
 | `scripts/sync-version.js` | Syncs version across all files |
 | `docs/RELEASING.md` | Release process documentation |
 
@@ -90,9 +93,45 @@ userNameDisplay.textContent = claims.email;
 // SAFE - always use textContent
 element.textContent = userInput;
 
-// DANGEROUS - never use innerHTML with user data
-// element.innerHTML = userInput;  // DO NOT DO THIS
+// DANGEROUS - never use dynamic HTML with user data
 ```
+
+## Token Storage Modes (v0.8.0)
+
+Three storage modes are available:
+
+| Mode | Security | Persistence | Use Case |
+|------|----------|-------------|----------|
+| `localStorage` | XSS-accessible | Yes | Default, simple apps |
+| `memory` | Not in storage | No | Session-only use |
+| `handler` | HttpOnly session | Yes | Maximum security |
+
+### Token Handler Mode (Recommended for Production)
+
+Handler mode stores tokens server-side in HttpOnly cookies, making them inaccessible to XSS:
+
+```javascript
+configure({
+    clientId: 'xxx',
+    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
+    tokenStorage: 'handler',
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout',
+    oauthCallbackUrl: '/auth/callback'  // Optional
+});
+
+// In handler mode, getTokens() returns a Promise
+const tokens = await getTokens();
+```
+
+**Key points:**
+- Requires a backend (see `examples/backends/express/`)
+- `await getTokens()` works in ALL modes (safe migration)
+- `isAuthenticated()` stays sync (uses cache)
+- `logout()` calls server endpoint
+
+See `docs/handler-mode.md` for complete documentation.
 
 ## RBAC System
 

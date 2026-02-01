@@ -115,7 +115,7 @@ onAuthStateChange(callback)
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.7.0"
+console.log(VERSION); // "0.8.0"
 ```
 
 ## Claude Code Integration

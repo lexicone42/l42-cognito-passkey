@@ -1,0 +1,20 @@
+{
+  "name": "l42-token-handler-express",
+  "version": "0.8.0",
+  "description": "Express backend for L42 Cognito Passkey Token Handler mode",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "cors": "^2.8.5",
+    "cookie-parser": "^1.4.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

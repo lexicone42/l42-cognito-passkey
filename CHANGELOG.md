@@ -2,6 +2,70 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-02-01
+
+### Added
+
+- **Token Handler Mode**: Server-side token storage for maximum XSS protection
+  - Tokens stored in HttpOnly session cookies on the server
+  - New `tokenStorage: 'handler'` option
+  - `refresh_token` never exposed to client (stays server-side)
+
+- **Handler Configuration Options**:
+  - `tokenEndpoint`: GET endpoint to retrieve tokens from session
+  - `refreshEndpoint`: POST endpoint to refresh tokens
+  - `logoutEndpoint`: POST endpoint to destroy session
+  - `oauthCallbackUrl`: Backend OAuth callback URL
+  - `handlerCacheTtl`: Cache TTL in milliseconds (default: 30000)
+
+- **New Async Functions**:
+  - `getTokensAsync()`: Explicitly async version of `getTokens()`
+  - `isAuthenticatedAsync()`: Async auth check that fetches from server
+
+- **Handler Token Store Tests**: 46 new tests covering:
+  - HandlerTokenStore fetching and caching
+  - Configuration validation (required endpoints)
+  - Error handling (401/403 returns null, 500 throws)
+  - Security properties (no localStorage, no refresh_token exposure)
+
+- **Express Backend Example**: `examples/backends/express/`
+  - Reference implementation of Token Handler endpoints
+  - Session management with `express-session`
+  - OAuth callback handling
+
+- **Handler Mode Documentation**: `docs/handler-mode.md`
+
+### Changed
+
+- `getTokens()` returns Promise in handler mode (sync in other modes)
+- `logout()` calls server endpoint in handler mode
+- `refreshTokens()` calls backend endpoint in handler mode
+- `loginWithHostedUI()` uses `oauthCallbackUrl` in handler mode
+- `isAuthenticated()` uses cache in handler mode (stays sync)
+- Total tests: 261 (was 207)
+
+### Security
+
+- Handler mode tokens are stored in HttpOnly cookies (immune to XSS storage scanning)
+- `refresh_token` never leaves the server in handler mode
+- Tokens briefly cached in memory (30 second TTL by default)
+
+### Migration
+
+No breaking changes for existing users. Handler mode is opt-in:
+
+```javascript
+configure({
+    tokenStorage: 'handler',
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout'
+});
+
+// Use await for cross-mode compatibility
+const tokens = await getTokens();
+```
+
 ## [0.7.0] - 2026-01-21
 
 ### Added

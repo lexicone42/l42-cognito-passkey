@@ -12,6 +12,95 @@ Complete migration guide for l42-cognito-passkey version upgrades.
 | v0.5.3 | v0.5.4+ | Dist file sync fix, CI safeguards |
 | v0.5.6 | v0.5.7 | `onAuthStateChange` no longer fires on token refresh |
 | v0.5.7 | v0.6.0 | New `onLogin()` and `onLogout()` event handlers |
+| v0.6.0 | v0.7.0 | Memory mode token storage |
+| v0.7.0 | v0.8.0 | Token Handler mode (server-side token storage) |
+
+---
+
+## v0.7.0 → v0.8.0 (Token Handler Mode)
+
+### New Token Handler Mode
+
+v0.8.0 introduces Token Handler mode, the most secure token storage option. Tokens are stored server-side in HttpOnly session cookies, making them inaccessible to XSS attacks.
+
+**No changes required for existing users.** Token Handler mode is opt-in.
+
+### To Enable Token Handler Mode
+
+1. **Deploy a backend** that implements the Token Handler endpoints (see `examples/backends/express/`)
+
+2. **Update configuration:**
+
+```javascript
+import { configure } from './auth.js';
+
+configure({
+    clientId: 'your-client-id',
+    cognitoDomain: 'your-app.auth.us-west-2.amazoncognito.com',
+
+    // Enable handler mode
+    tokenStorage: 'handler',
+
+    // Required endpoints
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout',
+
+    // Optional: Backend OAuth callback
+    oauthCallbackUrl: '/auth/callback'
+});
+```
+
+3. **Update code to use `await` with `getTokens()`** (recommended):
+
+```javascript
+// Before (still works in localStorage/memory modes)
+const tokens = getTokens();
+
+// After (works in ALL modes, required for handler mode)
+const tokens = await getTokens();
+```
+
+### New Functions
+
+| Function | Description |
+|----------|-------------|
+| `getTokensAsync()` | Explicitly async version of `getTokens()` |
+| `isAuthenticatedAsync()` | Async auth check (fetches from server if cache stale) |
+
+### Behavioral Changes
+
+| Function | localStorage/memory | handler |
+|----------|-------------------|---------|
+| `getTokens()` | Sync (returns value) | **Async (returns Promise)** |
+| `isAuthenticated()` | Sync | Sync (uses cache) |
+| `logout()` | Sync | **Async (calls server)** |
+| `refreshTokens()` | Calls Cognito | **Calls backend endpoint** |
+
+**Note:** JavaScript allows `await` on non-Promises, so `await getTokens()` works in all modes.
+
+### Configuration Validation
+
+Handler mode requires all endpoints:
+
+```javascript
+// This will throw an error
+configure({
+    tokenStorage: 'handler'
+    // Missing: tokenEndpoint, refreshEndpoint, logoutEndpoint
+});
+// Error: Token handler mode requires: tokenEndpoint, refreshEndpoint, logoutEndpoint
+```
+
+### Security Benefits
+
+| Threat | localStorage | handler |
+|--------|-------------|---------|
+| XSS stealing tokens | Vulnerable | Protected |
+| Refresh token exposure | Client-side | Server-only |
+| Token persistence | In browser | HttpOnly session |
+
+See [handler-mode.md](./handler-mode.md) for complete documentation.
 
 ---
 

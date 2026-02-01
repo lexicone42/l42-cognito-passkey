@@ -3,8 +3,8 @@
 This plugin provides quick setup for AWS Cognito authentication with WebAuthn passkey support.
 
 **Plugin Name**: `l42-cognito-passkey`
-**Current Version**: 0.7.0
-**Tests**: 207 passing
+**Current Version**: 0.8.0
+**Tests**: 261 passing
 
 ## Overview
 

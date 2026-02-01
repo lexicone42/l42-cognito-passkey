@@ -8,11 +8,11 @@
  *   import { configure, isAuthenticated, loginWithPassword } from './auth.js';
  *   configure({ clientId: 'xxx', cognitoDomain: 'xxx.auth.region.amazoncognito.com' });
  *
- * @version 0.7.0
+ * @version 0.8.0
  * @license Apache-2.0
  */
 
-export const VERSION = '0.7.0';
+export const VERSION = '0.8.0';
 
 // ==================== CONFIGURATION ====================
 
@@ -27,10 +27,18 @@ const DEFAULT_CONFIG = {
     cookieDomain: null,         // Auto-detected if not set
     allowedDomains: null,       // Auto-allow current domain if not set
     relyingPartyId: null,       // For WebAuthn - usually your domain
-    // Token storage mode: 'localStorage' (default) or 'memory'
+    // Token storage mode: 'localStorage' (default), 'memory', or 'handler'
     // - localStorage: Persists across page reloads (XSS-accessible)
     // - memory: Lost on page reload (more secure, no persistence)
+    // - handler: Server-side storage via Token Handler pattern (most secure)
     tokenStorage: 'localStorage',
+    // Token Handler endpoints (required when tokenStorage: 'handler')
+    tokenEndpoint: null,        // e.g., '/auth/token' - GET tokens from server
+    refreshEndpoint: null,      // e.g., '/auth/refresh' - POST to refresh tokens
+    logoutEndpoint: null,       // e.g., '/auth/logout' - POST to logout
+    oauthCallbackUrl: null,     // e.g., '/auth/callback' - Backend OAuth callback
+    // Token Handler cache TTL in milliseconds (default: 30 seconds)
+    handlerCacheTtl: 30000,
     // Structured logging for OCSF/Security Lake integration
     // Set to a function(event) to receive OCSF-formatted security events
     // Set to 'console' for console.log output, or null to disable
@@ -84,6 +92,138 @@ const MemoryTokenStore = {
 };
 
 /**
+ * Handler-based token store (v0.8.0).
+ * Tokens are stored server-side in HttpOnly session cookies.
+ * This store fetches tokens from the server endpoint and caches them briefly.
+ *
+ * Security benefits:
+ * - Tokens are never stored in localStorage/sessionStorage (immune to XSS storage scanning)
+ * - refresh_token never leaves the server (only access_token/id_token returned)
+ * - Server manages token refresh and session lifecycle
+ *
+ * Note: While cached tokens are still in JavaScript memory, the attack surface is
+ * significantly reduced compared to localStorage.
+ */
+const HandlerTokenStore = {
+    _cache: null,
+    _cacheExpiry: 0,
+    _fetchPromise: null,
+
+    /**
+     * Get tokens - returns cached value or fetches from server.
+     * This method is async in handler mode.
+     * @param {string} _tokenKey - Ignored in handler mode
+     * @returns {Promise<Object|null>} Tokens or null if not authenticated
+     */
+    async get(_tokenKey) {
+        // Return cached value if still valid
+        if (this._cache && Date.now() < this._cacheExpiry) {
+            return this._cache;
+        }
+
+        // Deduplicate concurrent requests
+        if (this._fetchPromise) {
+            return this._fetchPromise;
+        }
+
+        this._fetchPromise = this._fetchTokens();
+        try {
+            return await this._fetchPromise;
+        } finally {
+            this._fetchPromise = null;
+        }
+    },
+
+    /**
+     * Fetch tokens from the server endpoint.
+     * @returns {Promise<Object|null>} Tokens or null
+     * @private
+     */
+    async _fetchTokens() {
+        const endpoint = config.tokenEndpoint;
+        if (!endpoint) {
+            console.error('HandlerTokenStore: tokenEndpoint not configured');
+            return null;
+        }
+
+        try {
+            const response = await fetch(endpoint, {
+                method: 'GET',
+                credentials: 'include', // Send session cookies
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+
+            // 401/403 means not authenticated - return null
+            if (response.status === 401 || response.status === 403) {
+                this._cache = null;
+                this._cacheExpiry = 0;
+                return null;
+            }
+
+            // 5xx or network errors should throw
+            if (!response.ok) {
+                throw new Error(`Token fetch failed: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Server returns tokens (without refresh_token for security)
+            const tokens = {
+                access_token: data.access_token,
+                id_token: data.id_token,
+                auth_method: data.auth_method || 'handler'
+                // Note: refresh_token is NOT returned - it stays server-side
+            };
+
+            // Cache with TTL
+            this._cache = tokens;
+            this._cacheExpiry = Date.now() + (config.handlerCacheTtl || 30000);
+
+            return tokens;
+        } catch (error) {
+            // Network errors throw, let caller handle
+            console.error('HandlerTokenStore: fetch failed', error);
+            throw error;
+        }
+    },
+
+    /**
+     * Set tokens - in handler mode, this only updates the cache.
+     * Actual token storage is managed by the server.
+     * @param {string} _tokenKey - Ignored
+     * @param {Object} tokens - Tokens to cache
+     */
+    set(_tokenKey, tokens) {
+        // Update cache only - server manages actual storage
+        this._cache = tokens;
+        this._cacheExpiry = Date.now() + (config.handlerCacheTtl || 30000);
+    },
+
+    /**
+     * Clear cached tokens.
+     * Note: This doesn't log out from server - use logout() for that.
+     */
+    clear(_tokenKey) {
+        this._cache = null;
+        this._cacheExpiry = 0;
+    },
+
+    /**
+     * Get cached tokens synchronously (for isAuthenticated checks).
+     * Returns cached value without fetching.
+     * @returns {Object|null} Cached tokens or null
+     */
+    getCached() {
+        if (this._cache && Date.now() < this._cacheExpiry) {
+            return this._cache;
+        }
+        return null;
+    }
+};
+
+/**
  * Get the active token store based on configuration.
  * @returns {Object} Token store with get/set/clear methods
  */
@@ -91,10 +231,20 @@ function getTokenStore() {
     switch (config.tokenStorage) {
         case 'memory':
             return MemoryTokenStore;
+        case 'handler':
+            return HandlerTokenStore;
         case 'localStorage':
         default:
             return LocalStorageTokenStore;
     }
+}
+
+/**
+ * Check if currently using handler mode.
+ * @returns {boolean} True if handler mode is active
+ */
+function isHandlerMode() {
+    return config.tokenStorage === 'handler';
 }
 
 // ==================== OCSF SECURITY EVENT SCHEMA ====================
@@ -460,12 +610,29 @@ export function configure(options = {}) {
     }
 
     // Validate tokenStorage option
-    const validStorageModes = ['localStorage', 'memory'];
+    const validStorageModes = ['localStorage', 'memory', 'handler'];
     if (newConfig.tokenStorage && !validStorageModes.includes(newConfig.tokenStorage)) {
         throw new Error(
             `Invalid tokenStorage: '${newConfig.tokenStorage}'.\n` +
             `Valid options: ${validStorageModes.join(', ')}`
         );
+    }
+
+    // Validate handler mode requires all endpoints
+    if (newConfig.tokenStorage === 'handler') {
+        const requiredEndpoints = ['tokenEndpoint', 'refreshEndpoint', 'logoutEndpoint'];
+        const missing = requiredEndpoints.filter(ep => !newConfig[ep]);
+        if (missing.length > 0) {
+            throw new Error(
+                `Token handler mode requires: ${missing.join(', ')}.\n` +
+                'Example: configure({\n' +
+                '    tokenStorage: "handler",\n' +
+                '    tokenEndpoint: "/auth/token",\n' +
+                '    refreshEndpoint: "/auth/refresh",\n' +
+                '    logoutEndpoint: "/auth/logout"\n' +
+                '})'
+            );
+        }
     }
 
     // Validate redirectUri if provided
@@ -518,9 +685,25 @@ export function isConfigured() {
 
 /**
  * Get stored authentication tokens.
- * @returns {Object|null} Tokens object or null if not authenticated
+ *
+ * In handler mode (v0.8.0+), this returns a Promise.
+ * For cross-mode compatibility, use `await getTokens()` - JavaScript
+ * allows `await` on non-Promises, so this works in all modes.
+ *
+ * @returns {Object|null|Promise<Object|null>} Tokens object or null.
+ *   Returns Promise in handler mode, sync value in localStorage/memory modes.
  */
 export function getTokens() {
+    return getTokenStore().get(config.tokenKey);
+}
+
+/**
+ * Get tokens asynchronously (works in all modes).
+ * Prefer this over getTokens() when you need consistent async behavior.
+ *
+ * @returns {Promise<Object|null>} Tokens object or null
+ */
+export async function getTokensAsync() {
     return getTokenStore().get(config.tokenKey);
 }
 
@@ -549,6 +732,9 @@ export function getTokens() {
 /**
  * Store tokens in localStorage and set cookie for server-side validation.
  *
+ * In handler mode, this only updates the local cache - the server
+ * manages actual token storage in HttpOnly session cookies.
+ *
  * @param {Object} tokens - The tokens to store
  * @param {Object} [options] - Options
  * @param {boolean} [options.isRefresh=false] - If true, skip notifying auth state listeners
@@ -558,18 +744,21 @@ export function setTokens(tokens, options = {}) {
     requireConfig();
     getTokenStore().set(config.tokenKey, tokens);
 
-    // Set cookie for server-side validation
-    if (tokens && tokens.id_token) {
-        const domain = getCookieDomain();
-        const authMethod = tokens.auth_method || 'password';
-        const refreshConfig = REFRESH_CONFIG[authMethod] || REFRESH_CONFIG.password;
-        const maxAge = refreshConfig.cookieMaxAge;
+    // In handler mode, skip client-side cookie - server manages session
+    if (!isHandlerMode()) {
+        // Set cookie for server-side validation
+        if (tokens && tokens.id_token) {
+            const domain = getCookieDomain();
+            const authMethod = tokens.auth_method || 'password';
+            const refreshConfig = REFRESH_CONFIG[authMethod] || REFRESH_CONFIG.password;
+            const maxAge = refreshConfig.cookieMaxAge;
 
-        let cookieStr = `${config.cookieName}=${tokens.id_token}; path=/; max-age=${maxAge}; secure; samesite=lax`;
-        if (domain) {
-            cookieStr += `; domain=${domain}`;
+            let cookieStr = `${config.cookieName}=${tokens.id_token}; path=/; max-age=${maxAge}; secure; samesite=lax`;
+            if (domain) {
+                cookieStr += `; domain=${domain}`;
+            }
+            document.cookie = cookieStr;
         }
-        document.cookie = cookieStr;
     }
 
     // Only notify listeners on new login, not on token refresh
@@ -591,17 +780,21 @@ export function getAuthMethod() {
 /**
  * Clear stored tokens (logout).
  * Also clears the server-side validation cookie.
+ * In handler mode, also clears the local cache (but doesn't call logout endpoint).
  */
 export function clearTokens() {
     getTokenStore().clear(config.tokenKey);
 
-    // Clear the cookie
-    const domain = getCookieDomain();
-    let cookieStr = `${config.cookieName}=; path=/; max-age=0; secure; samesite=lax`;
-    if (domain) {
-        cookieStr += `; domain=${domain}`;
+    // In handler mode, skip client-side cookie clearing - server manages session
+    if (!isHandlerMode()) {
+        // Clear the cookie
+        const domain = getCookieDomain();
+        let cookieStr = `${config.cookieName}=; path=/; max-age=0; secure; samesite=lax`;
+        if (domain) {
+            cookieStr += `; domain=${domain}`;
+        }
+        document.cookie = cookieStr;
     }
-    document.cookie = cookieStr;
 
     notifyAuthStateChange(false);
     notifyLogout();
@@ -702,13 +895,22 @@ function detectAuthMethod(tokens) {
 
 /**
  * Refresh tokens using Cognito refresh token flow.
+ * In handler mode, calls the refresh endpoint instead of Cognito directly.
+ *
  * @returns {Promise<Object>} New tokens
  * @throws {Error} If refresh fails
  */
 export async function refreshTokens() {
     requireConfig();
-    const currentTokens = getTokens();
     const email = getUserEmail();
+
+    // Handler mode: call refresh endpoint
+    if (isHandlerMode()) {
+        return refreshTokensViaHandler(email);
+    }
+
+    // Standard mode: call Cognito directly
+    const currentTokens = getTokens();
 
     if (!currentTokens || !currentTokens.refresh_token) {
         logSecurityEvent({
@@ -773,16 +975,94 @@ export async function refreshTokens() {
 }
 
 /**
+ * Refresh tokens via Token Handler endpoint.
+ * @param {string} email - User email for logging
+ * @returns {Promise<Object>} New tokens
+ * @throws {Error} If refresh fails
+ * @private
+ */
+async function refreshTokensViaHandler(email) {
+    const endpoint = config.refreshEndpoint;
+
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            credentials: 'include', // Send session cookies
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        // 401/403 means session expired
+        if (response.status === 401 || response.status === 403) {
+            clearTokens();
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.SERVICE_TICKET,
+                activity_name: 'Service Ticket',
+                status_id: OCSF_STATUS.FAILURE,
+                severity_id: OCSF_SEVERITY.LOW,
+                user_email: email,
+                message: 'Handler refresh failed: session expired'
+            });
+            throw new Error('Session expired. Please log in again.');
+        }
+
+        if (!response.ok) {
+            throw new Error(`Token refresh failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        const newTokens = {
+            access_token: data.access_token,
+            id_token: data.id_token,
+            auth_method: data.auth_method || 'handler'
+        };
+
+        // Update cache
+        setTokens(newTokens, { isRefresh: true });
+
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.SERVICE_TICKET,
+            activity_name: 'Service Ticket',
+            status_id: OCSF_STATUS.SUCCESS,
+            severity_id: OCSF_SEVERITY.INFORMATIONAL,
+            user_email: email,
+            message: 'Handler token refresh successful'
+        });
+
+        return newTokens;
+    } catch (e) {
+        if (!e.message.includes('Session expired')) {
+            logSecurityEvent({
+                class_uid: OCSF_CLASS.AUTHENTICATION,
+                activity_id: OCSF_AUTH_ACTIVITY.SERVICE_TICKET,
+                activity_name: 'Service Ticket',
+                status_id: OCSF_STATUS.FAILURE,
+                severity_id: OCSF_SEVERITY.MEDIUM,
+                user_email: email,
+                message: 'Handler token refresh failed: ' + e.message
+            });
+        }
+        throw e;
+    }
+}
+
+/**
  * Ensure tokens are valid, refreshing if needed.
  * Call this before making authenticated API requests.
  * @returns {Promise<Object|null>} Valid tokens or null if not authenticated
  */
 export async function ensureValidTokens() {
-    const tokens = getTokens();
+    // In handler mode, getTokens() returns a Promise
+    const tokens = await getTokens();
     if (!tokens) return null;
 
     if (isTokenExpired(tokens)) {
-        if (!tokens.refresh_token) {
+        // In handler mode, refresh_token is server-side, so always try refresh
+        if (!isHandlerMode() && !tokens.refresh_token) {
             clearTokens();
             return null;
         }
@@ -809,11 +1089,37 @@ export async function ensureValidTokens() {
 
 /**
  * Check if currently authenticated with valid tokens.
+ *
+ * In handler mode, this checks the local cache synchronously.
+ * Use isAuthenticatedAsync() for an authoritative check that fetches from server.
+ *
  * @returns {boolean} True if authenticated, false otherwise
  */
 export function isAuthenticated() {
+    // In handler mode, use cached tokens for sync check
+    if (isHandlerMode()) {
+        const cached = HandlerTokenStore.getCached();
+        return !!(cached && !isTokenExpired(cached));
+    }
+
     const tokens = getTokens();
     return !!(tokens && !isTokenExpired(tokens));
+}
+
+/**
+ * Check if currently authenticated (async version).
+ * In handler mode, fetches fresh tokens from server if cache is stale.
+ * Use this when you need an authoritative auth check.
+ *
+ * @returns {Promise<boolean>} True if authenticated, false otherwise
+ */
+export async function isAuthenticatedAsync() {
+    try {
+        const tokens = await getTokens();
+        return !!(tokens && !isTokenExpired(tokens));
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -1261,6 +1567,10 @@ function getAndClearCodeVerifier() {
  * Redirect to Cognito Hosted UI for login.
  * Uses PKCE (Proof Key for Code Exchange) for enhanced security.
  * Use this for OAuth flow with full scopes (needed for passkey management).
+ *
+ * In handler mode, redirects to the backend callback URL (oauthCallbackUrl)
+ * which handles the OAuth exchange server-side.
+ *
  * @param {string} [email] - Optional email hint
  * @returns {Promise<void>}
  */
@@ -1270,7 +1580,14 @@ export async function loginWithHostedUI(email) {
     const state = generateOAuthState();
     storeOAuthState(state);
 
+    // In handler mode, redirect to backend callback URL
+    // The backend handles PKCE and token exchange
+    const redirectUri = isHandlerMode() && config.oauthCallbackUrl
+        ? config.oauthCallbackUrl
+        : getRedirectUri();
+
     // PKCE: Generate code verifier and challenge
+    // In handler mode, PKCE is handled by the backend, but we generate for client-side callback
     const codeVerifier = generateCodeVerifier();
     storeCodeVerifier(codeVerifier);
     const codeChallenge = await generateCodeChallenge(codeVerifier);
@@ -1279,7 +1596,7 @@ export async function loginWithHostedUI(email) {
         client_id: config.clientId,
         response_type: 'code',
         scope: config.scopes,
-        redirect_uri: getRedirectUri(),
+        redirect_uri: redirectUri,
         state: state,
         code_challenge: codeChallenge,
         code_challenge_method: 'S256'
@@ -1387,10 +1704,27 @@ export async function exchangeCodeForTokens(code, state) {
 }
 
 /**
- * Logout - clear tokens.
+ * Logout - clear tokens and end session.
+ *
+ * In handler mode, this calls the logout endpoint to destroy the server session.
+ * Returns a Promise in handler mode, void in other modes.
+ * Existing sync calls continue to work (logout happens in background).
+ *
+ * @returns {void|Promise<void>}
  */
 export function logout() {
     const email = getUserEmail();
+
+    // In handler mode, call logout endpoint
+    if (isHandlerMode()) {
+        // Clear local cache first (immediate UI update)
+        clearTokens();
+
+        // Call server endpoint in background
+        return logoutViaHandler(email);
+    }
+
+    // Standard mode: just clear local tokens
     clearTokens();
 
     logSecurityEvent({
@@ -1402,6 +1736,49 @@ export function logout() {
         user_email: email,
         message: 'User logged out'
     });
+}
+
+/**
+ * Logout via Token Handler endpoint.
+ * @param {string} email - User email for logging
+ * @returns {Promise<void>}
+ * @private
+ */
+async function logoutViaHandler(email) {
+    const endpoint = config.logoutEndpoint;
+
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            credentials: 'include', // Send session cookies
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        // Any response (including 401) means logout succeeded from our perspective
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.LOGOFF,
+            activity_name: 'Logoff',
+            status_id: OCSF_STATUS.SUCCESS,
+            severity_id: OCSF_SEVERITY.INFORMATIONAL,
+            user_email: email,
+            message: response.ok ? 'User logged out via handler' : 'Handler logout completed (session may have already expired)'
+        });
+    } catch (e) {
+        // Network error - still consider logout successful locally
+        console.warn('Handler logout endpoint failed:', e);
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.LOGOFF,
+            activity_name: 'Logoff',
+            status_id: OCSF_STATUS.SUCCESS,
+            severity_id: OCSF_SEVERITY.LOW,
+            user_email: email,
+            message: 'User logged out locally (handler endpoint unreachable)'
+        });
+    }
 }
 
 // ==================== PASSKEY MANAGEMENT ====================
@@ -1791,6 +2168,7 @@ export default {
     configure,
     isConfigured,
     getTokens,
+    getTokensAsync,
     setTokens,
     clearTokens,
     UNSAFE_decodeJwtPayload,
@@ -1802,6 +2180,7 @@ export default {
     ensureValidTokens,
     getAuthMethod,
     isAuthenticated,
+    isAuthenticatedAsync,
     getIdTokenClaims,
     getUserEmail,
     hasAdminScope,
