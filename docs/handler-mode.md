@@ -1,4 +1,4 @@
-# Token Handler Mode (v0.8.0)
+# Token Handler Mode (v0.8.0+)
 
 Token Handler mode is the most secure token storage option, storing tokens server-side in HttpOnly session cookies. This makes tokens completely inaccessible to JavaScript, providing strong protection against XSS attacks.
 
@@ -214,7 +214,24 @@ This is a significant improvement over localStorage mode where tokens can be exf
 
 ### What about CSRF?
 
-Session cookies use `SameSite=Lax`, which prevents CSRF for state-changing requests (POST). Combined with your existing CORS configuration, this provides strong CSRF protection.
+Defense-in-depth with two layers:
+
+1. **SameSite=Lax cookies** — Browsers block cross-origin POST cookies
+2. **Custom header check (v0.9.0+)** — The client sends `X-L42-CSRF: 1` on all handler POST requests. Cross-origin requests can't add custom headers without a CORS preflight, which your backend rejects for unknown origins.
+
+The reference Express backend enforces the `X-L42-CSRF` header via `requireCsrfHeader` middleware. If you build your own backend, implement the same check on state-changing endpoints (`/auth/refresh`, `/auth/logout`).
+
+```javascript
+// Your backend: reject POSTs without the CSRF header
+function requireCsrfHeader(req, res, next) {
+    if (req.headers['x-l42-csrf'] !== '1') {
+        return res.status(403).json({ error: 'CSRF validation failed' });
+    }
+    next();
+}
+app.post('/auth/refresh', requireCsrfHeader, refreshHandler);
+app.post('/auth/logout', requireCsrfHeader, logoutHandler);
+```
 
 ### Is the cache a security risk?
 
@@ -227,3 +244,75 @@ The cache holds tokens briefly (30 seconds by default) to avoid repeated server 
 ### Can I use handler mode without OAuth?
 
 Yes! Direct login methods (`loginWithPassword`, `loginWithPasskey`) still work. After login, tokens are sent to your backend via a separate endpoint you implement. However, OAuth is recommended for the cleanest flow.
+
+## Background Token Refresh (v0.9.0+)
+
+Auto-refresh starts automatically on login and stops on logout. It periodically checks token expiry and refreshes proactively before tokens expire.
+
+```javascript
+import { startAutoRefresh, stopAutoRefresh, isAutoRefreshActive } from './auth.js';
+
+// Auto-starts on login — no action needed for defaults.
+
+// Custom interval (default: 60 seconds):
+startAutoRefresh({ intervalMs: 30000 });
+
+// Pauses when tab is hidden, checks immediately when tab becomes visible
+startAutoRefresh({ pauseWhenHidden: true }); // default
+
+// Check status
+console.log(isAutoRefreshActive()); // true
+
+// Manual stop (also called automatically on logout)
+stopAutoRefresh();
+```
+
+### How it works
+
+1. Every `intervalMs`, calls `getTokens()` and checks `shouldRefreshToken()`
+2. If approaching expiry, calls `refreshTokens()` proactively
+3. If already expired, attempts refresh; on failure fires `onSessionExpired`
+4. When the tab is hidden (`document.visibilityState === 'hidden'`), the timer continues but no action is taken until the tab becomes visible
+5. On tab visibility restore, checks immediately
+
+## Session Expiry Handling (v0.9.0+)
+
+When a session becomes unrecoverable (refresh token expired, server session destroyed), the library fires `onSessionExpired`:
+
+```javascript
+import { onSessionExpired } from './auth.js';
+
+const unsubscribe = onSessionExpired((reason) => {
+    console.warn('Session expired:', reason);
+    window.location.href = '/login?expired=true';
+});
+```
+
+This fires when:
+- Auto-refresh discovers the token is expired and refresh fails
+- Handler mode server returns 401 on a refresh attempt
+- `fetchWithAuth()` gets a 401 and the retry-refresh also fails
+
+## fetchWithAuth() Helper (v0.9.0+)
+
+Convenience wrapper that injects the Bearer token and handles 401 with retry-after-refresh:
+
+```javascript
+import { fetchWithAuth } from './auth.js';
+
+// GET
+const res = await fetchWithAuth('/api/content');
+const data = await res.json();
+
+// POST
+const res = await fetchWithAuth('/api/content', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'New Post' })
+});
+
+// If the server returns 401:
+// 1. Attempts token refresh
+// 2. Retries the request with fresh tokens
+// 3. If refresh fails: clears tokens, fires onSessionExpired, throws
+```

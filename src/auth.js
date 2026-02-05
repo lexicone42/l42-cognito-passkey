@@ -8,11 +8,11 @@
  *   import { configure, isAuthenticated, loginWithPassword } from './auth.js';
  *   configure({ clientId: 'xxx', cognitoDomain: 'xxx.auth.region.amazoncognito.com' });
  *
- * @version 0.8.0
+ * @version 0.9.0
  * @license Apache-2.0
  */
 
-export const VERSION = '0.8.0';
+export const VERSION = '0.9.0';
 
 // ==================== CONFIGURATION ====================
 
@@ -1012,7 +1012,8 @@ async function refreshTokensViaHandler(email) {
             method: 'POST',
             credentials: 'include', // Send session cookies
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-L42-CSRF': '1' // CSRF protection for handler endpoints
             }
         });
 
@@ -1781,7 +1782,8 @@ async function logoutViaHandler(email) {
             method: 'POST',
             credentials: 'include', // Send session cookies
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-L42-CSRF': '1' // CSRF protection for handler endpoints
             }
         });
 
@@ -2190,6 +2192,241 @@ export function onLogout(callback) {
     return () => logoutListeners.delete(callback);
 }
 
+// ==================== BACKGROUND TOKEN AUTO-REFRESH (v0.9.0) ====================
+
+let _autoRefreshTimer = null;
+let _visibilityHandler = null;
+const sessionExpiredListeners = new Set();
+
+/**
+ * Default auto-refresh configuration.
+ * Can be overridden via startAutoRefresh(options).
+ */
+const AUTO_REFRESH_DEFAULTS = {
+    intervalMs: 60000,       // Check every 60 seconds
+    pauseWhenHidden: true    // Pause when tab is not visible
+};
+
+/**
+ * Start automatic background token refresh.
+ *
+ * Periodically checks token expiry and refreshes proactively.
+ * Automatically pauses when the tab is hidden (saves server load)
+ * and checks immediately when the tab becomes visible again.
+ *
+ * Called automatically on login. Call manually if you want to
+ * restart with custom options.
+ *
+ * @param {Object} [options] - Configuration
+ * @param {number} [options.intervalMs=60000] - Check interval in milliseconds
+ * @param {boolean} [options.pauseWhenHidden=true] - Pause when tab is hidden
+ * @returns {Function} Stop function to cancel auto-refresh
+ *
+ * @example
+ * // Auto-starts on login, but you can customize:
+ * startAutoRefresh({ intervalMs: 30000 }); // Check every 30s
+ *
+ * // Stop manually if needed:
+ * stopAutoRefresh();
+ */
+export function startAutoRefresh(options = {}) {
+    // Clean up any existing timer
+    stopAutoRefresh();
+
+    const opts = { ...AUTO_REFRESH_DEFAULTS, ...options };
+
+    async function refreshCheck() {
+        try {
+            const tokens = await getTokens();
+            if (!tokens) {
+                stopAutoRefresh();
+                return;
+            }
+
+            if (isTokenExpired(tokens)) {
+                // Token already expired - try to refresh
+                if (!isHandlerMode() && !tokens.refresh_token) {
+                    clearTokens();
+                    notifySessionExpired('Token expired with no refresh token');
+                    stopAutoRefresh();
+                    return;
+                }
+                try {
+                    await refreshTokens();
+                } catch (e) {
+                    console.warn('Auto-refresh failed (token expired):', e.message);
+                    clearTokens();
+                    notifySessionExpired(e.message);
+                    stopAutoRefresh();
+                }
+            } else if (shouldRefreshToken(tokens)) {
+                // Token approaching expiry - proactive refresh
+                try {
+                    await refreshTokens();
+                } catch (e) {
+                    // Proactive refresh failed - not critical yet, will retry
+                    console.warn('Proactive auto-refresh failed:', e.message);
+                }
+            }
+        } catch (e) {
+            // Handler mode: server returned error
+            if (e.message && (e.message.includes('401') || e.message.includes('Session expired'))) {
+                clearTokens();
+                notifySessionExpired(e.message);
+                stopAutoRefresh();
+            }
+        }
+    }
+
+    _autoRefreshTimer = setInterval(refreshCheck, opts.intervalMs);
+
+    // Page visibility handling - pause when hidden, check on return
+    if (opts.pauseWhenHidden && typeof document !== 'undefined') {
+        _visibilityHandler = () => {
+            if (document.visibilityState === 'visible') {
+                // Tab became visible - check immediately
+                refreshCheck();
+            }
+        };
+        document.addEventListener('visibilitychange', _visibilityHandler);
+    }
+
+    return stopAutoRefresh;
+}
+
+/**
+ * Stop automatic background token refresh.
+ */
+export function stopAutoRefresh() {
+    if (_autoRefreshTimer) {
+        clearInterval(_autoRefreshTimer);
+        _autoRefreshTimer = null;
+    }
+    if (_visibilityHandler && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', _visibilityHandler);
+        _visibilityHandler = null;
+    }
+}
+
+/**
+ * Check if auto-refresh is currently running.
+ * @returns {boolean} True if auto-refresh timer is active
+ */
+export function isAutoRefreshActive() {
+    return _autoRefreshTimer !== null;
+}
+
+// Auto-start on login, auto-stop on logout
+loginListeners.add(() => startAutoRefresh());
+logoutListeners.add(() => stopAutoRefresh());
+
+// ==================== SESSION EXPIRY (v0.9.0) ====================
+
+/**
+ * Notify session expired listeners.
+ * @param {string} reason - Why the session expired
+ * @private
+ */
+function notifySessionExpired(reason) {
+    sessionExpiredListeners.forEach(callback => {
+        try {
+            callback(reason);
+        } catch (e) {
+            console.error('Session expired listener error:', e);
+        }
+    });
+}
+
+/**
+ * Subscribe to session expiry events.
+ * Fires when the session cannot be recovered (refresh token expired,
+ * server session destroyed, etc.). Use this to redirect to login.
+ *
+ * @param {Function} callback - Called with (reason: string)
+ * @returns {Function} Unsubscribe function
+ *
+ * @example
+ * onSessionExpired((reason) => {
+ *     alert('Your session has expired. Please log in again.');
+ *     window.location.href = '/login';
+ * });
+ */
+export function onSessionExpired(callback) {
+    sessionExpiredListeners.add(callback);
+    return () => sessionExpiredListeners.delete(callback);
+}
+
+// ==================== FETCH WITH AUTH (v0.9.0) ====================
+
+/**
+ * Make an authenticated fetch request.
+ *
+ * Automatically injects the Bearer token, refreshes if needed,
+ * and handles session expiry. Works in all storage modes.
+ *
+ * @param {string} url - URL to fetch
+ * @param {Object} [options={}] - Standard fetch options
+ * @returns {Promise<Response>} Fetch response
+ * @throws {Error} If not authenticated or session expired
+ *
+ * @example
+ * // Simple GET
+ * const res = await fetchWithAuth('/api/content');
+ * const data = await res.json();
+ *
+ * // POST with body
+ * const res = await fetchWithAuth('/api/content', {
+ *     method: 'POST',
+ *     headers: { 'Content-Type': 'application/json' },
+ *     body: JSON.stringify({ title: 'New Post' })
+ * });
+ *
+ * // Handles 401 automatically
+ * const res = await fetchWithAuth('/api/admin/users');
+ * if (!res.ok) {
+ *     // If 401, tokens have been cleared and onSessionExpired fired
+ *     console.error('Request failed:', res.status);
+ * }
+ */
+export async function fetchWithAuth(url, options = {}) {
+    requireConfig();
+
+    const tokens = await ensureValidTokens();
+    if (!tokens) {
+        throw new Error('Not authenticated. Call login first.');
+    }
+
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            ...options.headers,
+            'Authorization': `Bearer ${tokens.access_token}`
+        }
+    });
+
+    // Handle auth failure - session may have expired server-side
+    if (response.status === 401) {
+        // Try one more refresh
+        try {
+            const freshTokens = await refreshTokens();
+            // Retry the request with fresh tokens
+            return fetch(url, {
+                ...options,
+                headers: {
+                    ...options.headers,
+                    'Authorization': `Bearer ${freshTokens.access_token}`
+                }
+            });
+        } catch (e) {
+            clearTokens();
+            notifySessionExpired('Server returned 401 and refresh failed');
+            throw new Error('Session expired. Please log in again.');
+        }
+    }
+
+    return response;
+}
+
 // ==================== DEFAULT EXPORT ====================
 
 export default {
@@ -2230,5 +2467,11 @@ export default {
     onLogout,
     // Server-side authorization (v0.3.0+)
     requireServerAuthorization,
-    UI_ONLY_hasRole
+    UI_ONLY_hasRole,
+    // Auto-refresh and session management (v0.9.0+)
+    startAutoRefresh,
+    stopAutoRefresh,
+    isAutoRefreshActive,
+    onSessionExpired,
+    fetchWithAuth
 };

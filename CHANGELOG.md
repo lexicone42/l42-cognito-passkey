@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-02-05
+
+### Added
+
+- **Background Token Auto-Refresh**: Automatic token refresh with visibility API integration
+  - `startAutoRefresh(options)`: Start periodic token refresh (default: every 60s)
+  - `stopAutoRefresh()`: Cancel background refresh
+  - `isAutoRefreshActive()`: Check if auto-refresh is running
+  - Auto-starts on login, auto-stops on logout
+  - Pauses when tab is hidden, checks immediately when visible again
+
+- **Session Expiry Handling**: `onSessionExpired(callback)` fires when session can't be recovered
+  - Triggered by: refresh failure, server 401, expired tokens with no refresh token
+  - Use to redirect users to login page
+
+- **Authenticated Fetch Helper**: `fetchWithAuth(url, options)` convenience wrapper
+  - Injects Bearer token automatically
+  - Handles 401 with retry-after-refresh
+  - Fires `onSessionExpired` if retry fails
+
+- **CSRF Protection for Handler Mode**:
+  - Client sends `X-L42-CSRF: 1` header on handler POST requests (refresh, logout)
+  - Express backend enforces header via `requireCsrfHeader` middleware
+  - Defense-in-depth alongside SameSite cookies
+
+- **Integration Guide**: `docs/integration-guide.md` with Claude Code advice
+
+- **35 new tests** for auto-refresh, fetchWithAuth, session expiry, CSRF, and visibility API
+
+### Fixed
+
+- **Handler Mode Sync API**: 12 sync functions now use `getTokensSync()` instead of async `getTokens()`
+  - Affected: `getAuthMethod`, `getIdTokenClaims`, `getUserEmail`, `getUserGroups`, `hasAdminScope`, `isAuthenticated`, `refreshTokens` standard path
+  - Async functions (`listPasskeys`, `registerPasskey`, `deletePasskey`) now properly `await getTokens()`
+
+- **`shouldRefreshToken()` in handler mode**: No longer requires `refresh_token` (stays server-side)
+
+- **`isAdmin()` / `isReadonly()` alias support**: Now check all Cognito group aliases case-insensitively
+  - `isAdmin()`: admin, admins, administrators
+  - `isReadonly()`: readonly, read-only, viewer, viewers (excluding admins)
+
 ## [0.8.0] - 2026-02-01
 
 ### Added

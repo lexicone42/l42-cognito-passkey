@@ -18,10 +18,16 @@ configure({
     redirectUri: '/callback',              // default: origin + '/callback'
     scopes: 'openid email aws.cognito.signin.user.admin',
     tokenKey: 'l42_auth_tokens',          // storage key
-    tokenStorage: 'localStorage',          // 'localStorage' or 'memory' (v0.7.0+)
+    tokenStorage: 'localStorage',          // 'localStorage', 'memory', or 'handler'
     cookieName: 'l42_id_token',           // cookie name
     cookieDomain: '.myapp.com',           // auto-detected if not set
-    allowedDomains: ['myapp.com']         // auto-allows current domain if not set
+    allowedDomains: ['myapp.com'],        // auto-allows current domain if not set
+    // Handler mode (v0.8.0+)
+    tokenEndpoint: '/auth/token',          // GET endpoint returning tokens
+    refreshEndpoint: '/auth/refresh',      // POST endpoint to refresh tokens
+    logoutEndpoint: '/auth/logout',        // POST endpoint to logout
+    oauthCallbackUrl: '/auth/callback',    // Backend OAuth callback URL
+    handlerCacheTtl: 30000                 // Cache TTL in ms (default: 30000)
 });
 ```
 
@@ -63,7 +69,7 @@ Library version string.
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.7.0"
+console.log(VERSION); // "0.9.0"
 ```
 
 ## Authentication State
@@ -482,6 +488,102 @@ const unsubscribe = onAuthStateChange((isAuthenticated) => {
 
 > **Note (v0.5.7+):** This is not called during token refresh, preventing reload loops.
 > For clearer semantics, use `onLogin()` and `onLogout()` instead.
+
+### onSessionExpired(callback) (v0.9.0+)
+
+Subscribe to unrecoverable session expiry events. Fires when refresh fails and the user must re-authenticate.
+
+```javascript
+import { onSessionExpired } from '/auth/auth.js';
+
+const unsubscribe = onSessionExpired((reason) => {
+    alert('Your session has expired. Please log in again.');
+    window.location.href = '/login';
+});
+```
+
+**Parameters:**
+- `callback(reason)` - Called with a string describing why the session expired
+
+**Returns:** `Function` - unsubscribe function
+
+## Auto-Refresh (v0.9.0+)
+
+### startAutoRefresh(options?)
+
+Start automatic background token refresh. Called automatically on login.
+
+```javascript
+import { startAutoRefresh } from '/auth/auth.js';
+
+// Custom options
+startAutoRefresh({
+    intervalMs: 30000,       // Check every 30s (default: 60000)
+    pauseWhenHidden: true    // Pause when tab hidden (default: true)
+});
+```
+
+**Parameters:**
+- `options.intervalMs` - Check interval in milliseconds (default: 60000)
+- `options.pauseWhenHidden` - Pause refresh checks when tab is hidden (default: true)
+
+**Returns:** `Function` - stop function (same as `stopAutoRefresh`)
+
+### stopAutoRefresh()
+
+Stop automatic token refresh. Called automatically on logout.
+
+```javascript
+import { stopAutoRefresh } from '/auth/auth.js';
+
+stopAutoRefresh();
+```
+
+### isAutoRefreshActive()
+
+Check if auto-refresh is currently running.
+
+```javascript
+import { isAutoRefreshActive } from '/auth/auth.js';
+
+console.log(isAutoRefreshActive()); // true or false
+```
+
+**Returns:** `boolean`
+
+## Authenticated Fetch (v0.9.0+)
+
+### fetchWithAuth(url, options?)
+
+Make an authenticated fetch request. Automatically injects Bearer token, handles 401 with retry-after-refresh.
+
+```javascript
+import { fetchWithAuth } from '/auth/auth.js';
+
+// GET
+const res = await fetchWithAuth('/api/data');
+const data = await res.json();
+
+// POST with body
+const res = await fetchWithAuth('/api/data', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'Hello' })
+});
+```
+
+**Parameters:**
+- `url` - URL to fetch
+- `options` - Standard `fetch()` options
+
+**Returns:** `Promise<Response>`
+
+**Throws:** `Error` if not authenticated or session expired after retry
+
+**Behavior on 401:**
+1. Attempts `refreshTokens()`
+2. Retries the request with fresh tokens
+3. If refresh fails: clears tokens, fires `onSessionExpired`, throws
 
 ## JWT Utilities
 

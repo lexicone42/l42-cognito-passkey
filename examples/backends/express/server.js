@@ -170,6 +170,29 @@ function isTokenExpired(token) {
 }
 
 // ============================================================================
+// CSRF Protection
+// ============================================================================
+
+/**
+ * CSRF middleware for state-changing endpoints.
+ *
+ * Requires the custom header X-L42-CSRF: 1 on POST/PUT/DELETE requests.
+ * Cross-origin requests cannot set custom headers without a successful CORS
+ * preflight, so this blocks forged cross-origin form submissions.
+ *
+ * The auth.js client library adds this header automatically in handler mode.
+ */
+function requireCsrfHeader(req, res, next) {
+    if (req.headers['x-l42-csrf'] !== '1') {
+        return res.status(403).json({
+            error: 'CSRF validation failed',
+            message: 'Missing X-L42-CSRF header'
+        });
+    }
+    next();
+}
+
+// ============================================================================
 // Auth Routes
 // ============================================================================
 
@@ -204,7 +227,7 @@ app.get('/auth/token', (req, res) => {
  *
  * Uses the server-side refresh_token to get new tokens from Cognito.
  */
-app.post('/auth/refresh', async (req, res) => {
+app.post('/auth/refresh', requireCsrfHeader, async (req, res) => {
     const tokens = req.session.tokens;
 
     if (!tokens || !tokens.refresh_token) {
@@ -254,7 +277,7 @@ app.post('/auth/refresh', async (req, res) => {
 /**
  * POST /auth/logout - Destroy session
  */
-app.post('/auth/logout', (req, res) => {
+app.post('/auth/logout', requireCsrfHeader, (req, res) => {
     req.session.destroy((err) => {
         if (err) {
             console.error('Session destroy error:', err);
