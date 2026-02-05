@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-02-05
+
+### Removed (BREAKING)
+
+- **`createAuthenticatedWebSocket()`**: Removed WebSocket auth helper — speculative feature with no tests or real-world integrations. If you need authenticated WebSocket connections, inject the access token from `ensureValidTokens()` directly.
+
+- **`getTokensAsync()`**: Removed redundant function — use `await getTokens()` instead, which works in all storage modes (localStorage returns sync, handler returns Promise, `await` handles both).
+
+- **`decodeJwtPayload()` and `parseJwt()` deprecated aliases**: These have been deprecated since v0.4.0. Use `UNSAFE_decodeJwtPayload()` instead.
+
+- **Healthcare, Education, SaaS RBAC roles**: Removed speculative role templates from `rbac-roles.js` (patient, nurse, doctor, student, ta, teacher, freeTier, proTier, enterpriseTier, and related COGNITO_GROUPS entries). Also removed API, Organization, E-commerce, Analytics, and Service roles. Kept: admin, readonly, user, editor, reviewer, publisher, player, dm, moderator, developer.
+
+- **`CONTENTFUL_ROLE_MAPPING` stub**: Removed empty placeholder from `rbac-roles.js`.
+
+- **Healthcare/Education/SaaS site patterns**: Removed from `SITE_PATTERNS`. Kept: staticSite, wasmMultiuser.
+
+- **Speculative docs**: Removed `docs/cedar-integration.md`, `docs/dpop-future.md`, `docs/v1-token-storage-proposal.md` (implemented feature — historical artifact).
+
+### Added
+
+- **Design Decisions guide**: New `docs/design-decisions.md` — 14-section deep-dive into code choices, trade-offs, and common misconfigurations with severity ratings.
+
+### Fixed
+
+- Duplicate JSDoc block on `setTokens()` removed
+- Stale "Future: HandlerTokenStore (v0.8.0)" comment updated
+- Fixed references to deleted docs across README, CLAUDE.md, BACKLOG.md, and design-decisions.md
+
+### Stats
+
+- **1,721 lines removed** — auth.js: 2,705 → 2,519 lines, rbac-roles.js: 824 → 406 lines
+- **379 tests passing** (unchanged — removed code had no test coverage)
+
 ## [0.9.0] - 2026-02-05
 
 ### Added

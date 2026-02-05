@@ -14,6 +14,50 @@ Complete migration guide for l42-cognito-passkey version upgrades.
 | v0.5.7 | v0.6.0 | New `onLogin()` and `onLogout()` event handlers |
 | v0.6.0 | v0.7.0 | Memory mode token storage |
 | v0.7.0 | v0.8.0 | Token Handler mode (server-side token storage) |
+| v0.8.0/v0.9.0 | v0.10.0 | Removed speculative features, trimmed export surface |
+
+---
+
+## v0.9.0 → v0.10.0 (Cleanup)
+
+### Removed Exports
+
+These functions no longer exist. Update your code:
+
+| Removed | Replacement |
+|---------|-------------|
+| `getTokensAsync()` | `await getTokens()` (works in all modes) |
+| `decodeJwtPayload(token)` | `UNSAFE_decodeJwtPayload(token)` |
+| `parseJwt(token)` | `UNSAFE_decodeJwtPayload(token)` |
+| `createAuthenticatedWebSocket()` | Use `ensureValidTokens()` + manual WebSocket setup |
+
+**Search your codebase:**
+```bash
+grep -r "getTokensAsync\|decodeJwtPayload\|parseJwt\|createAuthenticatedWebSocket" src/
+```
+
+### Removed RBAC Roles
+
+If you imported specific roles from `rbac-roles.js`, the following were removed from `STANDARD_ROLES`:
+- Healthcare: `patient`, `nurse`, `doctor`
+- Education: `student`, `ta`, `teacher`
+- SaaS: `freeTier`, `proTier`, `enterpriseTier`
+- API: `apiReader`, `apiWriter`
+- Organization: `teamMember`, `teamLead`, `orgAdmin`
+- E-commerce: `customer`, `vipCustomer`
+- Other: `supportAgent`, `analyst`, `auditor`, `serviceAccount`, `billingAdmin`
+
+**Still available:** `admin`, `readonly`, `user`, `editor`, `reviewer`, `publisher`, `player`, `dm`, `moderator`, `developer`.
+
+Also removed: `CONTENTFUL_ROLE_MAPPING`, `SITE_PATTERNS.healthcare`, `SITE_PATTERNS.education`, `SITE_PATTERNS.saas`.
+
+If you need domain-specific roles, define them in your own project instead of relying on the library's built-in definitions.
+
+### No Action Required If...
+
+- You only use core auth functions (`isAuthenticated`, `getTokens`, `loginWith*`, `logout`)
+- You only use core RBAC checks (`isAdmin`, `isReadonly`, `isInCognitoGroup`)
+- You weren't using WebSocket auth
 
 ---
 
@@ -65,7 +109,6 @@ const tokens = await getTokens();
 
 | Function | Description |
 |----------|-------------|
-| `getTokensAsync()` | Explicitly async version of `getTokens()` |
 | `isAuthenticatedAsync()` | Async auth check (fetches from server if cache stale) |
 
 ### Behavioral Changes

@@ -97,9 +97,6 @@ In handler mode, `getTokens()` returns a Promise:
 ```javascript
 // Works in ALL modes (await is safe on non-Promises)
 const tokens = await getTokens();
-
-// OR use the explicit async version
-const tokens = await getTokensAsync();
 ```
 
 ### Sync `isAuthenticated()`

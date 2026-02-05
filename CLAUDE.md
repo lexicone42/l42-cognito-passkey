@@ -290,17 +290,11 @@ The function now generates a PKCE code challenge before redirecting. Since the r
 - `redirectUri` must use HTTPS (except localhost)
 - `cognitoDomain` format is now validated
 
-### v0.4.0
+### v0.10.0 (Cleanup)
 
-**`decodeJwtPayload()` renamed to `UNSAFE_decodeJwtPayload()`**
+**Removed exports:** `getTokensAsync()`, `decodeJwtPayload()`, `parseJwt()`, `createAuthenticatedWebSocket()`.
 
-```javascript
-// Before (still works, emits deprecation warning)
-const claims = auth.decodeJwtPayload(token);
-
-// After
-const claims = auth.UNSAFE_decodeJwtPayload(token);
-```
+**Trimmed RBAC:** Healthcare, Education, SaaS, E-commerce, API, Org roles removed from `rbac-roles.js`.
 
 See `docs/migration.md` for the complete migration guide covering all versions.
 

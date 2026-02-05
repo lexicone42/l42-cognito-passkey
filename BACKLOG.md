@@ -113,7 +113,12 @@ Benefits:
 
 ## Completed
 
-### v0.9.0 (Current)
+### v0.10.0 (Current)
+- [x] Remove speculative features (WebSocket auth, deprecated aliases, domain RBAC roles)
+- [x] Design decisions documentation (`docs/design-decisions.md`)
+- [x] 1,721 lines removed, 379 tests passing
+
+### v0.9.0
 - [x] Auto-refresh with visibility API integration
 - [x] `fetchWithAuth()` with 401 retry
 - [x] `onSessionExpired()` callback

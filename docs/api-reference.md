@@ -602,11 +602,3 @@ console.log(payload.email, payload.exp);
 ```
 
 **Returns:** `Object`
-
-### decodeJwtPayload(token) [DEPRECATED]
-
-Alias for `UNSAFE_decodeJwtPayload`. Emits deprecation warning. Will be removed in v1.0.
-
-### parseJwt(token) [DEPRECATED]
-
-Alias for `UNSAFE_decodeJwtPayload`. Will be removed in v1.0.
