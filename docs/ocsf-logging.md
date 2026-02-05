@@ -47,7 +47,7 @@ All events follow the OCSF v1.0 base event schema:
     "metadata": {
         "product": {
             "name": "l42-cognito-passkey",
-            "version": "0.9.0",
+            "version": "0.10.0",
             "vendor_name": "L42"
         }
     },
