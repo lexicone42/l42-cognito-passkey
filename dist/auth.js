@@ -684,6 +684,26 @@ export function isConfigured() {
 // ==================== TOKEN MANAGEMENT ====================
 
 /**
+ * Get stored authentication tokens synchronously.
+ *
+ * In handler mode, returns cached tokens (may be null if cache expired).
+ * In localStorage/memory modes, returns tokens directly from store.
+ *
+ * Use this for sync functions that need token data (e.g., getUserEmail,
+ * isAdmin, getIdTokenClaims). For async contexts where you need fresh
+ * tokens from the server in handler mode, use `await getTokens()` instead.
+ *
+ * @returns {Object|null} Tokens object or null
+ * @private
+ */
+function getTokensSync() {
+    if (isHandlerMode()) {
+        return HandlerTokenStore.getCached();
+    }
+    return getTokenStore().get(config.tokenKey);
+}
+
+/**
  * Get stored authentication tokens.
  *
  * In handler mode (v0.8.0+), this returns a Promise.
@@ -773,7 +793,7 @@ export function setTokens(tokens, options = {}) {
  * @returns {string|null} 'password', 'passkey', or null if not authenticated
  */
 export function getAuthMethod() {
-    const tokens = getTokens();
+    const tokens = getTokensSync();
     return tokens ? (tokens.auth_method || 'password') : null;
 }
 
@@ -861,7 +881,10 @@ export function isTokenExpired(tokens) {
  * @returns {boolean} True if should refresh
  */
 export function shouldRefreshToken(tokens) {
-    if (!tokens || !tokens.id_token || !tokens.refresh_token) return false;
+    if (!tokens || !tokens.id_token) return false;
+    // In handler mode, refresh_token is server-side, so don't require it here.
+    // In standard modes, refresh_token must exist to perform a refresh.
+    if (!isHandlerMode() && !tokens.refresh_token) return false;
     try {
         const exp = UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000;
         const authMethod = tokens.auth_method || 'password';
@@ -910,7 +933,7 @@ export async function refreshTokens() {
     }
 
     // Standard mode: call Cognito directly
-    const currentTokens = getTokens();
+    const currentTokens = getTokensSync();
 
     if (!currentTokens || !currentTokens.refresh_token) {
         logSecurityEvent({
@@ -1127,7 +1150,7 @@ export async function isAuthenticatedAsync() {
  * @returns {Object|null} ID token claims or null
  */
 export function getIdTokenClaims() {
-    const tokens = getTokens();
+    const tokens = getTokensSync();
     if (!tokens || !tokens.id_token) return null;
     try {
         return UNSAFE_decodeJwtPayload(tokens.id_token);
@@ -1150,7 +1173,7 @@ export function getUserEmail() {
  * @returns {boolean} True if admin scope present
  */
 export function hasAdminScope() {
-    const tokens = getTokens();
+    const tokens = getTokensSync();
     if (!tokens || !tokens.access_token) return false;
     try {
         const payload = UNSAFE_decodeJwtPayload(tokens.access_token);
@@ -1172,19 +1195,25 @@ export function getUserGroups() {
 
 /**
  * Check if user is in the admin group.
+ * Handles common Cognito group name aliases (admin, admins, administrators).
  * @returns {boolean} True if user has admin role
  */
 export function isAdmin() {
-    return getUserGroups().includes('admin');
+    const groups = getUserGroups().map(g => g.toLowerCase());
+    return groups.includes('admin') || groups.includes('admins') || groups.includes('administrators');
 }
 
 /**
  * Check if user is in readonly group (and NOT admin).
+ * Handles common Cognito group name aliases.
  * @returns {boolean} True if user has readonly-only access
  */
 export function isReadonly() {
-    const groups = getUserGroups();
-    return groups.includes('readonly') && !groups.includes('admin');
+    const groups = getUserGroups().map(g => g.toLowerCase());
+    const hasReadonly = groups.includes('readonly') || groups.includes('read-only') ||
+                        groups.includes('viewer') || groups.includes('viewers');
+    const hasAdmin = groups.includes('admin') || groups.includes('admins') || groups.includes('administrators');
+    return hasReadonly && !hasAdmin;
 }
 
 // ==================== COGNITO API ====================
@@ -1789,7 +1818,7 @@ async function logoutViaHandler(email) {
  * @returns {Promise<Array>} Array of passkey credentials
  */
 export async function listPasskeys() {
-    const tokens = getTokens();
+    const tokens = await getTokens();
     if (!tokens) throw new Error('Not authenticated');
     if (!hasAdminScope()) {
         throw new Error(
@@ -1810,7 +1839,7 @@ export async function listPasskeys() {
  * @returns {Promise<void>}
  */
 export async function registerPasskey() {
-    const tokens = getTokens();
+    const tokens = await getTokens();
     const email = getUserEmail();
 
     if (!tokens) throw new Error('Not authenticated');
@@ -1928,7 +1957,7 @@ export async function registerPasskey() {
  * @returns {Promise<void>}
  */
 export async function deletePasskey(credentialId) {
-    const tokens = getTokens();
+    const tokens = await getTokens();
     const email = getUserEmail();
 
     if (!tokens) throw new Error('Not authenticated');
