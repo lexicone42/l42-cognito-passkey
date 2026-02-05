@@ -168,11 +168,7 @@ const cognitoGroupArb = fc.constantFrom(
     'user', 'users', 'editor', 'editors',
     'publisher', 'publishers', 'reviewer',
     'player', 'dm', 'moderator',
-    'developer', 'analyst', 'auditor',
-    'support', 'billing',
-    'patient', 'nurse', 'doctor',
-    'student', 'teacher', 'ta',
-    'free-tier', 'pro-tier', 'enterprise-tier'
+    'developer', 'developers'
 );
 
 /** Arbitrary for user group arrays */

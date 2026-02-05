@@ -95,7 +95,6 @@ See `docs/integration-feedback.md` for:
 ### AWS Cedar Integration
 **Status**: Design complete, implementation post-1.0
 **Description**: Externalized authorization via Amazon Verified Permissions.
-**Design Doc**: `docs/cedar-integration.md`
 
 Benefits:
 - Formal policy verification
@@ -121,10 +120,8 @@ Benefits:
 - [x] CSRF protection for handler mode (X-L42-CSRF header)
 - [x] WebAuthn feature detection (`isPasskeySupported`, `getPasskeyCapabilities`)
 - [x] `isPasskeySupported()` checks `window.isSecureContext`
-- [x] WebSocket auth helper (`createAuthenticatedWebSocket`)
-- [x] WSS enforcement warning for non-localhost
-- [x] WebSocket default auth mode changed to `message` (security)
-- [x] Healthcare, Education, SaaS RBAC role templates
+- [x] ~~WebSocket auth helper~~ (removed in cleanup — speculative, untested)
+- [x] ~~Healthcare, Education, SaaS RBAC role templates~~ (removed — speculative)
 - [x] 31 auth property-based tests (token expiry, cookie domain, mutual exclusion)
 - [x] Sharp-edges security analysis (18 findings documented)
 - [x] 379 total tests

@@ -30,23 +30,7 @@ export const COGNITO_GROUPS = {
     PLAYER: { canonical: 'players', aliases: ['player', 'players'] },
     DM: { canonical: 'dms', aliases: ['dm', 'dms', 'dungeon-master', 'game-master', 'gm'] },
     MODERATOR: { canonical: 'moderators', aliases: ['moderator', 'moderators', 'mod', 'mods'] },
-    DEVELOPER: { canonical: 'developers', aliases: ['developer', 'developers', 'dev', 'devs'] },
-    ANALYST: { canonical: 'analysts', aliases: ['analyst', 'analysts'] },
-    AUDITOR: { canonical: 'auditors', aliases: ['auditor', 'auditors'] },
-    SUPPORT: { canonical: 'support-agents', aliases: ['support', 'support-agent', 'support-agents'] },
-    BILLING: { canonical: 'billing-admins', aliases: ['billing', 'billing-admin', 'billing-admins'] },
-    // Healthcare
-    PATIENT: { canonical: 'patients', aliases: ['patient', 'patients'] },
-    NURSE: { canonical: 'nurses', aliases: ['nurse', 'nurses'] },
-    DOCTOR: { canonical: 'doctors', aliases: ['doctor', 'doctors', 'physician', 'physicians'] },
-    // Education
-    STUDENT: { canonical: 'students', aliases: ['student', 'students'] },
-    TA: { canonical: 'teaching-assistants', aliases: ['ta', 'tas', 'teaching-assistant', 'teaching-assistants'] },
-    TEACHER: { canonical: 'teachers', aliases: ['teacher', 'teachers', 'instructor', 'instructors'] },
-    // SaaS tiers
-    FREE_TIER: { canonical: 'free-tier', aliases: ['free', 'free-tier'] },
-    PRO_TIER: { canonical: 'pro-tier', aliases: ['pro', 'pro-tier', 'premium'] },
-    ENTERPRISE_TIER: { canonical: 'enterprise-tier', aliases: ['enterprise', 'enterprise-tier'] }
+    DEVELOPER: { canonical: 'developers', aliases: ['developer', 'developers', 'dev', 'devs'] }
 };
 
 /**
@@ -231,34 +215,8 @@ export const STANDARD_ROLES = {
     },
 
     // -------------------------------------------------------------------------
-    // API & Developer Roles
+    // Developer Role
     // -------------------------------------------------------------------------
-
-    /**
-     * API Consumer - Read-only API access
-     */
-    apiReader: {
-        name: 'api_reader',
-        displayName: 'API Reader',
-        description: 'Read-only API access for integrations',
-        level: 15,
-        permissions: ['api:read'],
-        cognitoGroup: 'api-readers',
-        pattern: 'api'
-    },
-
-    /**
-     * API Writer - Full API access
-     */
-    apiWriter: {
-        name: 'api_writer',
-        displayName: 'API Writer',
-        description: 'Full API access for integrations',
-        level: 35,
-        permissions: ['api:read', 'api:write'],
-        cognitoGroup: 'api-writers',
-        pattern: 'api'
-    },
 
     /**
      * Developer - Access to dev tools and APIs
@@ -271,284 +229,6 @@ export const STANDARD_ROLES = {
         permissions: ['api:*', 'read:logs', 'read:metrics', 'debug:*'],
         cognitoGroup: 'developers',
         pattern: 'api'
-    },
-
-    // -------------------------------------------------------------------------
-    // Organization & Team Roles
-    // -------------------------------------------------------------------------
-
-    /**
-     * Team Member - Basic team access
-     */
-    teamMember: {
-        name: 'team_member',
-        displayName: 'Team Member',
-        description: 'Basic team member with project access',
-        level: 25,
-        permissions: ['read:team', 'write:team-content'],
-        cognitoGroup: 'team-members',
-        pattern: 'organization'
-    },
-
-    /**
-     * Team Lead - Team management
-     */
-    teamLead: {
-        name: 'team_lead',
-        displayName: 'Team Lead',
-        description: 'Manage team members and team settings',
-        level: 55,
-        permissions: ['read:team', 'write:team', 'manage:team-members'],
-        cognitoGroup: 'team-leads',
-        pattern: 'organization'
-    },
-
-    /**
-     * Organization Admin - Org-level administration
-     */
-    orgAdmin: {
-        name: 'org_admin',
-        displayName: 'Organization Admin',
-        description: 'Manage organization settings and teams',
-        level: 80,
-        permissions: ['read:org', 'write:org', 'manage:teams', 'manage:billing'],
-        cognitoGroup: 'org-admins',
-        pattern: 'organization'
-    },
-
-    // -------------------------------------------------------------------------
-    // E-commerce & Customer Roles
-    // -------------------------------------------------------------------------
-
-    /**
-     * Customer - Standard customer account
-     */
-    customer: {
-        name: 'customer',
-        displayName: 'Customer',
-        description: 'Standard customer with order history access',
-        level: 20,
-        permissions: ['read:own-orders', 'write:own-profile', 'read:products'],
-        cognitoGroup: 'customers',
-        pattern: 'ecommerce'
-    },
-
-    /**
-     * VIP Customer - Premium customer access
-     */
-    vipCustomer: {
-        name: 'vip_customer',
-        displayName: 'VIP Customer',
-        description: 'Premium customer with early access and discounts',
-        level: 25,
-        permissions: ['read:own-orders', 'write:own-profile', 'read:products', 'access:vip'],
-        cognitoGroup: 'vip-customers',
-        pattern: 'ecommerce'
-    },
-
-    /**
-     * Support Agent - Customer support access
-     */
-    supportAgent: {
-        name: 'support_agent',
-        displayName: 'Support Agent',
-        description: 'Handle customer support tickets and inquiries',
-        level: 40,
-        permissions: ['read:tickets', 'write:tickets', 'read:customers', 'read:orders'],
-        cognitoGroup: 'support-agents',
-        pattern: 'support'
-    },
-
-    // -------------------------------------------------------------------------
-    // Analytics & Reporting Roles
-    // -------------------------------------------------------------------------
-
-    /**
-     * Analyst - Read access to analytics and reports
-     */
-    analyst: {
-        name: 'analyst',
-        displayName: 'Analyst',
-        description: 'Access to analytics dashboards and reports',
-        level: 30,
-        permissions: ['read:analytics', 'read:reports', 'export:reports'],
-        cognitoGroup: 'analysts',
-        pattern: 'analytics'
-    },
-
-    /**
-     * Auditor - Compliance and audit access
-     */
-    auditor: {
-        name: 'auditor',
-        displayName: 'Auditor',
-        description: 'Audit logs, compliance reports, and security data',
-        level: 65,
-        permissions: ['read:audit-logs', 'read:compliance', 'read:security', 'export:audit'],
-        cognitoGroup: 'auditors',
-        pattern: 'compliance'
-    },
-
-    // -------------------------------------------------------------------------
-    // Service & System Roles
-    // -------------------------------------------------------------------------
-
-    /**
-     * Service Account - Automated system access
-     */
-    serviceAccount: {
-        name: 'service_account',
-        displayName: 'Service Account',
-        description: 'Automated service with specific API access',
-        level: 50,
-        permissions: ['api:service'],
-        cognitoGroup: 'service-accounts',
-        pattern: 'system',
-        isServiceAccount: true
-    },
-
-    /**
-     * Billing Admin - Billing and subscription management
-     */
-    billingAdmin: {
-        name: 'billing_admin',
-        displayName: 'Billing Admin',
-        description: 'Manage billing, subscriptions, and invoices',
-        level: 60,
-        permissions: ['read:billing', 'write:billing', 'manage:subscriptions'],
-        cognitoGroup: 'billing-admins',
-        pattern: 'billing'
-    },
-
-    // -------------------------------------------------------------------------
-    // Healthcare Roles (HIPAA considerations apply)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Patient - View own health records
-     * NOTE: HIPAA requires audit logging for all PHI access.
-     * Use requireServerAuthorization() for all PHI operations.
-     */
-    patient: {
-        name: 'patient',
-        displayName: 'Patient',
-        description: 'View own health records and appointments',
-        level: 15,
-        permissions: ['read:own-records', 'write:own-profile', 'read:own-appointments'],
-        cognitoGroup: 'patients',
-        pattern: 'healthcare'
-    },
-
-    /**
-     * Nurse - Clinical care access
-     */
-    nurse: {
-        name: 'nurse',
-        displayName: 'Nurse',
-        description: 'Access assigned patient records, administer care',
-        level: 40,
-        permissions: ['read:patient-records', 'write:clinical-notes', 'read:medications', 'write:vitals'],
-        cognitoGroup: 'nurses',
-        pattern: 'healthcare'
-    },
-
-    /**
-     * Doctor - Full clinical access
-     */
-    doctor: {
-        name: 'doctor',
-        displayName: 'Doctor',
-        description: 'Full clinical access, prescribe medications, order tests',
-        level: 70,
-        permissions: ['read:patient-records', 'write:patient-records', 'write:prescriptions', 'order:tests', 'read:lab-results'],
-        cognitoGroup: 'doctors',
-        pattern: 'healthcare'
-    },
-
-    // -------------------------------------------------------------------------
-    // Education Roles (Course-based permissions)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Student - Course participant
-     */
-    student: {
-        name: 'student',
-        displayName: 'Student',
-        description: 'Access enrolled courses, submit assignments',
-        level: 15,
-        permissions: ['read:own-courses', 'write:own-assignments', 'read:course-materials', 'read:own-grades'],
-        cognitoGroup: 'students',
-        pattern: 'education'
-    },
-
-    /**
-     * Teaching Assistant - Grading and support
-     */
-    ta: {
-        name: 'ta',
-        displayName: 'Teaching Assistant',
-        description: 'Grade assignments, assist students, manage course materials',
-        level: 35,
-        permissions: ['read:course-roster', 'write:grades', 'read:submissions', 'write:feedback', 'manage:course-materials'],
-        cognitoGroup: 'teaching-assistants',
-        pattern: 'education'
-    },
-
-    /**
-     * Teacher - Full course control
-     */
-    teacher: {
-        name: 'teacher',
-        displayName: 'Teacher',
-        description: 'Create and manage courses, grade, manage students',
-        level: 60,
-        permissions: ['read:course-roster', 'write:grades', 'write:courses', 'manage:course-materials', 'manage:enrollments', 'read:analytics'],
-        cognitoGroup: 'teachers',
-        pattern: 'education'
-    },
-
-    // -------------------------------------------------------------------------
-    // SaaS Multi-Tier Roles (Feature gating)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Free Tier - Basic feature access
-     */
-    freeTier: {
-        name: 'free_tier',
-        displayName: 'Free',
-        description: 'Basic feature access with usage limits',
-        level: 10,
-        permissions: ['read:own', 'write:own', 'access:free-features'],
-        cognitoGroup: 'free-tier',
-        pattern: 'saas'
-    },
-
-    /**
-     * Pro Tier - Premium features
-     */
-    proTier: {
-        name: 'pro_tier',
-        displayName: 'Pro',
-        description: 'Premium features with higher limits',
-        level: 30,
-        permissions: ['read:own', 'write:own', 'access:free-features', 'access:pro-features', 'api:read', 'export:data'],
-        cognitoGroup: 'pro-tier',
-        pattern: 'saas'
-    },
-
-    /**
-     * Enterprise Tier - Full platform access
-     */
-    enterpriseTier: {
-        name: 'enterprise_tier',
-        displayName: 'Enterprise',
-        description: 'Full platform access, SSO, audit logs, dedicated support',
-        level: 50,
-        permissions: ['read:own', 'write:own', 'access:free-features', 'access:pro-features', 'access:enterprise-features', 'api:*', 'export:data', 'read:audit-logs', 'manage:team'],
-        cognitoGroup: 'enterprise-tier',
-        pattern: 'saas'
     }
 };
 
@@ -584,8 +264,7 @@ export const SITE_PATTERNS = {
         features: {
             staticGeneration: true,
             cdnCaching: true,
-            incrementalBuilds: true,
-            contentfulIntegration: 'backlog'  // Future integration
+            incrementalBuilds: true
         }
     },
 
@@ -622,83 +301,8 @@ export const SITE_PATTERNS = {
         }
     },
 
-    /**
-     * Healthcare Pattern
-     *
-     * HIPAA considerations:
-     * - All PHI access MUST be validated server-side (requireServerAuthorization)
-     * - Audit logging required for every record access
-     * - Session timeouts should be shorter (15-30 min idle)
-     * - Break-the-glass emergency access pattern recommended
-     */
-    healthcare: {
-        name: 'healthcare',
-        displayName: 'Healthcare / HIPAA',
-        description: 'Healthcare application with PHI access controls',
-        roles: ['patient', 'nurse', 'doctor', 'admin'],
-        routes: {
-            public: ['/', '/about'],
-            patient: ['/portal', '/portal/*'],
-            clinical: ['/clinical', '/clinical/*'],
-            admin: ['/admin', '/admin/*']
-        },
-        features: {
-            auditLogging: true,
-            sessionTimeout: 1800000, // 30 minutes
-            phiProtection: true,
-            breakTheGlass: 'recommended'
-        }
-    },
-
-    /**
-     * Education Pattern
-     *
-     * Course-based access: permissions scoped to enrolled courses.
-     */
-    education: {
-        name: 'education',
-        displayName: 'Education / LMS',
-        description: 'Learning management system with course-based access',
-        roles: ['student', 'ta', 'teacher', 'admin'],
-        routes: {
-            public: ['/', '/catalog'],
-            student: ['/courses', '/courses/*', '/assignments/*'],
-            instructor: ['/teach', '/teach/*', '/grades/*'],
-            admin: ['/admin', '/admin/*']
-        },
-        features: {
-            courseScoping: true,
-            gradeProtection: true,
-            enrollmentManagement: true
-        }
-    },
-
-    /**
-     * SaaS Multi-Tier Pattern
-     *
-     * Feature gating by subscription tier.
-     * Use hasPermission() to check 'access:pro-features' etc.
-     */
-    saas: {
-        name: 'saas',
-        displayName: 'SaaS Multi-Tier',
-        description: 'Subscription-based application with tier-gated features',
-        roles: ['freeTier', 'proTier', 'enterpriseTier', 'admin'],
-        routes: {
-            public: ['/', '/pricing'],
-            app: ['/app', '/app/*'],
-            enterprise: ['/enterprise', '/enterprise/*'],
-            admin: ['/admin', '/admin/*']
-        },
-        features: {
-            featureGating: true,
-            usageLimits: true,
-            teamManagement: 'enterprise',
-            sso: 'enterprise',
-            auditLogs: 'enterprise'
-        }
-    }
 };
+
 
 // =============================================================================
 // PERMISSION HELPERS
@@ -780,25 +384,6 @@ export function getCognitoGroupConfig(roles = Object.keys({ ...CORE_ROLES, ...ST
 }
 
 // =============================================================================
-// CONTENTFUL INTEGRATION (BACKLOG)
-// =============================================================================
-
-/**
- * Contentful role mapping - BACKLOG
- * Maps l42 roles to Contentful space roles
- *
- * TODO: Implement when Contentful integration is prioritized
- */
-export const CONTENTFUL_ROLE_MAPPING = {
-    // editor: 'Editor',
-    // reviewer: 'Content Reviewer',
-    // publisher: 'Publisher',
-    // admin: 'Admin'
-    _status: 'backlog',
-    _note: 'Contentful integration planned for future release'
-};
-
-// =============================================================================
 // EXPORTS
 // =============================================================================
 
@@ -817,7 +402,5 @@ export default {
     getRolesForPattern,
     getRoleHierarchy,
     canManageRole,
-    getCognitoGroupConfig,
-    // Future integrations
-    CONTENTFUL_ROLE_MAPPING
+    getCognitoGroupConfig
 };

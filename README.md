@@ -97,9 +97,8 @@ onAuthStateChange(callback)
 | [API Reference](docs/api-reference.md) | Complete function documentation |
 | [Migration Guide](docs/migration.md) | Upgrading between versions |
 | [Accessibility](docs/accessibility.md) | ARIA patterns, keyboard navigation, screen readers |
+| [Design Decisions](docs/design-decisions.md) | Code choices, trade-offs, and common misconfigurations |
 | [Security Hardening](docs/security-hardening.md) | CSP, BFF pattern, token lifecycle, threat models |
-| [Token Storage Proposal](docs/v1-token-storage-proposal.md) | v0.9 Token Handler roadmap |
-| [DPoP Future](docs/dpop-future.md) | v1.0 DPoP integration plan |
 | [OCSF Logging](docs/ocsf-logging.md) | AWS Security Lake / SIEM integration |
 | [Claude Workflow](docs/claude-workflow.md) | Claude-to-Claude collaboration via GitHub |
 | [Releasing](docs/RELEASING.md) | Release process for maintainers |

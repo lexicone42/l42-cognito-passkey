@@ -49,8 +49,7 @@ const DEFAULT_CONFIG = {
 
 /**
  * Token store interface - abstracts where tokens are stored.
- * Implementations: LocalStorageTokenStore, MemoryTokenStore
- * Future: HandlerTokenStore (v0.8.0)
+ * Implementations: LocalStorageTokenStore, MemoryTokenStore, HandlerTokenStore
  */
 
 /**
@@ -718,38 +717,6 @@ export function getTokens() {
 }
 
 /**
- * Get tokens asynchronously (works in all modes).
- * Prefer this over getTokens() when you need consistent async behavior.
- *
- * @returns {Promise<Object|null>} Tokens object or null
- */
-export async function getTokensAsync() {
-    return getTokenStore().get(config.tokenKey);
-}
-
-/**
- * Store authentication tokens.
- * Also sets a cookie for server-side validation (e.g., Lambda@Edge).
- * Cookie lifetime varies by auth method: 1 day for password, 30 days for passkey.
- *
- * SECURITY NOTE: Cookie is NOT HttpOnly
- * -----------------------------------
- * The cookie is set via document.cookie (client-side), which cannot set HttpOnly.
- * HttpOnly cookies can only be set via server-side Set-Cookie headers.
- *
- * Mitigations in place:
- * - Secure flag: Cookie only sent over HTTPS
- * - SameSite=Lax: CSRF protection
- * - Short-lived tokens: ID tokens expire quickly (Cognito default: 1 hour)
- * - Domain validation: Cookie domain restricted to current site
- *
- * For maximum security, consider:
- * - Using server-side session management with HttpOnly cookies
- * - Implementing a BFF (Backend for Frontend) pattern
- *
- * @param {Object} tokens - Tokens to store (should include auth_method)
- */
-/**
  * Store tokens in localStorage and set cookie for server-side validation.
  *
  * In handler mode, this only updates the local cache - the server
@@ -840,26 +807,6 @@ export function UNSAFE_decodeJwtPayload(token) {
     const base64Url = token.split('.')[1];
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
     return JSON.parse(atob(base64));
-}
-
-/**
- * @deprecated Use UNSAFE_decodeJwtPayload() instead. This alias will be removed in v1.0.
- * @param {string} token - JWT token string
- * @returns {Object} Decoded payload (UNVERIFIED)
- */
-export function decodeJwtPayload(token) {
-    console.warn('decodeJwtPayload() is deprecated. Use UNSAFE_decodeJwtPayload() to acknowledge the security implications.');
-    return UNSAFE_decodeJwtPayload(token);
-}
-
-/**
- * @deprecated Use UNSAFE_decodeJwtPayload() instead. This alias will be removed in v1.0.
- * @param {string} token - JWT token string
- * @returns {Object} Decoded payload (UNVERIFIED)
- */
-export function parseJwt(token) {
-    console.warn('parseJwt() is deprecated. Use UNSAFE_decodeJwtPayload() instead.');
-    return UNSAFE_decodeJwtPayload(token);
 }
 
 /**
@@ -2520,130 +2467,6 @@ export async function fetchWithAuth(url, options = {}) {
     return response;
 }
 
-// ==================== WEBSOCKET AUTH (v0.9.0) ====================
-
-/**
- * Create an authenticated WebSocket connection.
- *
- * Injects the current access token as a query parameter or via a first-message
- * auth handshake. Automatically reconnects with a fresh token when the
- * connection is closed with an auth error (4401/4403).
- *
- * Designed for the Multi-User WASM pattern where real-time connections
- * need authenticated sessions.
- *
- * @param {string} url - WebSocket URL (ws:// or wss://)
- * @param {Object} [options={}] - Configuration
- * @param {string} [options.authMode='query'] - How to send the token:
- *   'query' = append ?token=xxx to URL (simple, works with most WS servers)
- *   'message' = send {type:'auth', token:xxx} as first message after connect
- * @param {boolean} [options.autoReconnect=true] - Reconnect on auth errors
- * @param {number} [options.maxReconnectAttempts=3] - Max reconnect attempts
- * @param {number} [options.reconnectDelayMs=1000] - Delay between reconnects
- * @param {string[]} [options.protocols] - WebSocket sub-protocols
- * @returns {Promise<WebSocket>} Connected and authenticated WebSocket
- * @throws {Error} If not authenticated or connection fails
- *
- * @example
- * const ws = await createAuthenticatedWebSocket('wss://game.example.com/session/123');
- *
- * ws.onmessage = (event) => {
- *     const data = JSON.parse(event.data);
- *     handleGameUpdate(data);
- * };
- *
- * ws.onclose = (event) => {
- *     if (event.code === 4401) {
- *         // Session expired — auto-reconnect will handle this
- *     }
- * };
- */
-export async function createAuthenticatedWebSocket(url, options = {}) {
-    requireConfig();
-
-    // WSS enforcement: warn on insecure WebSocket in non-localhost environments
-    try {
-        const wsUrl = new URL(url, window.location.origin);
-        const isLocalhost = wsUrl.hostname === 'localhost' || wsUrl.hostname === '127.0.0.1';
-        if (!isLocalhost && wsUrl.protocol === 'ws:') {
-            console.warn(
-                'L42 Auth: WebSocket URL uses ws:// (unencrypted). ' +
-                'Tokens sent over unencrypted connections can be intercepted. ' +
-                'Use wss:// in production.'
-            );
-        }
-    } catch {
-        // URL parsing failed — will fail at WebSocket construction anyway
-    }
-
-    const {
-        authMode = 'message',
-        autoReconnect = true,
-        maxReconnectAttempts = 3,
-        reconnectDelayMs = 1000,
-        protocols
-    } = options;
-
-    let attempts = 0;
-
-    async function connect() {
-        const tokens = await ensureValidTokens();
-        if (!tokens) {
-            throw new Error('Not authenticated. Call login first.');
-        }
-
-        let wsUrl = url;
-        if (authMode === 'query') {
-            const separator = url.includes('?') ? '&' : '?';
-            wsUrl = `${url}${separator}token=${encodeURIComponent(tokens.access_token)}`;
-        }
-
-        return new Promise((resolve, reject) => {
-            const ws = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
-
-            ws.onopen = () => {
-                attempts = 0; // Reset on successful connect
-
-                if (authMode === 'message') {
-                    ws.send(JSON.stringify({
-                        type: 'auth',
-                        token: tokens.access_token
-                    }));
-                }
-
-                resolve(ws);
-            };
-
-            ws.onerror = (event) => {
-                reject(new Error('WebSocket connection failed'));
-            };
-
-            // Handle auth-related close codes with auto-reconnect
-            const originalOnclose = ws.onclose;
-            ws.onclose = async (event) => {
-                // 4401/4403 = auth errors (common convention for WS servers)
-                if (autoReconnect && (event.code === 4401 || event.code === 4403) && attempts < maxReconnectAttempts) {
-                    attempts++;
-                    try {
-                        await refreshTokens();
-                        await new Promise(r => setTimeout(r, reconnectDelayMs));
-                        const newWs = await connect();
-                        // Copy event handlers to new socket
-                        newWs.onmessage = ws.onmessage;
-                        newWs.onclose = ws.onclose;
-                        newWs.onerror = ws.onerror;
-                    } catch (e) {
-                        notifySessionExpired('WebSocket auth failed after reconnect attempt');
-                    }
-                }
-                if (originalOnclose) originalOnclose.call(ws, event);
-            };
-        });
-    }
-
-    return connect();
-}
-
 // ==================== DEFAULT EXPORT ====================
 
 export default {
@@ -2651,12 +2474,9 @@ export default {
     configure,
     isConfigured,
     getTokens,
-    getTokensAsync,
     setTokens,
     clearTokens,
     UNSAFE_decodeJwtPayload,
-    decodeJwtPayload,  // deprecated alias
-    parseJwt,          // deprecated alias
     isTokenExpired,
     shouldRefreshToken,
     refreshTokens,
@@ -2695,7 +2515,5 @@ export default {
     isPasskeySupported,
     isConditionalMediationAvailable,
     isPlatformAuthenticatorAvailable,
-    getPasskeyCapabilities,
-    // WebSocket auth (v0.9.0+)
-    createAuthenticatedWebSocket
+    getPasskeyCapabilities
 };

@@ -306,7 +306,7 @@ See `docs/migration.md` for the complete migration guide covering all versions.
 
 ## Future Plans
 
-- **AWS Cedar Integration** - See `docs/cedar-integration.md`
+- **AWS Cedar Integration** - Externalized authorization via Amazon Verified Permissions (post-1.0)
 - **Semgrep Rules** - Security scanning (post-1.0)
 
 ## Submitting Feedback
