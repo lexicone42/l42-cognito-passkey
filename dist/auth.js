@@ -1812,6 +1812,99 @@ async function logoutViaHandler(email) {
     }
 }
 
+// ==================== WEBAUTHN FEATURE DETECTION (v0.9.0) ====================
+
+/**
+ * Check if WebAuthn/passkeys are supported by the current browser.
+ * Returns false in non-secure contexts (HTTP except localhost).
+ *
+ * @returns {boolean} True if WebAuthn is available
+ *
+ * @example
+ * if (isPasskeySupported()) {
+ *     showPasskeyLoginButton();
+ * } else {
+ *     hidePasskeyLoginButton();
+ * }
+ */
+export function isPasskeySupported() {
+    return typeof window !== 'undefined' &&
+        window.isSecureContext === true &&
+        typeof window.PublicKeyCredential !== 'undefined' &&
+        typeof navigator.credentials !== 'undefined';
+}
+
+/**
+ * Check if the browser supports conditional mediation (passkey autofill).
+ * When available, passkey login can be triggered from the browser's autofill
+ * suggestion, providing a seamless login experience without a dedicated button.
+ *
+ * @returns {Promise<boolean>} True if conditional mediation is available
+ *
+ * @example
+ * if (await isConditionalMediationAvailable()) {
+ *     // Set up passkey autofill on the username field
+ *     document.getElementById('email').autocomplete = 'username webauthn';
+ * }
+ */
+export async function isConditionalMediationAvailable() {
+    if (!isPasskeySupported()) return false;
+    try {
+        if (typeof PublicKeyCredential.isConditionalMediationAvailable === 'function') {
+            return await PublicKeyCredential.isConditionalMediationAvailable();
+        }
+    } catch {
+        // Ignore errors — feature not supported
+    }
+    return false;
+}
+
+/**
+ * Check if a platform authenticator (Touch ID, Face ID, Windows Hello) is available.
+ * Cross-platform authenticators (security keys, phones) don't require this.
+ *
+ * @returns {Promise<boolean>} True if platform authenticator exists
+ *
+ * @example
+ * const hasPlatform = await isPlatformAuthenticatorAvailable();
+ * if (hasPlatform) {
+ *     promptText.textContent = 'Use Touch ID / Face ID to sign in';
+ * } else {
+ *     promptText.textContent = 'Use your security key to sign in';
+ * }
+ */
+export async function isPlatformAuthenticatorAvailable() {
+    if (!isPasskeySupported()) return false;
+    try {
+        if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
+            return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+        }
+    } catch {
+        // Ignore errors — feature not supported
+    }
+    return false;
+}
+
+/**
+ * Get a summary of WebAuthn capabilities for the current environment.
+ * Useful for debugging integration issues and adapting UI.
+ *
+ * @returns {Promise<Object>} Capabilities report
+ *
+ * @example
+ * const caps = await getPasskeyCapabilities();
+ * // { supported: true, conditionalMediation: true, platformAuthenticator: true, secureContext: true }
+ */
+export async function getPasskeyCapabilities() {
+    const supported = isPasskeySupported();
+    return {
+        supported,
+        conditionalMediation: supported ? await isConditionalMediationAvailable() : false,
+        platformAuthenticator: supported ? await isPlatformAuthenticatorAvailable() : false,
+        secureContext: typeof window !== 'undefined' ? window.isSecureContext === true : false
+    };
+}
+
 // ==================== PASSKEY MANAGEMENT ====================
 
 /**
@@ -2427,6 +2520,130 @@ export async function fetchWithAuth(url, options = {}) {
     return response;
 }
 
+// ==================== WEBSOCKET AUTH (v0.9.0) ====================
+
+/**
+ * Create an authenticated WebSocket connection.
+ *
+ * Injects the current access token as a query parameter or via a first-message
+ * auth handshake. Automatically reconnects with a fresh token when the
+ * connection is closed with an auth error (4401/4403).
+ *
+ * Designed for the Multi-User WASM pattern where real-time connections
+ * need authenticated sessions.
+ *
+ * @param {string} url - WebSocket URL (ws:// or wss://)
+ * @param {Object} [options={}] - Configuration
+ * @param {string} [options.authMode='query'] - How to send the token:
+ *   'query' = append ?token=xxx to URL (simple, works with most WS servers)
+ *   'message' = send {type:'auth', token:xxx} as first message after connect
+ * @param {boolean} [options.autoReconnect=true] - Reconnect on auth errors
+ * @param {number} [options.maxReconnectAttempts=3] - Max reconnect attempts
+ * @param {number} [options.reconnectDelayMs=1000] - Delay between reconnects
+ * @param {string[]} [options.protocols] - WebSocket sub-protocols
+ * @returns {Promise<WebSocket>} Connected and authenticated WebSocket
+ * @throws {Error} If not authenticated or connection fails
+ *
+ * @example
+ * const ws = await createAuthenticatedWebSocket('wss://game.example.com/session/123');
+ *
+ * ws.onmessage = (event) => {
+ *     const data = JSON.parse(event.data);
+ *     handleGameUpdate(data);
+ * };
+ *
+ * ws.onclose = (event) => {
+ *     if (event.code === 4401) {
+ *         // Session expired — auto-reconnect will handle this
+ *     }
+ * };
+ */
+export async function createAuthenticatedWebSocket(url, options = {}) {
+    requireConfig();
+
+    // WSS enforcement: warn on insecure WebSocket in non-localhost environments
+    try {
+        const wsUrl = new URL(url, window.location.origin);
+        const isLocalhost = wsUrl.hostname === 'localhost' || wsUrl.hostname === '127.0.0.1';
+        if (!isLocalhost && wsUrl.protocol === 'ws:') {
+            console.warn(
+                'L42 Auth: WebSocket URL uses ws:// (unencrypted). ' +
+                'Tokens sent over unencrypted connections can be intercepted. ' +
+                'Use wss:// in production.'
+            );
+        }
+    } catch {
+        // URL parsing failed — will fail at WebSocket construction anyway
+    }
+
+    const {
+        authMode = 'message',
+        autoReconnect = true,
+        maxReconnectAttempts = 3,
+        reconnectDelayMs = 1000,
+        protocols
+    } = options;
+
+    let attempts = 0;
+
+    async function connect() {
+        const tokens = await ensureValidTokens();
+        if (!tokens) {
+            throw new Error('Not authenticated. Call login first.');
+        }
+
+        let wsUrl = url;
+        if (authMode === 'query') {
+            const separator = url.includes('?') ? '&' : '?';
+            wsUrl = `${url}${separator}token=${encodeURIComponent(tokens.access_token)}`;
+        }
+
+        return new Promise((resolve, reject) => {
+            const ws = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                attempts = 0; // Reset on successful connect
+
+                if (authMode === 'message') {
+                    ws.send(JSON.stringify({
+                        type: 'auth',
+                        token: tokens.access_token
+                    }));
+                }
+
+                resolve(ws);
+            };
+
+            ws.onerror = (event) => {
+                reject(new Error('WebSocket connection failed'));
+            };
+
+            // Handle auth-related close codes with auto-reconnect
+            const originalOnclose = ws.onclose;
+            ws.onclose = async (event) => {
+                // 4401/4403 = auth errors (common convention for WS servers)
+                if (autoReconnect && (event.code === 4401 || event.code === 4403) && attempts < maxReconnectAttempts) {
+                    attempts++;
+                    try {
+                        await refreshTokens();
+                        await new Promise(r => setTimeout(r, reconnectDelayMs));
+                        const newWs = await connect();
+                        // Copy event handlers to new socket
+                        newWs.onmessage = ws.onmessage;
+                        newWs.onclose = ws.onclose;
+                        newWs.onerror = ws.onerror;
+                    } catch (e) {
+                        notifySessionExpired('WebSocket auth failed after reconnect attempt');
+                    }
+                }
+                if (originalOnclose) originalOnclose.call(ws, event);
+            };
+        });
+    }
+
+    return connect();
+}
+
 // ==================== DEFAULT EXPORT ====================
 
 export default {
@@ -2473,5 +2690,12 @@ export default {
     stopAutoRefresh,
     isAutoRefreshActive,
     onSessionExpired,
-    fetchWithAuth
+    fetchWithAuth,
+    // WebAuthn feature detection (v0.9.0+)
+    isPasskeySupported,
+    isConditionalMediationAvailable,
+    isPlatformAuthenticatorAvailable,
+    getPasskeyCapabilities,
+    // WebSocket auth (v0.9.0+)
+    createAuthenticatedWebSocket
 };

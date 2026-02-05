@@ -34,7 +34,19 @@ export const COGNITO_GROUPS = {
     ANALYST: { canonical: 'analysts', aliases: ['analyst', 'analysts'] },
     AUDITOR: { canonical: 'auditors', aliases: ['auditor', 'auditors'] },
     SUPPORT: { canonical: 'support-agents', aliases: ['support', 'support-agent', 'support-agents'] },
-    BILLING: { canonical: 'billing-admins', aliases: ['billing', 'billing-admin', 'billing-admins'] }
+    BILLING: { canonical: 'billing-admins', aliases: ['billing', 'billing-admin', 'billing-admins'] },
+    // Healthcare
+    PATIENT: { canonical: 'patients', aliases: ['patient', 'patients'] },
+    NURSE: { canonical: 'nurses', aliases: ['nurse', 'nurses'] },
+    DOCTOR: { canonical: 'doctors', aliases: ['doctor', 'doctors', 'physician', 'physicians'] },
+    // Education
+    STUDENT: { canonical: 'students', aliases: ['student', 'students'] },
+    TA: { canonical: 'teaching-assistants', aliases: ['ta', 'tas', 'teaching-assistant', 'teaching-assistants'] },
+    TEACHER: { canonical: 'teachers', aliases: ['teacher', 'teachers', 'instructor', 'instructors'] },
+    // SaaS tiers
+    FREE_TIER: { canonical: 'free-tier', aliases: ['free', 'free-tier'] },
+    PRO_TIER: { canonical: 'pro-tier', aliases: ['pro', 'pro-tier', 'premium'] },
+    ENTERPRISE_TIER: { canonical: 'enterprise-tier', aliases: ['enterprise', 'enterprise-tier'] }
 };
 
 /**
@@ -406,6 +418,137 @@ export const STANDARD_ROLES = {
         permissions: ['read:billing', 'write:billing', 'manage:subscriptions'],
         cognitoGroup: 'billing-admins',
         pattern: 'billing'
+    },
+
+    // -------------------------------------------------------------------------
+    // Healthcare Roles (HIPAA considerations apply)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Patient - View own health records
+     * NOTE: HIPAA requires audit logging for all PHI access.
+     * Use requireServerAuthorization() for all PHI operations.
+     */
+    patient: {
+        name: 'patient',
+        displayName: 'Patient',
+        description: 'View own health records and appointments',
+        level: 15,
+        permissions: ['read:own-records', 'write:own-profile', 'read:own-appointments'],
+        cognitoGroup: 'patients',
+        pattern: 'healthcare'
+    },
+
+    /**
+     * Nurse - Clinical care access
+     */
+    nurse: {
+        name: 'nurse',
+        displayName: 'Nurse',
+        description: 'Access assigned patient records, administer care',
+        level: 40,
+        permissions: ['read:patient-records', 'write:clinical-notes', 'read:medications', 'write:vitals'],
+        cognitoGroup: 'nurses',
+        pattern: 'healthcare'
+    },
+
+    /**
+     * Doctor - Full clinical access
+     */
+    doctor: {
+        name: 'doctor',
+        displayName: 'Doctor',
+        description: 'Full clinical access, prescribe medications, order tests',
+        level: 70,
+        permissions: ['read:patient-records', 'write:patient-records', 'write:prescriptions', 'order:tests', 'read:lab-results'],
+        cognitoGroup: 'doctors',
+        pattern: 'healthcare'
+    },
+
+    // -------------------------------------------------------------------------
+    // Education Roles (Course-based permissions)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Student - Course participant
+     */
+    student: {
+        name: 'student',
+        displayName: 'Student',
+        description: 'Access enrolled courses, submit assignments',
+        level: 15,
+        permissions: ['read:own-courses', 'write:own-assignments', 'read:course-materials', 'read:own-grades'],
+        cognitoGroup: 'students',
+        pattern: 'education'
+    },
+
+    /**
+     * Teaching Assistant - Grading and support
+     */
+    ta: {
+        name: 'ta',
+        displayName: 'Teaching Assistant',
+        description: 'Grade assignments, assist students, manage course materials',
+        level: 35,
+        permissions: ['read:course-roster', 'write:grades', 'read:submissions', 'write:feedback', 'manage:course-materials'],
+        cognitoGroup: 'teaching-assistants',
+        pattern: 'education'
+    },
+
+    /**
+     * Teacher - Full course control
+     */
+    teacher: {
+        name: 'teacher',
+        displayName: 'Teacher',
+        description: 'Create and manage courses, grade, manage students',
+        level: 60,
+        permissions: ['read:course-roster', 'write:grades', 'write:courses', 'manage:course-materials', 'manage:enrollments', 'read:analytics'],
+        cognitoGroup: 'teachers',
+        pattern: 'education'
+    },
+
+    // -------------------------------------------------------------------------
+    // SaaS Multi-Tier Roles (Feature gating)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Free Tier - Basic feature access
+     */
+    freeTier: {
+        name: 'free_tier',
+        displayName: 'Free',
+        description: 'Basic feature access with usage limits',
+        level: 10,
+        permissions: ['read:own', 'write:own', 'access:free-features'],
+        cognitoGroup: 'free-tier',
+        pattern: 'saas'
+    },
+
+    /**
+     * Pro Tier - Premium features
+     */
+    proTier: {
+        name: 'pro_tier',
+        displayName: 'Pro',
+        description: 'Premium features with higher limits',
+        level: 30,
+        permissions: ['read:own', 'write:own', 'access:free-features', 'access:pro-features', 'api:read', 'export:data'],
+        cognitoGroup: 'pro-tier',
+        pattern: 'saas'
+    },
+
+    /**
+     * Enterprise Tier - Full platform access
+     */
+    enterpriseTier: {
+        name: 'enterprise_tier',
+        displayName: 'Enterprise',
+        description: 'Full platform access, SSO, audit logs, dedicated support',
+        level: 50,
+        permissions: ['read:own', 'write:own', 'access:free-features', 'access:pro-features', 'access:enterprise-features', 'api:*', 'export:data', 'read:audit-logs', 'manage:team'],
+        cognitoGroup: 'enterprise-tier',
+        pattern: 'saas'
     }
 };
 
@@ -476,6 +619,83 @@ export const SITE_PATTERNS = {
             wasmModules: true,
             realtimeSync: true,
             sessionManagement: true
+        }
+    },
+
+    /**
+     * Healthcare Pattern
+     *
+     * HIPAA considerations:
+     * - All PHI access MUST be validated server-side (requireServerAuthorization)
+     * - Audit logging required for every record access
+     * - Session timeouts should be shorter (15-30 min idle)
+     * - Break-the-glass emergency access pattern recommended
+     */
+    healthcare: {
+        name: 'healthcare',
+        displayName: 'Healthcare / HIPAA',
+        description: 'Healthcare application with PHI access controls',
+        roles: ['patient', 'nurse', 'doctor', 'admin'],
+        routes: {
+            public: ['/', '/about'],
+            patient: ['/portal', '/portal/*'],
+            clinical: ['/clinical', '/clinical/*'],
+            admin: ['/admin', '/admin/*']
+        },
+        features: {
+            auditLogging: true,
+            sessionTimeout: 1800000, // 30 minutes
+            phiProtection: true,
+            breakTheGlass: 'recommended'
+        }
+    },
+
+    /**
+     * Education Pattern
+     *
+     * Course-based access: permissions scoped to enrolled courses.
+     */
+    education: {
+        name: 'education',
+        displayName: 'Education / LMS',
+        description: 'Learning management system with course-based access',
+        roles: ['student', 'ta', 'teacher', 'admin'],
+        routes: {
+            public: ['/', '/catalog'],
+            student: ['/courses', '/courses/*', '/assignments/*'],
+            instructor: ['/teach', '/teach/*', '/grades/*'],
+            admin: ['/admin', '/admin/*']
+        },
+        features: {
+            courseScoping: true,
+            gradeProtection: true,
+            enrollmentManagement: true
+        }
+    },
+
+    /**
+     * SaaS Multi-Tier Pattern
+     *
+     * Feature gating by subscription tier.
+     * Use hasPermission() to check 'access:pro-features' etc.
+     */
+    saas: {
+        name: 'saas',
+        displayName: 'SaaS Multi-Tier',
+        description: 'Subscription-based application with tier-gated features',
+        roles: ['freeTier', 'proTier', 'enterpriseTier', 'admin'],
+        routes: {
+            public: ['/', '/pricing'],
+            app: ['/app', '/app/*'],
+            enterprise: ['/enterprise', '/enterprise/*'],
+            admin: ['/admin', '/admin/*']
+        },
+        features: {
+            featureGating: true,
+            usageLimits: true,
+            teamManagement: 'enterprise',
+            sso: 'enterprise',
+            auditLogs: 'enterprise'
         }
     }
 };

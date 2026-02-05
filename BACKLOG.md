@@ -17,31 +17,33 @@ See `docs/integration-feedback.md` for:
 
 ## Priority: High
 
-### Token Refresh Implementation
-**Status**: Partially implemented
-**Description**: Complete automatic token refresh flow with proper error handling.
-- Currently relies on `ensureValidTokens()` being called manually
-- Add background refresh for long-running sessions
-- Handle refresh token expiry gracefully
+### Conditional UI / Passkey Autofill
+**Status**: Not started
+**Description**: Implement `loginWithConditionalUI()` for passkey autofill UX.
+- Use `mediation: 'conditional'` with empty `allowCredentials`
+- Add AbortController management (abort pending conditional request before modal flow)
+- Accept `signal` parameter for cancellation
+- This is the expected passkey UX in 2025/2026
 
-### Automated JavaScript Tests
-**Status**: Templates created, framework pending
-**Description**: Set up automated test runner for all templates.
-- Configure Vitest or Jest
-- Add CI/CD integration
-- Target >80% coverage for RBAC functions
+### Conditional Create / Passkey Upgrade
+**Status**: Not started
+**Description**: Silent passkey upgrade after password login.
+- `upgradeToPasskey()` using `navigator.credentials.create()` with `mediation: 'conditional'`
+- Chrome 136+ and Safari 18+ support
+- Auto-invoke after successful password login
+
+### Token Validation on Load
+**Status**: Not started
+**Description**: Validate stored tokens against config on load.
+- Verify `iss` claim matches configured Cognito domain
+- Verify `aud`/`client_id` matches configured client ID
+- Reject tokens with unreasonable `exp` claims
 
 ## Priority: Medium
 
 ### Contentful CMS Integration
 **Status**: Backlog (role mapping defined)
 **Description**: Integrate with Contentful for headless CMS workflows.
-
-**Planned Features**:
-- Map l42 roles to Contentful space roles
-- Sync user permissions between Cognito and Contentful
-- Webhook handlers for content publish events
-- SSG trigger on content changes
 
 **Role Mapping** (tentative):
 | l42 Role | Contentful Role |
@@ -50,11 +52,6 @@ See `docs/integration-feedback.md` for:
 | reviewer | Content Reviewer |
 | publisher | Publisher |
 | admin | Admin |
-
-**Implementation Notes**:
-- Use Contentful Management API for role sync
-- Consider Contentful webhooks for real-time updates
-- May need Lambda function for webhook handling
 
 ### Multi-Tenant Support
 **Status**: Backlog
@@ -67,40 +64,31 @@ See `docs/integration-feedback.md` for:
 ### Published npm Package
 **Status**: Backlog
 **Description**: Publish auth module to npm for easier integration.
-- Currently CDN-only distribution
-- Would enable `npm install l42-cognito-passkey`
 - TypeScript definitions
 - Tree-shaking support
 
+### Client-Side Login Rate Limiting
+**Status**: Not started
+**Description**: Exponential backoff on failed login attempts.
+- Configurable `maxLoginAttemptsBeforeDelay` and `loginBackoffMs`
+- OCSF logging for threshold breaches
+- Surface Cognito account lockout errors
+
 ## Priority: Low
 
-### Additional RBAC Role Templates
+### WebAuthn `getClientCapabilities()` Support
+**Status**: Not started
+**Description**: Use WebAuthn Level 3 `getClientCapabilities()` in `getPasskeyCapabilities()`.
+- Check for method first, fall back to individual checks
+- Add `isWebView` detection for mobile compatibility
 
-#### Healthcare Roles
-- `patient`, `nurse`, `doctor`, `admin`
-- HIPAA compliance considerations
-
-#### Education Roles
-- `student`, `teacher`, `ta`, `admin`
-- Course-based permissions
-
-#### SaaS Multi-Tier
-- `free`, `pro`, `enterprise`, `admin`
-- Feature gating by tier
-
-### WebSocket Auth Middleware
-**Status**: Planned
-**Description**: Authentication middleware for WebSocket connections.
-- Token validation on connect
-- Auto-disconnect on token expiry
-- Reconnect with refresh flow
-
-### Passkey Cross-Device Support
-**Status**: Research
-**Description**: Improve passkey UX across devices.
-- QR code flow for cross-device auth
-- Platform authenticator detection
-- Graceful fallback to password
+### `registerPasskey()` Default Improvements
+**Status**: Not started
+**Description**: Better defaults for broader passkey support.
+- Change `residentKey` to `'required'` (discoverable credentials)
+- Remove `authenticatorAttachment: 'platform'` default (allow cross-device)
+- Make authenticator selection configurable
+- Document `userVerification` trade-offs
 
 ## Post-1.0: Advanced Authorization
 
@@ -126,7 +114,36 @@ Benefits:
 
 ## Completed
 
-### v0.4.0 (Current)
+### v0.9.0 (Current)
+- [x] Auto-refresh with visibility API integration
+- [x] `fetchWithAuth()` with 401 retry
+- [x] `onSessionExpired()` callback
+- [x] CSRF protection for handler mode (X-L42-CSRF header)
+- [x] WebAuthn feature detection (`isPasskeySupported`, `getPasskeyCapabilities`)
+- [x] `isPasskeySupported()` checks `window.isSecureContext`
+- [x] WebSocket auth helper (`createAuthenticatedWebSocket`)
+- [x] WSS enforcement warning for non-localhost
+- [x] WebSocket default auth mode changed to `message` (security)
+- [x] Healthcare, Education, SaaS RBAC role templates
+- [x] 31 auth property-based tests (token expiry, cookie domain, mutual exclusion)
+- [x] Sharp-edges security analysis (18 findings documented)
+- [x] 379 total tests
+
+### v0.8.0
+- [x] Token Handler mode (server-side HttpOnly session storage)
+- [x] Memory mode token storage
+- [x] Handler sync/async contamination fixes
+- [x] `isAdmin()`/`isReadonly()` alias support
+- [x] 52 handler sync API tests
+
+### v0.5.x
+- [x] OAuth state uses localStorage (Safari ITP fix)
+- [x] PKCE code challenge support
+- [x] HTTPS enforcement for redirect URIs
+- [x] Cognito domain validation
+- [x] Dist file sync
+
+### v0.4.0
 - [x] `UNSAFE_decodeJwtPayload()` rename for security clarity
 - [x] `requireServerAuthorization()` helper
 - [x] ccTLD cookie domain fix (30+ public suffixes)

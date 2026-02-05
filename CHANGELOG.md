@@ -29,9 +29,26 @@ All notable changes to this project will be documented in this file.
 
 - **Integration Guide**: `docs/integration-guide.md` with Claude Code advice
 
+- **WebAuthn Feature Detection**: `isPasskeySupported()`, `isConditionalMediationAvailable()`, `isPlatformAuthenticatorAvailable()`, `getPasskeyCapabilities()`
+
+- **WebSocket Authentication**: `createAuthenticatedWebSocket(url, options)` with:
+  - Message-based auth (default, secure) and query param auth modes
+  - Auto-reconnect on 4401/4403 close codes with token refresh
+  - WSS enforcement warning for non-localhost URLs
+
+- **Additional RBAC Role Templates**: Healthcare (patient/nurse/doctor), Education (student/ta/teacher), SaaS (free/pro/enterprise) with Cognito group aliases
+
+- **31 new auth property-based tests** for token expiry invariants, admin/readonly mutual exclusion, cookie domain safety, OAuth state uniqueness, JWT decode roundtrip
+
 - **35 new tests** for auto-refresh, fetchWithAuth, session expiry, CSRF, and visibility API
 
+### Changed
+
+- **WebSocket default auth mode**: Changed from `'query'` to `'message'` to prevent token leakage in URLs (server logs, proxy logs)
+
 ### Fixed
+
+- **`isPasskeySupported()` now checks `window.isSecureContext`**: Matches documentation that said it checked secure context but didn't
 
 - **Handler Mode Sync API**: 12 sync functions now use `getTokensSync()` instead of async `getTokens()`
   - Affected: `getAuthMethod`, `getIdTokenClaims`, `getUserEmail`, `getUserGroups`, `hasAdminScope`, `isAuthenticated`, `refreshTokens` standard path
