@@ -3,8 +3,8 @@
 This plugin provides quick setup for AWS Cognito authentication with WebAuthn passkey support.
 
 **Plugin Name**: `l42-cognito-passkey`
-**Current Version**: 0.11.0
-**Tests**: 384 passing
+**Current Version**: 0.12.0
+**Tests**: 492 passing
 
 ## Overview
 
@@ -200,7 +200,7 @@ Cookie domain is auto-detected based on current hostname, or can be explicitly c
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.11.0"
+console.log(VERSION); // "0.12.0"
 ```
 
 ## Site Architecture Patterns
@@ -311,8 +311,12 @@ Each template has an accompanying test file:
 - `plugin/templates/auto-refresh.test.js` (35 auto-refresh, fetchWithAuth, CSRF tests)
 - `plugin/templates/auth-properties.test.js` (31 auth property-based tests)
 - `plugin/templates/debug-diagnostics.test.js` (34 debug logging & diagnostics tests)
+- `plugin/templates/conditional-ui.test.js` (32 conditional UI / passkey autofill tests)
+- `plugin/templates/conditional-create.test.js` (23 conditional create / passkey upgrade tests)
+- `plugin/templates/token-validation.test.js` (31 token validation on load tests)
+- `plugin/templates/webauthn-capabilities.test.js` (22 WebAuthn Level 3 capabilities tests)
 
-**Total: 384 tests**
+**Total: 492 tests**
 
 Run tests with:
 ```bash

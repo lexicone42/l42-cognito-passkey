@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-02-05
+
+### Added
+
+- **Conditional UI / Passkey Autofill** (`loginWithConditionalUI()`)
+  - Mode A: With email — single biometric prompt via Cognito challenge + `mediation: 'conditional'`
+  - Mode B: Without email — discovery flow extracts `userHandle`, then re-authenticates via `loginWithPasskey()`
+  - Internal `AbortController` management — conditional requests auto-cancelled on other login/logout calls
+  - User-provided `AbortSignal` support via options parameter
+
+- **Conditional Create / Passkey Upgrade** (`upgradeToPasskey()`)
+  - Silent passkey registration after password login using `mediation: 'conditional'` on `navigator.credentials.create()`
+  - Non-blocking — failures return `false` instead of throwing
+  - `autoUpgradeToPasskey` config option for automatic fire-and-forget upgrade after password login
+  - Requires Chrome 136+ or Safari 18+ for conditional create support
+
+- **Token Validation on Load** (internal `validateTokenClaims()`)
+  - `isAuthenticated()`, `isAuthenticatedAsync()`, and `ensureValidTokens()` now validate token claims against config
+  - Detects tokens from wrong Cognito pool (issuer region mismatch)
+  - Detects tokens from wrong app (client_id/aud mismatch)
+  - Rejects tokens with unreasonable expiry (> 30 days)
+  - Invalid tokens are automatically cleared from storage
+
+- **WebAuthn Level 3 `getClientCapabilities()`** — `getPasskeyCapabilities()` enhanced:
+  - Uses `PublicKeyCredential.getClientCapabilities()` when available
+  - New fields: `conditionalCreate`, `hybridTransport`, `passkeyPlatformAuthenticator`, `userVerifyingPlatformAuthenticator`, `relatedOrigins`, `signalAllAcceptedCredentials`, `signalCurrentUserDetails`, `signalUnknownCredential`, `isWebView`, `source`
+  - Handles both camelCase and kebab-case capability keys
+  - Falls back to individual feature detection when Level 3 API unavailable
+  - `detectWebView()` helper for Android WebView, iOS WKWebView, Electron detection
+
+- **Helper extraction**: `buildAssertionResponse()` and `buildCredentialResponse()` shared helpers (DRY refactor)
+
+### Changed
+
+- **`registerPasskey(options)`** now accepts an options parameter:
+  - `authenticatorAttachment`: `'platform'`, `'cross-platform'`, or omit (any — new default)
+  - `residentKey`: default changed from `'preferred'` to `'required'` (needed for conditional UI)
+  - `userVerification`: configurable, default remains `'preferred'`
+  - Server-provided `authenticatorSelection` values used as base, caller options override
+
+- **Login methods** (`loginWithPasskey`, `loginWithPassword`, `loginWithHostedUI`) and `logout()` now abort any pending conditional UI request
+
+### TypeScript
+
+- New interfaces: `ConditionalUIOptions`, `PasskeyRegistrationOptions`, `UpgradeToPasskeyOptions`
+- Expanded `PasskeyCapabilities` interface (14 fields, was 4)
+- `AuthConfigOptions` gains `autoUpgradeToPasskey?: boolean`
+- Updated `registerPasskey(options?)` signature
+- Added `loginWithConditionalUI()` and `upgradeToPasskey()` declarations
+
+### Stats
+
+- **492 tests passing** (was 384)
+- 4 new test files: `conditional-ui.test.js` (32), `conditional-create.test.js` (23), `token-validation.test.js` (31), `webauthn-capabilities.test.js` (22)
+
 ## [0.11.0] - 2026-02-05
 
 ### Added

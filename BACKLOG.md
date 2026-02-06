@@ -15,30 +15,6 @@ See `docs/integration-feedback.md` for:
 
 ---
 
-## Priority: High
-
-### Conditional UI / Passkey Autofill
-**Status**: Not started
-**Description**: Implement `loginWithConditionalUI()` for passkey autofill UX.
-- Use `mediation: 'conditional'` with empty `allowCredentials`
-- Add AbortController management (abort pending conditional request before modal flow)
-- Accept `signal` parameter for cancellation
-- This is the expected passkey UX in 2025/2026
-
-### Conditional Create / Passkey Upgrade
-**Status**: Not started
-**Description**: Silent passkey upgrade after password login.
-- `upgradeToPasskey()` using `navigator.credentials.create()` with `mediation: 'conditional'`
-- Chrome 136+ and Safari 18+ support
-- Auto-invoke after successful password login
-
-### Token Validation on Load
-**Status**: Not started
-**Description**: Validate stored tokens against config on load.
-- Verify `iss` claim matches configured Cognito domain
-- Verify `aud`/`client_id` matches configured client ID
-- Reject tokens with unreasonable `exp` claims
-
 ## Priority: Medium
 
 ### Contentful CMS Integration
@@ -74,22 +50,6 @@ See `docs/integration-feedback.md` for:
 - OCSF logging for threshold breaches
 - Surface Cognito account lockout errors
 
-## Priority: Low
-
-### WebAuthn `getClientCapabilities()` Support
-**Status**: Not started
-**Description**: Use WebAuthn Level 3 `getClientCapabilities()` in `getPasskeyCapabilities()`.
-- Check for method first, fall back to individual checks
-- Add `isWebView` detection for mobile compatibility
-
-### `registerPasskey()` Default Improvements
-**Status**: Not started
-**Description**: Better defaults for broader passkey support.
-- Change `residentKey` to `'required'` (discoverable credentials)
-- Remove `authenticatorAttachment: 'platform'` default (allow cross-device)
-- Make authenticator selection configurable
-- Document `userVerification` trade-offs
-
 ## Post-1.0: Advanced Authorization
 
 ### AWS Cedar Integration
@@ -113,7 +73,23 @@ Benefits:
 
 ## Completed
 
-### v0.10.0 (Current)
+### v0.12.0
+- [x] **Conditional UI / Passkey Autofill** — `loginWithConditionalUI()` with Mode A (email known, single prompt) and Mode B (discovery, two prompts)
+- [x] **Conditional Create / Passkey Upgrade** — `upgradeToPasskey()` with silent registration, `autoUpgradeToPasskey` config
+- [x] **Token Validation on Load** — `validateTokenClaims()` checks issuer, client_id, unreasonable expiry
+- [x] **WebAuthn `getClientCapabilities()`** — Level 3 API support in `getPasskeyCapabilities()`, `detectWebView()`
+- [x] **`registerPasskey()` Default Improvements** — `residentKey: 'required'`, no platform-only restriction, configurable options
+- [x] AbortController management for conditional UI
+- [x] `buildAssertionResponse()` and `buildCredentialResponse()` helper extraction
+- [x] TypeScript declarations for all new features
+- [x] 108 new tests (492 total)
+
+### v0.11.0
+- [x] Debug Logging & Diagnostics (`debug` config, `getDebugHistory()`, `getDiagnostics()`, `clearDebugHistory()`)
+- [x] 34 debug diagnostics tests
+- [x] 384 total tests
+
+### v0.10.0
 - [x] Remove speculative features (WebSocket auth, deprecated aliases, domain RBAC roles)
 - [x] Design decisions documentation (`docs/design-decisions.md`)
 - [x] 1,721 lines removed, 379 tests passing

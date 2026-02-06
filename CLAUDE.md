@@ -4,9 +4,9 @@
 
 L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for AWS Cognito with WebAuthn/Passkey support. It's designed to be copied into projects (no CDN dependency) and used as an ES module.
 
-**Current Version**: 0.11.0
+**Current Version**: 0.12.0
 **License**: Apache-2.0
-**Tests**: ~384 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests)
+**Tests**: ~492 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests)
 
 ## Quick Start for Claude Instances
 
@@ -48,7 +48,7 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 
 | File | Purpose |
 |------|---------|
-| `src/auth.js` | Main authentication library (~1100 lines) |
+| `src/auth.js` | Main authentication library (~1400 lines) |
 | `plugin/templates/rbac-roles.js` | RBAC role definitions and permission helpers |
 | `plugin/templates/static-site-pattern.html` | Static site integration template |
 | `plugin/templates/admin-panel-pattern.html` | Admin panel template |
@@ -58,6 +58,10 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 | `scripts/sync-version.js` | Syncs version across all files |
 | `docs/RELEASING.md` | Release process documentation |
 | `plugin/templates/debug-diagnostics.test.js` | Debug logging & diagnostics tests |
+| `plugin/templates/conditional-ui.test.js` | Conditional UI / passkey autofill tests |
+| `plugin/templates/conditional-create.test.js` | Conditional create / passkey upgrade tests |
+| `plugin/templates/token-validation.test.js` | Token validation on load tests |
+| `plugin/templates/webauthn-capabilities.test.js` | WebAuthn Level 3 capabilities tests |
 
 ## Security Patterns (CRITICAL)
 

@@ -2,9 +2,9 @@
  * L42 Cognito Passkey - TypeScript Type Declarations
  *
  * Type declarations for the l42-cognito-passkey authentication library.
- * These types match the exports of src/auth.js (v0.11.0).
+ * These types match the exports of src/auth.js (v0.12.0).
  *
- * @version 0.11.0
+ * @version 0.12.0
  * @license Apache-2.0
  */
 
@@ -95,20 +95,78 @@ export interface AuthConfigOptions {
    * - function: receive debug events programmatically
    */
   debug?: boolean | 'verbose' | ((event: DebugEvent) => void);
+  /**
+   * Auto-upgrade: silently offer passkey registration after password login.
+   * Requires browser support for conditional create (Chrome 136+, Safari 18+).
+   * Default: false
+   */
+  autoUpgradeToPasskey?: boolean;
+}
+
+/**
+ * Options for loginWithConditionalUI().
+ */
+export interface ConditionalUIOptions {
+  /** If known, enables single-prompt flow via Cognito challenge */
+  email?: string;
+  /** AbortController signal for cancellation */
+  signal?: AbortSignal;
+}
+
+/**
+ * Options for registerPasskey().
+ */
+export interface PasskeyRegistrationOptions {
+  /** Authenticator type: 'platform', 'cross-platform', or undefined (any) */
+  authenticatorAttachment?: 'platform' | 'cross-platform';
+  /** Resident key requirement (default: 'required') */
+  residentKey?: 'required' | 'preferred' | 'discouraged';
+  /** User verification requirement (default: 'preferred') */
+  userVerification?: 'required' | 'preferred' | 'discouraged';
+}
+
+/**
+ * Options for upgradeToPasskey().
+ */
+export interface UpgradeToPasskeyOptions {
+  /** AbortController signal for cancellation */
+  signal?: AbortSignal;
 }
 
 /**
  * WebAuthn/Passkey capability detection results.
+ * When the Level 3 getClientCapabilities() API is available, additional
+ * fields are populated. Otherwise, fallback detection is used.
  */
 export interface PasskeyCapabilities {
   /** Whether the browser supports WebAuthn */
   supported: boolean;
   /** Whether conditional mediation (autofill) is available */
   conditionalMediation: boolean;
+  /** Whether conditional create (passkey upgrade prompt) is available */
+  conditionalCreate: boolean;
   /** Whether a platform authenticator (Touch ID, Windows Hello) is available */
   platformAuthenticator: boolean;
   /** Whether the page is in a secure context (HTTPS) */
   secureContext: boolean;
+  /** Whether hybrid transport (cross-device passkeys) is available */
+  hybridTransport: boolean;
+  /** Whether a passkey-capable platform authenticator is available */
+  passkeyPlatformAuthenticator: boolean;
+  /** Whether a user-verifying platform authenticator is available */
+  userVerifyingPlatformAuthenticator: boolean;
+  /** Whether related origins are supported */
+  relatedOrigins: boolean;
+  /** Whether signalAllAcceptedCredentials is supported */
+  signalAllAcceptedCredentials: boolean;
+  /** Whether signalCurrentUserDetails is supported */
+  signalCurrentUserDetails: boolean;
+  /** Whether signalUnknownCredential is supported */
+  signalUnknownCredential: boolean;
+  /** Whether the environment is a WebView (Android, iOS WKWebView, Electron) */
+  isWebView: boolean;
+  /** Detection method used: 'getClientCapabilities' or 'fallback' */
+  source: 'getClientCapabilities' | 'fallback';
 }
 
 /**
@@ -235,6 +293,7 @@ export function refreshTokens(): Promise<TokenSet>;
 
 /**
  * Ensure valid tokens are available, refreshing if needed.
+ * Also validates token claims against current config.
  * @returns Valid tokens, or null if not authenticated.
  */
 export function ensureValidTokens(): Promise<TokenSet | null>;
@@ -243,12 +302,14 @@ export function ensureValidTokens(): Promise<TokenSet | null>;
 
 /**
  * Check if user is authenticated (synchronous).
+ * Validates token claims against config. Clears invalid tokens automatically.
  * In handler mode, uses cached tokens.
  */
 export function isAuthenticated(): boolean;
 
 /**
  * Check if user is authenticated (asynchronous).
+ * Validates token claims against config. Clears invalid tokens automatically.
  * In handler mode, fetches fresh token status from server.
  */
 export function isAuthenticatedAsync(): Promise<boolean>;
@@ -289,12 +350,28 @@ export function loginWithPassword(email: string, password: string): Promise<Toke
 
 /**
  * Log in with a passkey (WebAuthn).
+ * Aborts any pending conditional UI request.
  * @returns Authentication tokens on success
  */
 export function loginWithPasskey(email: string): Promise<TokenSet>;
 
 /**
+ * Login via passkey autofill (Conditional UI).
+ *
+ * Two modes:
+ * - With email: Uses Cognito challenge + conditional mediation (single biometric prompt)
+ * - Without email: Discovery flow with local challenge, then re-auth via loginWithPasskey
+ *   (requires two biometric prompts — Cognito needs a username for its challenge)
+ *
+ * @param options - Optional email and AbortSignal
+ * @returns Authentication tokens on success
+ * @throws {Error} If conditional mediation is not available
+ */
+export function loginWithConditionalUI(options?: ConditionalUIOptions): Promise<TokenSet>;
+
+/**
  * Redirect to Cognito Hosted UI for OAuth login.
+ * Aborts any pending conditional UI request.
  * @param email - Optional email hint for the login form
  */
 export function loginWithHostedUI(email?: string): Promise<void>;
@@ -309,7 +386,10 @@ export function getRedirectUri(): string;
  */
 export function exchangeCodeForTokens(code: string, state: string): Promise<TokenSet>;
 
-/** Log out - clears tokens, cookies, and calls server logout in handler mode. */
+/**
+ * Log out - clears tokens, cookies, and calls server logout in handler mode.
+ * Aborts any pending conditional UI request.
+ */
 export function logout(): void;
 
 // -- Passkey Management --
@@ -317,8 +397,21 @@ export function logout(): void;
 /** List registered passkey credentials. */
 export function listPasskeys(): Promise<PasskeyInfo[]>;
 
-/** Register a new passkey for the authenticated user. */
-export function registerPasskey(): Promise<void>;
+/**
+ * Register a new passkey for the authenticated user.
+ * @param options - Optional authenticator selection overrides
+ */
+export function registerPasskey(options?: PasskeyRegistrationOptions): Promise<void>;
+
+/**
+ * Silently offer passkey upgrade after password login.
+ * Uses conditional create (Chrome 136+, Safari 18+).
+ * Non-blocking — failures are silent (returns false).
+ *
+ * @param options - Optional AbortSignal
+ * @returns true if passkey was created, false if skipped/failed
+ */
+export function upgradeToPasskey(options?: UpgradeToPasskeyOptions): Promise<boolean>;
 
 /** Delete a registered passkey. */
 export function deletePasskey(credentialId: string): Promise<void>;
@@ -337,7 +430,11 @@ export function isConditionalMediationAvailable(): Promise<boolean>;
 /** Check if a platform authenticator (Touch ID, Windows Hello) is available. */
 export function isPlatformAuthenticatorAvailable(): Promise<boolean>;
 
-/** Get comprehensive passkey capability information. */
+/**
+ * Get comprehensive passkey capability information.
+ * Uses WebAuthn Level 3 getClientCapabilities() when available,
+ * falls back to individual feature detection.
+ */
 export function getPasskeyCapabilities(): Promise<PasskeyCapabilities>;
 
 // -- Server-Side Authorization --
@@ -469,11 +566,13 @@ declare const auth: {
   getRedirectUri: typeof getRedirectUri;
   loginWithPassword: typeof loginWithPassword;
   loginWithPasskey: typeof loginWithPasskey;
+  loginWithConditionalUI: typeof loginWithConditionalUI;
   loginWithHostedUI: typeof loginWithHostedUI;
   exchangeCodeForTokens: typeof exchangeCodeForTokens;
   logout: typeof logout;
   listPasskeys: typeof listPasskeys;
   registerPasskey: typeof registerPasskey;
+  upgradeToPasskey: typeof upgradeToPasskey;
   deletePasskey: typeof deletePasskey;
   onAuthStateChange: typeof onAuthStateChange;
   onLogin: typeof onLogin;

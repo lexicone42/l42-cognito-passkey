@@ -8,11 +8,11 @@
  *   import { configure, isAuthenticated, loginWithPassword } from './auth.js';
  *   configure({ clientId: 'xxx', cognitoDomain: 'xxx.auth.region.amazoncognito.com' });
  *
- * @version 0.11.0
+ * @version 0.12.0
  * @license Apache-2.0
  */
 
-export const VERSION = '0.11.0';
+export const VERSION = '0.12.0';
 
 // ==================== CONFIGURATION ====================
 
@@ -48,7 +48,10 @@ const DEFAULT_CONFIG = {
     // - true: log to console.debug with [l42-auth] prefix
     // - 'verbose': also include data payloads in console output
     // - function(event): receive debug events programmatically
-    debug: false
+    debug: false,
+    // Auto-upgrade: silently offer passkey registration after password login
+    // Requires browser support for conditional create (Chrome 136+, Safari 18+)
+    autoUpgradeToPasskey: false
 };
 
 // ==================== TOKEN STORAGE ABSTRACTION ====================
@@ -498,6 +501,19 @@ const REFRESH_CONFIG = {
 
 let config = { ...DEFAULT_CONFIG };
 let _configured = false;
+let _conditionalAbortController = null;
+
+/**
+ * Abort any pending conditional UI (passkey autofill) request.
+ * Called automatically when other login methods are used or on logout.
+ * @private
+ */
+function abortConditionalRequest() {
+    if (_conditionalAbortController) {
+        _conditionalAbortController.abort();
+        _conditionalAbortController = null;
+    }
+}
 
 /**
  * Auto-read configuration from window.L42_AUTH_CONFIG if present.
@@ -909,6 +925,66 @@ export function UNSAFE_decodeJwtPayload(token) {
 }
 
 /**
+ * Validate token claims against current config.
+ * Returns false (and optionally clears tokens) if claims don't match.
+ * Catches tokens from a different Cognito pool (stale localStorage) or
+ * tokens with unreasonable expiry.
+ * @param {Object} tokens - Token object with id_token
+ * @returns {boolean} true if claims are valid
+ * @private
+ */
+function validateTokenClaims(tokens) {
+    if (!tokens || !tokens.id_token) return false;
+
+    try {
+        const claims = UNSAFE_decodeJwtPayload(tokens.id_token);
+
+        // Verify issuer matches configured Cognito pool
+        // iss format: https://cognito-idp.{region}.amazonaws.com/{poolId}
+        if (claims.iss) {
+            const expectedIssPrefix = 'https://cognito-idp.' + config.cognitoRegion + '.amazonaws.com/';
+            if (!claims.iss.startsWith(expectedIssPrefix)) {
+                debugLog('token', 'validateTokenClaims:failed', {
+                    reason: 'issuer mismatch',
+                    expected: expectedIssPrefix + '...',
+                    actual: claims.iss
+                });
+                return false;
+            }
+        }
+
+        // Verify audience/client_id matches configured clientId
+        // ID tokens use 'aud', access tokens use 'client_id'
+        const tokenClientId = claims.aud || claims.client_id;
+        if (tokenClientId && tokenClientId !== config.clientId) {
+            debugLog('token', 'validateTokenClaims:failed', {
+                reason: 'client_id mismatch',
+                expected: config.clientId,
+                actual: tokenClientId
+            });
+            return false;
+        }
+
+        // Reject unreasonable exp (> 30 days in future)
+        if (claims.exp) {
+            var maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
+            if (claims.exp > maxReasonableExp) {
+                debugLog('token', 'validateTokenClaims:failed', {
+                    reason: 'unreasonable expiry',
+                    exp: claims.exp
+                });
+                return false;
+            }
+        }
+
+        return true;
+    } catch {
+        debugLog('token', 'validateTokenClaims:failed', { reason: 'decode error' });
+        return false;
+    }
+}
+
+/**
  * Check if token is expired.
  * @param {Object} tokens - Tokens object
  * @returns {boolean} True if expired
@@ -1132,6 +1208,12 @@ export async function ensureValidTokens() {
     const tokens = await getTokens();
     if (!tokens) return null;
 
+    // Validate token claims against current config
+    if (!validateTokenClaims(tokens)) {
+        clearTokens();
+        return null;
+    }
+
     if (isTokenExpired(tokens)) {
         // In handler mode, refresh_token is server-side, so always try refresh
         if (!isHandlerMode() && !tokens.refresh_token) {
@@ -1171,10 +1253,18 @@ export function isAuthenticated() {
     // In handler mode, use cached tokens for sync check
     if (isHandlerMode()) {
         const cached = HandlerTokenStore.getCached();
+        if (cached && !validateTokenClaims(cached)) {
+            clearTokens();
+            return false;
+        }
         return !!(cached && !isTokenExpired(cached));
     }
 
     const tokens = getTokens();
+    if (tokens && !validateTokenClaims(tokens)) {
+        clearTokens();
+        return false;
+    }
     return !!(tokens && !isTokenExpired(tokens));
 }
 
@@ -1188,6 +1278,10 @@ export function isAuthenticated() {
 export async function isAuthenticatedAsync() {
     try {
         const tokens = await getTokens();
+        if (tokens && !validateTokenClaims(tokens)) {
+            clearTokens();
+            return false;
+        }
         return !!(tokens && !isTokenExpired(tokens));
     } catch {
         return false;
@@ -1369,6 +1463,7 @@ export function getRedirectUri() {
  */
 export async function loginWithPassword(email, password) {
     requireConfig();
+    abortConditionalRequest();
 
     try {
         const res = await cognitoRequest('InitiateAuth', {
@@ -1403,6 +1498,12 @@ export async function loginWithPassword(email, password) {
             });
 
             debugLog('auth', 'loginWithPassword:success', { email });
+
+            // Non-blocking passkey upgrade offer (fire and forget)
+            if (config.autoUpgradeToPasskey) {
+                upgradeToPasskey().catch(function() {});
+            }
+
             return tokens;
         } else if (res.ChallengeName) {
             logSecurityEvent({
@@ -1443,8 +1544,76 @@ export async function loginWithPassword(email, password) {
  * @param {string} email - User email
  * @returns {Promise<Object>} Authentication result with tokens
  */
+
+/**
+ * Build a WebAuthn assertion response for Cognito from a navigator.credentials.get() result.
+ * @param {PublicKeyCredential} credential - The credential from navigator.credentials.get()
+ * @returns {Object} Assertion response formatted for Cognito
+ * @private
+ */
+function buildAssertionResponse(credential) {
+    const response = {
+        id: credential.id,
+        rawId: arrayBufferToB64(credential.rawId),
+        response: {
+            clientDataJSON: arrayBufferToB64(credential.response.clientDataJSON),
+            authenticatorData: arrayBufferToB64(credential.response.authenticatorData),
+            signature: arrayBufferToB64(credential.response.signature)
+        },
+        type: credential.type,
+        clientExtensionResults: credential.getClientExtensionResults() || {}
+    };
+
+    if (credential.response.userHandle) {
+        response.response.userHandle = arrayBufferToB64(credential.response.userHandle);
+    }
+    if (credential.authenticatorAttachment) {
+        response.authenticatorAttachment = credential.authenticatorAttachment;
+    }
+
+    return response;
+}
+
+/**
+ * Build a WebAuthn credential response for Cognito from a navigator.credentials.create() result.
+ * @param {PublicKeyCredential} credential - The credential from navigator.credentials.create()
+ * @returns {Object} Credential response formatted for Cognito
+ * @private
+ */
+function buildCredentialResponse(credential) {
+    const response = {
+        id: credential.id,
+        rawId: arrayBufferToB64(credential.rawId),
+        type: credential.type,
+        response: {
+            clientDataJSON: arrayBufferToB64(credential.response.clientDataJSON),
+            attestationObject: arrayBufferToB64(credential.response.attestationObject)
+        },
+        clientExtensionResults: credential.getClientExtensionResults() || {}
+    };
+
+    if (credential.response.getTransports) {
+        response.response.transports = credential.response.getTransports();
+    }
+    if (credential.authenticatorAttachment) {
+        response.authenticatorAttachment = credential.authenticatorAttachment;
+    }
+    if (credential.response.getPublicKey) {
+        response.response.publicKey = arrayBufferToB64(credential.response.getPublicKey());
+    }
+    if (credential.response.getPublicKeyAlgorithm) {
+        response.response.publicKeyAlgorithm = credential.response.getPublicKeyAlgorithm();
+    }
+    if (credential.response.getAuthenticatorData) {
+        response.response.authenticatorData = arrayBufferToB64(credential.response.getAuthenticatorData());
+    }
+
+    return response;
+}
+
 export async function loginWithPasskey(email) {
     requireConfig();
+    abortConditionalRequest();
 
     try {
         // Step 1: Initiate auth with USER_AUTH and PREFERRED_CHALLENGE=WEB_AUTHN
@@ -1493,24 +1662,7 @@ export async function loginWithPasskey(email) {
         const credential = await navigator.credentials.get({ publicKey: publicKey });
 
         // Step 4: Build response
-        const assertionResponse = {
-            id: credential.id,
-            rawId: arrayBufferToB64(credential.rawId),
-            response: {
-                clientDataJSON: arrayBufferToB64(credential.response.clientDataJSON),
-                authenticatorData: arrayBufferToB64(credential.response.authenticatorData),
-                signature: arrayBufferToB64(credential.response.signature)
-            },
-            type: credential.type,
-            clientExtensionResults: credential.getClientExtensionResults() || {}
-        };
-
-        if (credential.response.userHandle) {
-            assertionResponse.response.userHandle = arrayBufferToB64(credential.response.userHandle);
-        }
-        if (credential.authenticatorAttachment) {
-            assertionResponse.authenticatorAttachment = credential.authenticatorAttachment;
-        }
+        const assertionResponse = buildAssertionResponse(credential);
 
         // Step 5: Complete challenge
         const authRes = await cognitoRequest('RespondToAuthChallenge', {
@@ -1566,6 +1718,150 @@ export async function loginWithPasskey(email) {
         }
         debugLog('auth', 'loginWithPasskey:failed', { email, error: e.message });
         throw e;
+    }
+}
+
+/**
+ * Login via passkey autofill (Conditional UI).
+ *
+ * Two modes:
+ * - With email: Uses Cognito challenge + conditional mediation (single biometric prompt)
+ * - Without email: Discovery flow with local challenge, then re-auth via loginWithPasskey
+ *   (requires two biometric prompts — Cognito needs a username for its challenge)
+ *
+ * @param {Object} [options]
+ * @param {string} [options.email] - If known, enables single-prompt flow
+ * @param {AbortSignal} [options.signal] - AbortController signal for cancellation
+ * @returns {Promise<Object>} Token object on success
+ * @throws {Error} If conditional mediation is not available
+ */
+export async function loginWithConditionalUI(options = {}) {
+    requireConfig();
+
+    if (!await isConditionalMediationAvailable()) {
+        throw new Error('Conditional mediation not available in this browser');
+    }
+
+    // Abort any previous conditional request
+    abortConditionalRequest();
+
+    var controller = new AbortController();
+    _conditionalAbortController = controller;
+
+    // Merge user signal with internal controller
+    var signal = options.signal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal;
+
+    var rpId = config.relyingPartyId || window.location.hostname;
+
+    if (options.email) {
+        // Mode A: Email known — use Cognito challenge for single-prompt flow
+        try {
+            var initRes = await cognitoRequest('InitiateAuth', {
+                AuthFlow: 'USER_AUTH',
+                ClientId: config.clientId,
+                AuthParameters: {
+                    USERNAME: options.email,
+                    PREFERRED_CHALLENGE: 'WEB_AUTHN'
+                }
+            });
+
+            if (initRes.ChallengeName !== 'WEB_AUTHN') {
+                throw new Error('Passkey not available for this user');
+            }
+
+            var credOpts = JSON.parse(initRes.ChallengeParameters.CREDENTIAL_REQUEST_OPTIONS);
+            var credential = await navigator.credentials.get({
+                publicKey: {
+                    challenge: b64ToArrayBuffer(credOpts.challenge),
+                    rpId: credOpts.rpId,
+                    allowCredentials: [],
+                    userVerification: credOpts.userVerification || 'preferred',
+                    timeout: credOpts.timeout
+                },
+                mediation: 'conditional',
+                signal: signal
+            });
+
+            _conditionalAbortController = null;
+
+            var assertionResponse = buildAssertionResponse(credential);
+
+            var authRes = await cognitoRequest('RespondToAuthChallenge', {
+                ChallengeName: 'WEB_AUTHN',
+                ClientId: config.clientId,
+                Session: initRes.Session,
+                ChallengeResponses: {
+                    USERNAME: options.email,
+                    CREDENTIAL: JSON.stringify(assertionResponse)
+                }
+            });
+
+            if (authRes.AuthenticationResult) {
+                var tokens = {
+                    access_token: authRes.AuthenticationResult.AccessToken,
+                    id_token: authRes.AuthenticationResult.IdToken,
+                    refresh_token: authRes.AuthenticationResult.RefreshToken,
+                    auth_method: 'passkey'
+                };
+                setTokens(tokens);
+                notifyLogin(tokens, 'passkey');
+
+                logSecurityEvent({
+                    class_uid: OCSF_CLASS.AUTHENTICATION,
+                    activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                    activity_name: 'Logon',
+                    status_id: OCSF_STATUS.SUCCESS,
+                    severity_id: OCSF_SEVERITY.INFORMATIONAL,
+                    user_email: options.email,
+                    auth_protocol_id: OCSF_AUTH_PROTOCOL.FIDO2,
+                    auth_protocol: 'WebAuthn/FIDO2',
+                    message: 'User logged in with conditional UI (passkey autofill)'
+                });
+
+                debugLog('auth', 'loginWithConditionalUI:success', { email: options.email, mode: 'email' });
+                return tokens;
+            }
+            throw new Error('Conditional UI authentication failed');
+        } catch (e) {
+            _conditionalAbortController = null;
+            debugLog('auth', 'loginWithConditionalUI:failed', { email: options.email, error: e.message });
+            throw e;
+        }
+    } else {
+        // Mode B: Discovery flow — local challenge, then re-auth
+        try {
+            var challenge = crypto.getRandomValues(new Uint8Array(32));
+            var credential = await navigator.credentials.get({
+                publicKey: {
+                    challenge: challenge.buffer,
+                    rpId: rpId,
+                    allowCredentials: [],
+                    userVerification: 'preferred'
+                },
+                mediation: 'conditional',
+                signal: signal
+            });
+
+            _conditionalAbortController = null;
+
+            // Extract username from userHandle
+            var userHandle = credential.response.userHandle;
+            if (!userHandle || userHandle.byteLength === 0) {
+                throw new Error('No user handle returned — credential may not be discoverable');
+            }
+            var discoveredUser = new TextDecoder().decode(userHandle);
+
+            debugLog('auth', 'loginWithConditionalUI:discovered', { user: discoveredUser });
+
+            // Complete with full Cognito flow (will prompt biometric again)
+            return loginWithPasskey(discoveredUser);
+        } catch (e) {
+            _conditionalAbortController = null;
+            debugLog('auth', 'loginWithConditionalUI:failed', { error: e.message });
+            throw e;
+        }
     }
 }
 
@@ -1658,6 +1954,7 @@ function getAndClearCodeVerifier() {
  */
 export async function loginWithHostedUI(email) {
     requireConfig();
+    abortConditionalRequest();
 
     const state = generateOAuthState();
     storeOAuthState(state);
@@ -1798,6 +2095,7 @@ export async function exchangeCodeForTokens(code, state) {
  * @returns {void|Promise<void>}
  */
 export function logout() {
+    abortConditionalRequest();
     debugLog('auth', 'logout');
     const email = getUserEmail();
 
@@ -1951,13 +2249,81 @@ export async function isPlatformAuthenticatorAvailable() {
  * const caps = await getPasskeyCapabilities();
  * // { supported: true, conditionalMediation: true, platformAuthenticator: true, secureContext: true }
  */
+/**
+ * Detect if the current environment is a WebView (Android, iOS WKWebView, Electron).
+ * @returns {boolean}
+ * @private
+ */
+function detectWebView() {
+    if (typeof navigator === 'undefined') return false;
+    var ua = navigator.userAgent || '';
+    // Android WebView
+    if (/wv\)/.test(ua)) return true;
+    // iOS WKWebView (no Safari in UA)
+    if (/iPhone|iPad/.test(ua) && !/Safari/.test(ua)) return true;
+    // Electron
+    if (/Electron/.test(ua)) return true;
+    return false;
+}
+
 export async function getPasskeyCapabilities() {
-    const supported = isPasskeySupported();
+    var supported = isPasskeySupported();
+    var secureContext = typeof window !== 'undefined' ? window.isSecureContext === true : false;
+
+    // Try WebAuthn Level 3 getClientCapabilities() first
+    if (supported && typeof PublicKeyCredential.getClientCapabilities === 'function') {
+        try {
+            var caps = await PublicKeyCredential.getClientCapabilities();
+            return {
+                supported: supported,
+                conditionalMediation: caps.conditionalMediation === true
+                    || caps['conditional-mediation'] === true,
+                conditionalCreate: caps.conditionalCreate === true
+                    || caps['conditional-create'] === true,
+                platformAuthenticator: supported
+                    ? await isPlatformAuthenticatorAvailable()
+                    : false,
+                secureContext: secureContext,
+                hybridTransport: caps.hybridTransport === true
+                    || caps['hybrid-transport'] === true,
+                passkeyPlatformAuthenticator: caps.passkeyPlatformAuthenticator === true
+                    || caps['passkey-platform-authenticator'] === true,
+                userVerifyingPlatformAuthenticator: caps.userVerifyingPlatformAuthenticator === true
+                    || caps['user-verifying-platform-authenticator'] === true,
+                relatedOrigins: caps.relatedOrigins === true
+                    || caps['related-origins'] === true,
+                signalAllAcceptedCredentials: caps.signalAllAcceptedCredentials === true
+                    || caps['signal-all-accepted-credentials'] === true,
+                signalCurrentUserDetails: caps.signalCurrentUserDetails === true
+                    || caps['signal-current-user-details'] === true,
+                signalUnknownCredential: caps.signalUnknownCredential === true
+                    || caps['signal-unknown-credential'] === true,
+                isWebView: detectWebView(),
+                source: 'getClientCapabilities'
+            };
+        } catch {
+            // Fall through to individual checks
+        }
+    }
+
+    // Fallback: individual feature detection
     return {
-        supported,
+        supported: supported,
         conditionalMediation: supported ? await isConditionalMediationAvailable() : false,
+        conditionalCreate: false,
         platformAuthenticator: supported ? await isPlatformAuthenticatorAvailable() : false,
-        secureContext: typeof window !== 'undefined' ? window.isSecureContext === true : false
+        secureContext: secureContext,
+        hybridTransport: false,
+        passkeyPlatformAuthenticator: false,
+        userVerifyingPlatformAuthenticator: supported
+            ? await isPlatformAuthenticatorAvailable()
+            : false,
+        relatedOrigins: false,
+        signalAllAcceptedCredentials: false,
+        signalCurrentUserDetails: false,
+        signalUnknownCredential: false,
+        isWebView: detectWebView(),
+        source: 'fallback'
     };
 }
 
@@ -1989,7 +2355,7 @@ export async function listPasskeys() {
  * Requires admin scope (use OAuth login).
  * @returns {Promise<void>}
  */
-export async function registerPasskey() {
+export async function registerPasskey(options = {}) {
     const tokens = await getTokens();
     const email = getUserEmail();
 
@@ -2023,10 +2389,18 @@ export async function registerPasskey() {
             pubKeyCredParams: credOpts.pubKeyCredParams,
             timeout: credOpts.timeout || 60000,
             attestation: credOpts.attestation || 'none',
-            authenticatorSelection: credOpts.authenticatorSelection || {
-                authenticatorAttachment: 'platform',
-                residentKey: 'preferred',
-                userVerification: 'preferred'
+            authenticatorSelection: {
+                // Server options as base, then caller overrides, then defaults
+                ...(credOpts.authenticatorSelection || {}),
+                ...(options.authenticatorAttachment !== undefined
+                    ? { authenticatorAttachment: options.authenticatorAttachment }
+                    : {}),
+                residentKey: options.residentKey
+                    || credOpts.authenticatorSelection?.residentKey
+                    || 'required',
+                userVerification: options.userVerification
+                    || credOpts.authenticatorSelection?.userVerification
+                    || 'preferred'
             }
         };
 
@@ -2044,32 +2418,7 @@ export async function registerPasskey() {
         const credential = await navigator.credentials.create({ publicKey: publicKeyOptions });
 
         // Step 4: Format for Cognito
-        const credentialResponse = {
-            id: credential.id,
-            rawId: arrayBufferToB64(credential.rawId),
-            type: credential.type,
-            response: {
-                clientDataJSON: arrayBufferToB64(credential.response.clientDataJSON),
-                attestationObject: arrayBufferToB64(credential.response.attestationObject)
-            },
-            clientExtensionResults: credential.getClientExtensionResults() || {}
-        };
-
-        if (credential.response.getTransports) {
-            credentialResponse.response.transports = credential.response.getTransports();
-        }
-        if (credential.authenticatorAttachment) {
-            credentialResponse.authenticatorAttachment = credential.authenticatorAttachment;
-        }
-        if (credential.response.getPublicKey) {
-            credentialResponse.response.publicKey = arrayBufferToB64(credential.response.getPublicKey());
-        }
-        if (credential.response.getPublicKeyAlgorithm) {
-            credentialResponse.response.publicKeyAlgorithm = credential.response.getPublicKeyAlgorithm();
-        }
-        if (credential.response.getAuthenticatorData) {
-            credentialResponse.response.authenticatorData = arrayBufferToB64(credential.response.getAuthenticatorData());
-        }
+        const credentialResponse = buildCredentialResponse(credential);
 
         // Step 5: Complete registration
         await cognitoRequest('CompleteWebAuthnRegistration', {
@@ -2100,6 +2449,102 @@ export async function registerPasskey() {
         });
         debugLog('passkey', 'registerPasskey:failed', { error: e.message });
         throw e;
+    }
+}
+
+/**
+ * Silently offer passkey upgrade after password login.
+ * Uses conditional create (Chrome 136+, Safari 18+).
+ * Non-blocking — failures are silent (user just keeps using password).
+ *
+ * @param {Object} [options]
+ * @param {AbortSignal} [options.signal] - AbortController signal
+ * @returns {Promise<boolean>} true if passkey was created, false if skipped/failed
+ */
+export async function upgradeToPasskey(options = {}) {
+    requireConfig();
+
+    var tokens = await getTokens();
+    if (!tokens || !hasAdminScope()) {
+        debugLog('passkey', 'upgradeToPasskey:skipped', { reason: 'not authenticated or no admin scope' });
+        return false;
+    }
+
+    // Check browser support for conditional create
+    if (!isPasskeySupported()) return false;
+    if (typeof PublicKeyCredential.isConditionalMediationAvailable !== 'function') return false;
+    if (!await PublicKeyCredential.isConditionalMediationAvailable()) return false;
+
+    try {
+        // Get creation options from Cognito
+        var startRes = await cognitoRequest('StartWebAuthnRegistration', {
+            AccessToken: tokens.access_token
+        });
+
+        var credOpts = startRes.CredentialCreationOptions;
+        var publicKeyOptions = {
+            challenge: b64ToArrayBuffer(credOpts.challenge),
+            rp: { name: credOpts.rp.name, id: credOpts.rp.id },
+            user: {
+                id: b64ToArrayBuffer(credOpts.user.id),
+                name: credOpts.user.name,
+                displayName: credOpts.user.displayName
+            },
+            pubKeyCredParams: credOpts.pubKeyCredParams,
+            timeout: credOpts.timeout || 60000,
+            attestation: credOpts.attestation || 'none',
+            authenticatorSelection: {
+                residentKey: 'required',
+                userVerification: 'preferred'
+                // No authenticatorAttachment — allow any
+            }
+        };
+
+        if (credOpts.excludeCredentials) {
+            publicKeyOptions.excludeCredentials = credOpts.excludeCredentials.map(function(c) {
+                return {
+                    type: c.type,
+                    id: b64ToArrayBuffer(c.id),
+                    transports: c.transports
+                };
+            });
+        }
+
+        // Conditional create — browser may show non-blocking prompt
+        var credential = await navigator.credentials.create({
+            publicKey: publicKeyOptions,
+            mediation: 'conditional',
+            signal: options.signal
+        });
+
+        if (!credential) {
+            debugLog('passkey', 'upgradeToPasskey:skipped', { reason: 'user declined' });
+            return false;
+        }
+
+        // Complete registration with Cognito
+        var credentialResponse = buildCredentialResponse(credential);
+        await cognitoRequest('CompleteWebAuthnRegistration', {
+            AccessToken: tokens.access_token,
+            Credential: credentialResponse
+        });
+
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
+            activity_id: OCSF_ACCOUNT_ACTIVITY.CREATE,
+            activity_name: 'Create',
+            status_id: OCSF_STATUS.SUCCESS,
+            severity_id: OCSF_SEVERITY.INFORMATIONAL,
+            user_email: getUserEmail(),
+            message: 'Passkey upgrade completed via conditional create'
+        });
+
+        debugLog('passkey', 'upgradeToPasskey:success');
+        return true;
+    } catch (e) {
+        // Silent failure — don't disrupt user experience
+        debugLog('passkey', 'upgradeToPasskey:failed', { error: e.message });
+        return false;
     }
 }
 
@@ -2612,11 +3057,13 @@ export default {
     getRedirectUri,
     loginWithPassword,
     loginWithPasskey,
+    loginWithConditionalUI,
     loginWithHostedUI,
     exchangeCodeForTokens,
     logout,
     listPasskeys,
     registerPasskey,
+    upgradeToPasskey,
     deletePasskey,
     onAuthStateChange,
     onLogin,
