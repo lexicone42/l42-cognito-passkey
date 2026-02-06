@@ -2,9 +2,9 @@
  * L42 Cognito Passkey - TypeScript Type Declarations
  *
  * Type declarations for the l42-cognito-passkey authentication library.
- * These types match the exports of src/auth.js (v0.12.1).
+ * These types match the exports of src/auth.js (v0.12.2).
  *
- * @version 0.12.1
+ * @version 0.12.2
  * @license Apache-2.0
  */
 

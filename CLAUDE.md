@@ -4,7 +4,7 @@
 
 L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for AWS Cognito with WebAuthn/Passkey support. It's designed to be copied into projects (no CDN dependency) and used as an ES module.
 
-**Current Version**: 0.12.1
+**Current Version**: 0.12.2
 **License**: Apache-2.0
 **Tests**: ~532 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests)
 
@@ -319,7 +319,7 @@ See `docs/migration.md` for the complete migration guide covering all versions.
 
 ## Future Plans
 
-- **AWS Cedar Integration** - Externalized authorization via Amazon Verified Permissions (post-1.0)
+- **Cedar Policy Authorization** - Externalized authorization via open-source Cedar (`@cedar-policy/cedar-wasm`) (post-1.0)
 - **Semgrep Rules** - Security scanning (post-1.0)
 
 ## Submitting Feedback

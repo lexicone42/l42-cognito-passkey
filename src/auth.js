@@ -8,15 +8,15 @@
  *   import { configure, isAuthenticated, loginWithPassword } from './auth.js';
  *   configure({ clientId: 'xxx', cognitoDomain: 'xxx.auth.region.amazoncognito.com' });
  *
- * @version 0.12.1
+ * @version 0.12.2
  * @license Apache-2.0
  */
 
-export const VERSION = '0.12.1';
+export const VERSION = '0.12.2';
 
 // ==================== CONFIGURATION ====================
 
-const DEFAULT_CONFIG = {
+const DEFAULT_CONFIG = /*#__PURE__*/ {
     cognitoDomain: null,        // REQUIRED: e.g., 'myapp.auth.us-west-2.amazoncognito.com'
     cognitoRegion: 'us-west-2',
     clientId: null,             // REQUIRED: Cognito app client ID
@@ -266,7 +266,7 @@ function isHandlerMode() {
 /**
  * OCSF Event Class UIDs
  */
-const OCSF_CLASS = {
+const OCSF_CLASS = /*#__PURE__*/ {
     AUTHENTICATION: 3001,       // Authentication events (login, logout, token refresh)
     ACCOUNT_CHANGE: 3002        // Account changes (passkey add/delete)
 };
@@ -274,7 +274,7 @@ const OCSF_CLASS = {
 /**
  * OCSF Activity IDs for Authentication (class 3001)
  */
-const OCSF_AUTH_ACTIVITY = {
+const OCSF_AUTH_ACTIVITY = /*#__PURE__*/ {
     LOGON: 1,
     LOGOFF: 2,
     AUTHENTICATION_TICKET: 3,   // Initial token grant
@@ -284,7 +284,7 @@ const OCSF_AUTH_ACTIVITY = {
 /**
  * OCSF Activity IDs for Account Change (class 3002)
  */
-const OCSF_ACCOUNT_ACTIVITY = {
+const OCSF_ACCOUNT_ACTIVITY = /*#__PURE__*/ {
     CREATE: 1,                  // Passkey registered
     DELETE: 4                   // Passkey deleted
 };
@@ -292,7 +292,7 @@ const OCSF_ACCOUNT_ACTIVITY = {
 /**
  * OCSF Status IDs
  */
-const OCSF_STATUS = {
+const OCSF_STATUS = /*#__PURE__*/ {
     SUCCESS: 1,
     FAILURE: 2
 };
@@ -300,7 +300,7 @@ const OCSF_STATUS = {
 /**
  * OCSF Severity IDs
  */
-const OCSF_SEVERITY = {
+const OCSF_SEVERITY = /*#__PURE__*/ {
     INFORMATIONAL: 1,
     LOW: 2,
     MEDIUM: 3,
@@ -311,7 +311,7 @@ const OCSF_SEVERITY = {
 /**
  * Authentication protocol IDs (OCSF auth_protocol_id)
  */
-const OCSF_AUTH_PROTOCOL = {
+const OCSF_AUTH_PROTOCOL = /*#__PURE__*/ {
     UNKNOWN: 0,
     PASSWORD: 2,                // Username/Password
     OAUTH2: 10,                 // OAuth 2.0 / OIDC
@@ -492,7 +492,7 @@ export function getDiagnostics() {
 }
 
 // Token refresh configuration by auth method
-const REFRESH_CONFIG = {
+const REFRESH_CONFIG = /*#__PURE__*/ {
     password: {
         cookieMaxAge: 86400,      // 1 day in seconds
         refreshBefore: 300000     // Refresh 5 minutes before expiry (ms)
@@ -565,7 +565,7 @@ function requireConfig() {
  * These require 3 parts minimum for a valid registrable domain.
  * @see https://publicsuffix.org/list/
  */
-const PUBLIC_SUFFIXES = [
+const PUBLIC_SUFFIXES = /*#__PURE__*/ [
     // UK
     'co.uk', 'org.uk', 'me.uk', 'ltd.uk', 'plc.uk',
     // Australia
@@ -1368,7 +1368,7 @@ export function isReadonly() {
 
 // ==================== COGNITO API ====================
 
-const RETRY_CONFIG = {
+const RETRY_CONFIG = /*#__PURE__*/ {
     maxRetries: 3,
     baseDelayMs: 1000,
     maxDelayMs: 10000,
@@ -2946,7 +2946,7 @@ const sessionExpiredListeners = new Set();
  * Default auto-refresh configuration.
  * Can be overridden via startAutoRefresh(options).
  */
-const AUTO_REFRESH_DEFAULTS = {
+const AUTO_REFRESH_DEFAULTS = /*#__PURE__*/ {
     intervalMs: 60000,       // Check every 60 seconds
     pauseWhenHidden: true    // Pause when tab is not visible
 };

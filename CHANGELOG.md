@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.2] - 2026-02-06
+
+### Added
+
+- **Tree-Shaking Support** — bundler optimization hints for Webpack, Rollup, Vite, and esbuild
+  - `"sideEffects": false` in `package.json` enables bundlers to eliminate unused exports
+  - `/*#__PURE__*/` annotations on 11 internal constants (`DEFAULT_CONFIG`, `OCSF_*`, `RETRY_CONFIG`, `REFRESH_CONFIG`, `AUTO_REFRESH_DEFAULTS`, `PUBLIC_SUFFIXES`) enable minifiers to drop unused definitions
+  - No API or behavioral changes — purely bundler hints
+
+### Changed
+
+- **Cedar backlog** updated to reference open-source Cedar (`@cedar-policy/cedar-wasm`) instead of Amazon Verified Permissions, aligning with the library's self-hosted philosophy
+
 ## [0.12.1] - 2026-02-05
 
 ### Added

@@ -1,6 +1,7 @@
 {
   "name": "l42-cognito-passkey",
-  "version": "0.12.1",
+  "version": "0.12.2",
+  "sideEffects": false,
   "description": "AWS Cognito authentication with WebAuthn/Passkey support - self-hosted, configurable",
   "type": "module",
   "main": "src/auth.js",

@@ -41,21 +41,26 @@ See `docs/integration-feedback.md` for:
 **Status**: Backlog
 **Description**: Publish auth module to npm for easier integration.
 - TypeScript definitions
-- Tree-shaking support
+- ~~Tree-shaking support~~ → Bundler hints added in v0.12.2 (`sideEffects: false`, `/*#__PURE__*/`)
 
 ### ~~Client-Side Login Rate Limiting~~ → Completed in v0.12.1
 
 ## Post-1.0: Advanced Authorization
 
-### AWS Cedar Integration
+### Cedar Policy Authorization
 **Status**: Design complete, implementation post-1.0
-**Description**: Externalized authorization via Amazon Verified Permissions.
+**Description**: Externalized authorization via open-source Cedar (`@cedar-policy/cedar-wasm`).
+
+Cedar is the policy language behind Amazon Verified Permissions, but the open-source WASM engine
+runs anywhere — Lambda, Express middleware, or even client-side for offline-capable apps.
+No AWS managed service dependency required.
 
 Benefits:
-- Formal policy verification
-- Externalized policies (update without deploy)
-- Native Cognito token support
-- ABAC beyond simple role checks
+- Formal policy verification (Cedar's type system catches invalid policies)
+- Externalized policies (update without deploy — store in S3, DynamoDB, etc.)
+- Native JWT claim support (map Cognito groups to Cedar principals)
+- ABAC beyond simple role checks (attribute-based conditions, resource hierarchies)
+- Self-hosted: `@cedar-policy/cedar-wasm` runs in Node.js, Deno, and browsers
 
 ### Semgrep Security Rules
 **Status**: Post-1.0
@@ -67,6 +72,10 @@ Benefits:
 ---
 
 ## Completed
+
+### v0.12.2
+- [x] **Tree-Shaking Support** — `sideEffects: false` + `/*#__PURE__*/` annotations on 11 constants
+- [x] Cedar backlog updated for open-source `@cedar-policy/cedar-wasm`
 
 ### v0.12.1
 - [x] **Client-Side Login Rate Limiting** — exponential backoff on failed login attempts
