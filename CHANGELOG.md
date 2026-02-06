@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.1] - 2026-02-05
+
+### Added
+
+- **Client-Side Login Rate Limiting** — exponential backoff on failed login attempts
+  - Per-email attempt tracking with configurable threshold (`maxLoginAttemptsBeforeDelay`, default: 3)
+  - Exponential backoff with jitter (`loginBackoffBaseMs`: 1000ms, `loginBackoffMaxMs`: 30s)
+  - Rate limiting applied to `loginWithPassword()`, `loginWithPasskey()`, `loginWithConditionalUI()` (Mode A)
+  - Counter resets on successful login, lives only in memory (page reload clears)
+  - `getLoginAttemptInfo(email)` — exported for UI to display "try again in N seconds" messages
+  - OCSF event (HIGH severity) logged when threshold is first breached
+  - Cognito account lockout detection — `NotAuthorizedException` with "temporarily locked" or "password attempts exceeded" re-thrown with clear message and CRITICAL OCSF event
+
+### TypeScript
+
+- New interface: `LoginAttemptInfo` (attemptsRemaining, nextRetryMs, isThrottled)
+- New config options: `maxLoginAttemptsBeforeDelay`, `loginBackoffBaseMs`, `loginBackoffMaxMs`
+- New export: `getLoginAttemptInfo(email: string): LoginAttemptInfo | null`
+
+### Tests
+
+- 40 new tests in `login-rate-limiting.test.js` (532 total)
+
 ## [0.12.0] - 2026-02-05
 
 ### Added

@@ -47,7 +47,7 @@ All events follow the OCSF v1.0 base event schema:
     "metadata": {
         "product": {
             "name": "l42-cognito-passkey",
-            "version": "0.12.0",
+            "version": "0.12.1",
             "vendor_name": "L42"
         }
     },
@@ -102,8 +102,8 @@ Covers credential management.
 | Informational | 1 | Successful operations |
 | Low | 2 | User-cancelled operations, MFA prompts |
 | Medium | 3 | Failed authentications, token errors |
-| High | 4 | CSRF/state validation failures |
-| Critical | 5 | Reserved for future use |
+| High | 4 | CSRF/state validation failures, login rate limit threshold breach |
+| Critical | 5 | Cognito account lockout detected |
 
 ## AWS Security Lake Integration
 
@@ -199,6 +199,8 @@ configure({
 | `logout()` | Success | Authentication | Logoff |
 | `registerPasskey()` | Success/Failure | Account Change | Create |
 | `deletePasskey()` | Success/Failure | Account Change | Delete |
+| Rate limit threshold | Failure (HIGH) | Authentication | Logon |
+| Cognito account lockout | Failure (CRITICAL) | Authentication | Logon |
 
 ## Disabling Logging
 

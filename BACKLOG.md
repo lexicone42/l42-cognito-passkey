@@ -43,12 +43,7 @@ See `docs/integration-feedback.md` for:
 - TypeScript definitions
 - Tree-shaking support
 
-### Client-Side Login Rate Limiting
-**Status**: Not started
-**Description**: Exponential backoff on failed login attempts.
-- Configurable `maxLoginAttemptsBeforeDelay` and `loginBackoffMs`
-- OCSF logging for threshold breaches
-- Surface Cognito account lockout errors
+### ~~Client-Side Login Rate Limiting~~ → Completed in v0.12.1
 
 ## Post-1.0: Advanced Authorization
 
@@ -72,6 +67,14 @@ Benefits:
 ---
 
 ## Completed
+
+### v0.12.1
+- [x] **Client-Side Login Rate Limiting** — exponential backoff on failed login attempts
+- [x] Per-email tracking with `maxLoginAttemptsBeforeDelay`, `loginBackoffBaseMs`, `loginBackoffMaxMs` config
+- [x] `getLoginAttemptInfo()` for UI display
+- [x] OCSF HIGH severity on threshold breach, CRITICAL on Cognito lockout
+- [x] Cognito account lockout detection and clear error messaging
+- [x] 40 new tests (532 total)
 
 ### v0.12.0
 - [x] **Conditional UI / Passkey Autofill** — `loginWithConditionalUI()` with Mode A (email known, single prompt) and Mode B (discovery, two prompts)

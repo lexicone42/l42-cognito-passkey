@@ -2,9 +2,9 @@
  * L42 Cognito Passkey - TypeScript Type Declarations
  *
  * Type declarations for the l42-cognito-passkey authentication library.
- * These types match the exports of src/auth.js (v0.12.0).
+ * These types match the exports of src/auth.js (v0.12.1).
  *
- * @version 0.12.0
+ * @version 0.12.1
  * @license Apache-2.0
  */
 
@@ -101,6 +101,12 @@ export interface AuthConfigOptions {
    * Default: false
    */
   autoUpgradeToPasskey?: boolean;
+  /** Failed login attempts before exponential backoff kicks in (default: 3) */
+  maxLoginAttemptsBeforeDelay?: number;
+  /** Base delay in ms for login backoff (doubles each attempt, default: 1000) */
+  loginBackoffBaseMs?: number;
+  /** Maximum delay cap in ms for login backoff (default: 30000) */
+  loginBackoffMaxMs?: number;
 }
 
 /**
@@ -232,6 +238,19 @@ export interface DiagnosticsInfo {
   autoRefreshActive: boolean;
   debug: boolean | string;
   version: string;
+}
+
+/**
+ * Login attempt state for a given email, returned by getLoginAttemptInfo().
+ * Used by UI to display "try again in N seconds" messages.
+ */
+export interface LoginAttemptInfo {
+  /** Remaining attempts before backoff activates */
+  attemptsRemaining: number;
+  /** Estimated delay in ms for the next attempt (0 if not throttled) */
+  nextRetryMs: number;
+  /** Whether the email is currently being rate-limited */
+  isThrottled: boolean;
 }
 
 // ==================== EXPORTS ====================
@@ -540,6 +559,17 @@ export function getDiagnostics(): DiagnosticsInfo;
 /** Clear the debug event history. */
 export function clearDebugHistory(): void;
 
+// -- Login Rate Limiting --
+
+/**
+ * Get login attempt info for a given email (for UI display).
+ * Returns null if no history exists for this email.
+ *
+ * @param email - The email to check
+ * @returns Attempt state with attemptsRemaining, nextRetryMs, isThrottled; or null
+ */
+export function getLoginAttemptInfo(email: string): LoginAttemptInfo | null;
+
 // ==================== DEFAULT EXPORT ====================
 
 declare const auth: {
@@ -591,6 +621,7 @@ declare const auth: {
   getDebugHistory: typeof getDebugHistory;
   getDiagnostics: typeof getDiagnostics;
   clearDebugHistory: typeof clearDebugHistory;
+  getLoginAttemptInfo: typeof getLoginAttemptInfo;
 };
 
 export default auth;

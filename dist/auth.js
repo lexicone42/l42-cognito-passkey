@@ -8,11 +8,11 @@
  *   import { configure, isAuthenticated, loginWithPassword } from './auth.js';
  *   configure({ clientId: 'xxx', cognitoDomain: 'xxx.auth.region.amazoncognito.com' });
  *
- * @version 0.12.0
+ * @version 0.12.1
  * @license Apache-2.0
  */
 
-export const VERSION = '0.12.0';
+export const VERSION = '0.12.1';
 
 // ==================== CONFIGURATION ====================
 
@@ -51,7 +51,11 @@ const DEFAULT_CONFIG = {
     debug: false,
     // Auto-upgrade: silently offer passkey registration after password login
     // Requires browser support for conditional create (Chrome 136+, Safari 18+)
-    autoUpgradeToPasskey: false
+    autoUpgradeToPasskey: false,
+    // Login rate limiting: exponential backoff on failed attempts
+    maxLoginAttemptsBeforeDelay: 3,     // Failed attempts before backoff kicks in
+    loginBackoffBaseMs: 1000,           // Initial delay (doubles each time)
+    loginBackoffMaxMs: 30000            // Cap at 30 seconds
 };
 
 // ==================== TOKEN STORAGE ABSTRACTION ====================
@@ -502,6 +506,9 @@ const REFRESH_CONFIG = {
 let config = { ...DEFAULT_CONFIG };
 let _configured = false;
 let _conditionalAbortController = null;
+
+// Login rate limiting: per-email attempt tracking { email → { count, lastAttemptTime } }
+const _loginAttempts = new Map();
 
 /**
  * Abort any pending conditional UI (passkey autofill) request.
@@ -1378,6 +1385,101 @@ function getBackoffDelay(attempt) {
     return Math.min(exponentialDelay + jitter, RETRY_CONFIG.maxDelayMs);
 }
 
+// ============================================================================
+// Login Rate Limiting
+// ============================================================================
+
+/**
+ * Check rate limit for login attempts and apply delay if needed.
+ * Called at the top of login functions. Applies exponential backoff
+ * after threshold failures — the delay IS the rate limiting (no throws).
+ */
+async function checkLoginRateLimit(email) {
+    const entry = _loginAttempts.get(email);
+    if (!entry || entry.count < config.maxLoginAttemptsBeforeDelay) return;
+
+    const attemptsOverThreshold = entry.count - config.maxLoginAttemptsBeforeDelay;
+    const exponentialDelay = config.loginBackoffBaseMs * Math.pow(2, attemptsOverThreshold);
+    const jitter = Math.random() * 0.3 * exponentialDelay;
+    const delayMs = Math.min(exponentialDelay + jitter, config.loginBackoffMaxMs);
+
+    debugLog('auth', 'login:throttled', {
+        email,
+        attemptCount: entry.count,
+        delayMs: Math.round(delayMs)
+    });
+
+    await sleep(delayMs);
+}
+
+/**
+ * Record a failed login attempt. Logs OCSF event on first threshold breach.
+ */
+function recordLoginFailure(email) {
+    const entry = _loginAttempts.get(email) || { count: 0, lastAttemptTime: 0 };
+    entry.count += 1;
+    entry.lastAttemptTime = Date.now();
+    _loginAttempts.set(email, entry);
+
+    // Log OCSF on first threshold breach
+    if (entry.count === config.maxLoginAttemptsBeforeDelay) {
+        logSecurityEvent({
+            class_uid: OCSF_CLASS.AUTHENTICATION,
+            activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+            activity_name: 'Logon',
+            status_id: OCSF_STATUS.FAILURE,
+            severity_id: OCSF_SEVERITY.HIGH,
+            user_email: email,
+            message: 'Login rate limit activated: ' + entry.count + ' failed attempts for ' + email
+        });
+    }
+}
+
+/**
+ * Reset login attempt counter on successful login.
+ */
+function resetLoginAttempts(email) {
+    _loginAttempts.delete(email);
+}
+
+/**
+ * Detect Cognito account lockout from error response.
+ * Returns true if the error indicates a server-side lockout.
+ */
+function detectCognitoLockout(error) {
+    const msg = (error.message || '').toLowerCase();
+    const type = (error.__type || error.code || '').toLowerCase();
+    return (
+        (type.includes('notauthorizedexception') || msg.includes('notauthorizedexception')) &&
+        (msg.includes('temporarily locked') || msg.includes('password attempts exceeded'))
+    );
+}
+
+/**
+ * Get login attempt info for a given email (for UI display).
+ * Returns null if no history exists for this email.
+ */
+export function getLoginAttemptInfo(email) {
+    const entry = _loginAttempts.get(email);
+    if (!entry) return null;
+
+    const threshold = config.maxLoginAttemptsBeforeDelay;
+    const isThrottled = entry.count >= threshold;
+    let nextRetryMs = 0;
+
+    if (isThrottled) {
+        const attemptsOverThreshold = entry.count - threshold;
+        const exponentialDelay = config.loginBackoffBaseMs * Math.pow(2, attemptsOverThreshold);
+        nextRetryMs = Math.min(exponentialDelay, config.loginBackoffMaxMs);
+    }
+
+    return {
+        attemptsRemaining: Math.max(0, threshold - entry.count),
+        nextRetryMs,
+        isThrottled
+    };
+}
+
 async function cognitoRequest(action, body) {
     requireConfig();
     let lastError;
@@ -1464,6 +1566,7 @@ export function getRedirectUri() {
 export async function loginWithPassword(email, password) {
     requireConfig();
     abortConditionalRequest();
+    await checkLoginRateLimit(email);
 
     try {
         const res = await cognitoRequest('InitiateAuth', {
@@ -1498,6 +1601,7 @@ export async function loginWithPassword(email, password) {
             });
 
             debugLog('auth', 'loginWithPassword:success', { email });
+            resetLoginAttempts(email);
 
             // Non-blocking passkey upgrade offer (fire and forget)
             if (config.autoUpgradeToPasskey) {
@@ -1535,6 +1639,23 @@ export async function loginWithPassword(email, password) {
             });
         }
         debugLog('auth', 'loginWithPassword:failed', { email, error: e.message });
+        if (!e.message.includes('Additional verification required')) {
+            recordLoginFailure(email);
+            if (detectCognitoLockout(e)) {
+                logSecurityEvent({
+                    class_uid: OCSF_CLASS.AUTHENTICATION,
+                    activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                    activity_name: 'Logon',
+                    status_id: OCSF_STATUS.FAILURE,
+                    severity_id: OCSF_SEVERITY.CRITICAL,
+                    user_email: email,
+                    auth_protocol_id: OCSF_AUTH_PROTOCOL.PASSWORD,
+                    auth_protocol: 'Password',
+                    message: 'Cognito account lockout detected for ' + email
+                });
+                throw new Error('Account temporarily locked by Cognito. Please try again later or reset your password.');
+            }
+        }
         throw e;
     }
 }
@@ -1614,6 +1735,7 @@ function buildCredentialResponse(credential) {
 export async function loginWithPasskey(email) {
     requireConfig();
     abortConditionalRequest();
+    await checkLoginRateLimit(email);
 
     try {
         // Step 1: Initiate auth with USER_AUTH and PREFERRED_CHALLENGE=WEB_AUTHN
@@ -1698,6 +1820,7 @@ export async function loginWithPasskey(email) {
             });
 
             debugLog('auth', 'loginWithPasskey:success', { email });
+            resetLoginAttempts(email);
             return tokens;
         }
         throw new Error('Passkey authentication failed');
@@ -1717,6 +1840,23 @@ export async function loginWithPasskey(email) {
             });
         }
         debugLog('auth', 'loginWithPasskey:failed', { email, error: e.message });
+        if (!e.message.includes('Passkey not available')) {
+            recordLoginFailure(email);
+            if (detectCognitoLockout(e)) {
+                logSecurityEvent({
+                    class_uid: OCSF_CLASS.AUTHENTICATION,
+                    activity_id: OCSF_AUTH_ACTIVITY.LOGON,
+                    activity_name: 'Logon',
+                    status_id: OCSF_STATUS.FAILURE,
+                    severity_id: OCSF_SEVERITY.CRITICAL,
+                    user_email: email,
+                    auth_protocol_id: OCSF_AUTH_PROTOCOL.FIDO2,
+                    auth_protocol: 'WebAuthn/FIDO2',
+                    message: 'Cognito account lockout detected for ' + email
+                });
+                throw new Error('Account temporarily locked by Cognito. Please try again later or reset your password.');
+            }
+        }
         throw e;
     }
 }
@@ -1757,6 +1897,7 @@ export async function loginWithConditionalUI(options = {}) {
 
     if (options.email) {
         // Mode A: Email known — use Cognito challenge for single-prompt flow
+        await checkLoginRateLimit(options.email);
         try {
             var initRes = await cognitoRequest('InitiateAuth', {
                 AuthFlow: 'USER_AUTH',
@@ -1821,12 +1962,14 @@ export async function loginWithConditionalUI(options = {}) {
                 });
 
                 debugLog('auth', 'loginWithConditionalUI:success', { email: options.email, mode: 'email' });
+                resetLoginAttempts(options.email);
                 return tokens;
             }
             throw new Error('Conditional UI authentication failed');
         } catch (e) {
             _conditionalAbortController = null;
             debugLog('auth', 'loginWithConditionalUI:failed', { email: options.email, error: e.message });
+            recordLoginFailure(options.email);
             throw e;
         }
     } else {
@@ -3085,5 +3228,7 @@ export default {
     // Debug & diagnostics (v0.11.0+)
     getDebugHistory,
     getDiagnostics,
-    clearDebugHistory
+    clearDebugHistory,
+    // Login rate limiting (v0.12.1+)
+    getLoginAttemptInfo
 };

@@ -2,7 +2,7 @@
 
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-blueviolet?logo=anthropic&logoColor=white)](https://claude.ai/code)
 [![CI](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml/badge.svg)](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.12.0-blue)](https://github.com/lexicone42/l42-cognito-passkey/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.12.1-blue)](https://github.com/lexicone42/l42-cognito-passkey/blob/main/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
 [![Tests](https://img.shields.io/badge/tests-350-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
@@ -154,7 +154,7 @@ declare module '/auth/auth.js' {
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.12.0"
+console.log(VERSION); // "0.12.1"
 ```
 
 ## Claude Code Integration
