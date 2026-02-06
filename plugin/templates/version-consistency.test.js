@@ -107,7 +107,7 @@ describe('Version Consistency', () => {
             // Check for old 1.x versions (except in changelog history)
             if (!file.includes('CHANGELOG')) {
                 const hasOld1x = /["']1\.[0-9]+\.[0-9]+["']/.test(content) ||
-                                 /version.*1\.[0-9]+/i.test(content);
+                                 /version\s+1\.[0-9]+/i.test(content);
                 expect(hasOld1x, `${file} contains stale 1.x version`).toBe(false);
             }
         }

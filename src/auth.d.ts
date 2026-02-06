@@ -2,9 +2,9 @@
  * L42 Cognito Passkey - TypeScript Type Declarations
  *
  * Type declarations for the l42-cognito-passkey authentication library.
- * These types match the exports of src/auth.js (v0.10.0).
+ * These types match the exports of src/auth.js (v0.11.0).
  *
- * @version 0.10.0
+ * @version 0.11.0
  * @license Apache-2.0
  */
 
@@ -87,6 +87,14 @@ export interface AuthConfigOptions {
    * Set to 'console' for console.log output, a function to receive events, or null to disable.
    */
   securityLogger?: 'console' | ((event: Record<string, unknown>) => void) | null;
+  /**
+   * Debug logging mode.
+   * - false: disabled (default)
+   * - true: log to console.debug with [l42-auth] prefix
+   * - 'verbose': also include data payloads in console output
+   * - function: receive debug events programmatically
+   */
+  debug?: boolean | 'verbose' | ((event: DebugEvent) => void);
 }
 
 /**
@@ -131,6 +139,41 @@ export interface AutoRefreshOptions {
   intervalMs?: number;
   /** Whether to pause refresh when the tab is hidden (default: true) */
   pauseWhenHidden?: boolean;
+}
+
+/**
+ * A debug event logged by the library.
+ */
+export interface DebugEvent {
+  /** Unix timestamp in milliseconds */
+  timestamp: number;
+  /** Event category (token, auth, config, state, refresh, session, passkey) */
+  category: string;
+  /** Human-readable event message */
+  message: string;
+  /** Optional data payload */
+  data?: Record<string, unknown>;
+  /** Library version */
+  version: string;
+}
+
+/**
+ * Current auth state diagnostics snapshot.
+ */
+export interface DiagnosticsInfo {
+  configured: boolean;
+  tokenStorage: string;
+  hasTokens: boolean;
+  isAuthenticated: boolean;
+  tokenExpiry: Date | null;
+  authMethod: string | null;
+  userEmail: string | null;
+  userGroups: string[];
+  isAdmin: boolean;
+  isReadonly: boolean;
+  autoRefreshActive: boolean;
+  debug: boolean | string;
+  version: string;
 }
 
 // ==================== EXPORTS ====================
@@ -389,6 +432,17 @@ export function onSessionExpired(callback: (reason: string) => void): () => void
  */
 export function fetchWithAuth(url: string, options?: RequestInit): Promise<Response>;
 
+// -- Debug & Diagnostics --
+
+/** Get a copy of the debug event history (newest last). */
+export function getDebugHistory(): DebugEvent[];
+
+/** Get a snapshot of current auth diagnostics. Works regardless of debug mode. */
+export function getDiagnostics(): DiagnosticsInfo;
+
+/** Clear the debug event history. */
+export function clearDebugHistory(): void;
+
 // ==================== DEFAULT EXPORT ====================
 
 declare const auth: {
@@ -435,6 +489,9 @@ declare const auth: {
   isConditionalMediationAvailable: typeof isConditionalMediationAvailable;
   isPlatformAuthenticatorAvailable: typeof isPlatformAuthenticatorAvailable;
   getPasskeyCapabilities: typeof getPasskeyCapabilities;
+  getDebugHistory: typeof getDebugHistory;
+  getDiagnostics: typeof getDiagnostics;
+  clearDebugHistory: typeof clearDebugHistory;
 };
 
 export default auth;

@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-02-05
+
+### Added
+
+- **Debug Logging & Diagnostics Mode** (`debug` config option)
+  - `debug: true` — logs to `console.debug` with `[l42-auth]` prefix
+  - `debug: 'verbose'` — includes data payloads in console output
+  - `debug: function(event)` — receive events programmatically (for Datadog, Sentry, etc.)
+  - In-memory ring buffer of last 100 events with timestamps and version tags
+
+- **`getDebugHistory()`** — retrieve copy of debug event history (newest last)
+
+- **`getDiagnostics()`** — snapshot of current auth state:
+  - `configured`, `tokenStorage`, `hasTokens`, `isAuthenticated`, `tokenExpiry`
+  - `authMethod`, `userEmail`, `userGroups`, `isAdmin`, `isReadonly`
+  - `autoRefreshActive`, `debug`, `version`
+
+- **`clearDebugHistory()`** — reset debug event buffer
+
+- **Instrumented operations** — 16 debug log points across:
+  - Token ops: `setTokens`, `clearTokens`, `refreshTokens:success/failed`
+  - Auth flows: `loginWithPassword:success/failed`, `loginWithPasskey:success/failed`, `loginWithHostedUI:redirect`, `exchangeCodeForTokens:success/failed`, `logout`
+  - State changes: `authStateChange`, `login`, `logout`
+  - Auto-refresh: `autoRefresh:start`, `autoRefresh:stop`
+  - Sessions: `sessionExpired`
+  - Passkeys: `registerPasskey:success/failed`, `deletePasskey:success/failed`
+
+- **TypeScript types**: `DebugEvent`, `DiagnosticsInfo` interfaces; `debug` option in `AuthConfigOptions`
+
+- **34 new tests** for debug logging, ring buffer, diagnostics shape, console modes, function callback, and integration
+
+### Stats
+
+- **384 tests passing** (was 350)
+
 ## [0.10.1] - 2026-02-05
 
 ### Removed

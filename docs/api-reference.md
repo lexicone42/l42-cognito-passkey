@@ -69,7 +69,7 @@ Library version string.
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.10.1"
+console.log(VERSION); // "0.11.0"
 ```
 
 ## Authentication State
@@ -584,6 +584,86 @@ const res = await fetchWithAuth('/api/data', {
 1. Attempts `refreshTokens()`
 2. Retries the request with fresh tokens
 3. If refresh fails: clears tokens, fires `onSessionExpired`, throws
+
+## Debug & Diagnostics (v0.11.0+)
+
+### configure({ debug })
+
+Enable debug logging to diagnose auth issues.
+
+```javascript
+import { configure } from '/auth/auth.js';
+
+// Console output with [l42-auth] prefix
+configure({ clientId: '...', cognitoDomain: '...', debug: true });
+
+// Verbose mode — includes data payloads
+configure({ clientId: '...', cognitoDomain: '...', debug: 'verbose' });
+
+// Custom callback (e.g., send to Datadog, Sentry)
+configure({
+    clientId: '...', cognitoDomain: '...',
+    debug: (event) => {
+        myLogger.debug(event.category, event.message, event.data);
+    }
+});
+```
+
+### getDiagnostics()
+
+Get a snapshot of current auth state. Works regardless of whether debug mode is enabled.
+
+```javascript
+import { getDiagnostics } from '/auth/auth.js';
+
+const diag = getDiagnostics();
+// {
+//   configured: true,
+//   tokenStorage: 'localStorage',
+//   hasTokens: true,
+//   isAuthenticated: true,
+//   tokenExpiry: Date,
+//   authMethod: 'password',
+//   userEmail: 'user@example.com',
+//   userGroups: ['admin'],
+//   isAdmin: true,
+//   isReadonly: false,
+//   autoRefreshActive: true,
+//   debug: true,
+//   version: '0.11.0'
+// }
+```
+
+**Returns:** `DiagnosticsInfo`
+
+### getDebugHistory()
+
+Get a copy of the last 100 debug events (newest last). Returns empty array when debug is disabled.
+
+```javascript
+import { getDebugHistory } from '/auth/auth.js';
+
+const events = getDebugHistory();
+events.forEach(e => {
+    console.log(`[${new Date(e.timestamp).toISOString()}] ${e.category}: ${e.message}`, e.data);
+});
+```
+
+**Returns:** `DebugEvent[]`
+
+Each event has: `{ timestamp, category, message, data?, version }`
+
+### clearDebugHistory()
+
+Clear the debug event buffer.
+
+```javascript
+import { clearDebugHistory } from '/auth/auth.js';
+
+clearDebugHistory();
+```
+
+**Returns:** `void`
 
 ## JWT Utilities
 

@@ -8,11 +8,11 @@
  *   import { configure, isAuthenticated, loginWithPassword } from './auth.js';
  *   configure({ clientId: 'xxx', cognitoDomain: 'xxx.auth.region.amazoncognito.com' });
  *
- * @version 0.10.1
+ * @version 0.11.0
  * @license Apache-2.0
  */
 
-export const VERSION = '0.10.1';
+export const VERSION = '0.11.0';
 
 // ==================== CONFIGURATION ====================
 
@@ -42,7 +42,13 @@ const DEFAULT_CONFIG = {
     // Structured logging for OCSF/Security Lake integration
     // Set to a function(event) to receive OCSF-formatted security events
     // Set to 'console' for console.log output, or null to disable
-    securityLogger: null
+    securityLogger: null,
+    // Debug logging mode:
+    // - false: disabled (default)
+    // - true: log to console.debug with [l42-auth] prefix
+    // - 'verbose': also include data payloads in console output
+    // - function(event): receive debug events programmatically
+    debug: false
 };
 
 // ==================== TOKEN STORAGE ABSTRACTION ====================
@@ -388,6 +394,96 @@ function logSecurityEvent({
     }
 }
 
+// ==================== DEBUG LOGGING ====================
+
+const DEBUG_HISTORY_MAX = 100;
+const _debugHistory = [];
+
+/**
+ * Log a debug event to the ring buffer and optional output.
+ * @param {string} category - Event category (token, auth, config, state, refresh, session, passkey)
+ * @param {string} message - Event message
+ * @param {Object} [data] - Optional data payload
+ * @private
+ */
+function debugLog(category, message, data) {
+    if (!config.debug) return;
+
+    const event = {
+        timestamp: Date.now(),
+        category,
+        message,
+        ...(data !== undefined ? { data } : {}),
+        version: VERSION
+    };
+
+    _debugHistory.push(event);
+    if (_debugHistory.length > DEBUG_HISTORY_MAX) {
+        _debugHistory.shift();
+    }
+
+    if (config.debug === true) {
+        console.debug('[l42-auth]', category, message);
+    } else if (config.debug === 'verbose') {
+        console.debug('[l42-auth]', category, message, data !== undefined ? data : '');
+    } else if (typeof config.debug === 'function') {
+        try {
+            config.debug(event);
+        } catch {
+            // Don't let debug callback errors break auth flow
+        }
+    }
+}
+
+/**
+ * Get a copy of the debug event history.
+ * Returns an empty array if debug mode is disabled.
+ * @returns {Array<Object>} Array of debug events (newest last)
+ */
+export function getDebugHistory() {
+    return [..._debugHistory];
+}
+
+/**
+ * Clear the debug event history.
+ */
+export function clearDebugHistory() {
+    _debugHistory.length = 0;
+}
+
+/**
+ * Get a snapshot of current auth diagnostics.
+ * Works regardless of debug mode.
+ * @returns {Object} Current auth state summary
+ */
+export function getDiagnostics() {
+    const tokens = _configured ? getTokensSync() : null;
+    let tokenExpiry = null;
+    if (tokens && tokens.id_token) {
+        try {
+            tokenExpiry = new Date(UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000);
+        } catch {
+            // Invalid token
+        }
+    }
+
+    return {
+        configured: _configured,
+        tokenStorage: config.tokenStorage,
+        hasTokens: tokens !== null,
+        isAuthenticated: _configured ? isAuthenticated() : false,
+        tokenExpiry,
+        authMethod: tokens ? (tokens.auth_method || null) : null,
+        userEmail: _configured ? getUserEmail() : null,
+        userGroups: _configured ? getUserGroups() : [],
+        isAdmin: _configured ? isAdmin() : false,
+        isReadonly: _configured ? isReadonly() : false,
+        autoRefreshActive: isAutoRefreshActive(),
+        debug: config.debug,
+        version: VERSION
+    };
+}
+
 // Token refresh configuration by auth method
 const REFRESH_CONFIG = {
     password: {
@@ -670,6 +766,7 @@ export function configure(options = {}) {
 
     config = newConfig;
     _configured = true;
+    debugLog('config', 'configured', { tokenStorage: config.tokenStorage });
 }
 
 /**
@@ -729,6 +826,7 @@ export function getTokens() {
  */
 export function setTokens(tokens, options = {}) {
     requireConfig();
+    debugLog('token', 'setTokens', { auth_method: tokens?.auth_method, isRefresh: !!options.isRefresh });
     getTokenStore().set(config.tokenKey, tokens);
 
     // In handler mode, skip client-side cookie - server manages session
@@ -770,6 +868,7 @@ export function getAuthMethod() {
  * In handler mode, also clears the local cache (but doesn't call logout endpoint).
  */
 export function clearTokens() {
+    debugLog('token', 'clearTokens');
     getTokenStore().clear(config.tokenKey);
 
     // In handler mode, skip client-side cookie clearing - server manages session
@@ -927,6 +1026,7 @@ export async function refreshTokens() {
                 message: 'Token refresh successful'
             });
 
+            debugLog('token', 'refreshTokens:success');
             return newTokens;
         }
         throw new Error('Token refresh failed');
@@ -940,6 +1040,7 @@ export async function refreshTokens() {
             user_email: email,
             message: 'Token refresh failed: ' + e.message
         });
+        debugLog('token', 'refreshTokens:failed', { error: e.message });
         throw e;
     }
 }
@@ -1301,6 +1402,7 @@ export async function loginWithPassword(email, password) {
                 message: 'User logged in with password'
             });
 
+            debugLog('auth', 'loginWithPassword:success', { email });
             return tokens;
         } else if (res.ChallengeName) {
             logSecurityEvent({
@@ -1331,6 +1433,7 @@ export async function loginWithPassword(email, password) {
                 message: 'Password authentication failed: ' + e.message
             });
         }
+        debugLog('auth', 'loginWithPassword:failed', { email, error: e.message });
         throw e;
     }
 }
@@ -1442,6 +1545,7 @@ export async function loginWithPasskey(email) {
                 message: 'User logged in with passkey'
             });
 
+            debugLog('auth', 'loginWithPasskey:success', { email });
             return tokens;
         }
         throw new Error('Passkey authentication failed');
@@ -1460,6 +1564,7 @@ export async function loginWithPasskey(email) {
                 message: 'Passkey authentication failed: ' + e.message
             });
         }
+        debugLog('auth', 'loginWithPasskey:failed', { email, error: e.message });
         throw e;
     }
 }
@@ -1581,6 +1686,7 @@ export async function loginWithHostedUI(email) {
     if (email) {
         params.set('login_hint', email);
     }
+    debugLog('auth', 'loginWithHostedUI:redirect', { email: email || null });
     window.location.href = 'https://' + config.cognitoDomain + '/oauth2/authorize?' + params;
 }
 
@@ -1649,6 +1755,7 @@ export async function exchangeCodeForTokens(code, state) {
             auth_protocol: 'OAuth 2.0/OIDC',
             message: 'Token exchange failed: ' + (errorText || res.status)
         });
+        debugLog('auth', 'exchangeCodeForTokens:failed', { error: errorText || String(res.status) });
         throw new Error('Token exchange failed: ' + (errorText || res.status));
     }
 
@@ -1677,6 +1784,7 @@ export async function exchangeCodeForTokens(code, state) {
         message: 'OAuth token exchange successful'
     });
 
+    debugLog('auth', 'exchangeCodeForTokens:success');
     return tokens;
 }
 
@@ -1690,6 +1798,7 @@ export async function exchangeCodeForTokens(code, state) {
  * @returns {void|Promise<void>}
  */
 export function logout() {
+    debugLog('auth', 'logout');
     const email = getUserEmail();
 
     // In handler mode, call logout endpoint
@@ -1978,6 +2087,7 @@ export async function registerPasskey() {
             message: 'Passkey registered successfully',
             metadata: { credential_id: credential.id }
         });
+        debugLog('passkey', 'registerPasskey:success');
     } catch (e) {
         logSecurityEvent({
             class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
@@ -1988,6 +2098,7 @@ export async function registerPasskey() {
             user_email: email,
             message: 'Passkey registration failed: ' + e.message
         });
+        debugLog('passkey', 'registerPasskey:failed', { error: e.message });
         throw e;
     }
 }
@@ -2026,6 +2137,7 @@ export async function deletePasskey(credentialId) {
             message: 'Passkey deleted',
             metadata: { credential_id: credentialId }
         });
+        debugLog('passkey', 'deletePasskey:success', { credentialId });
     } catch (e) {
         logSecurityEvent({
             class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
@@ -2037,6 +2149,7 @@ export async function deletePasskey(credentialId) {
             message: 'Passkey deletion failed: ' + e.message,
             metadata: { credential_id: credentialId }
         });
+        debugLog('passkey', 'deletePasskey:failed', { credentialId, error: e.message });
         throw e;
     }
 }
@@ -2147,6 +2260,7 @@ const loginListeners = new Set();
 const logoutListeners = new Set();
 
 function notifyAuthStateChange(isAuth) {
+    debugLog('state', 'authStateChange', { isAuthenticated: isAuth });
     authStateListeners.forEach(callback => {
         try {
             callback(isAuth);
@@ -2162,6 +2276,7 @@ function notifyAuthStateChange(isAuth) {
  * @param {string} method - The auth method used ('password', 'passkey', 'oauth')
  */
 function notifyLogin(tokens, method) {
+    debugLog('state', 'login', { method });
     loginListeners.forEach(callback => {
         try {
             callback(tokens, method);
@@ -2175,6 +2290,7 @@ function notifyLogin(tokens, method) {
  * Notify logout listeners when a user logs out.
  */
 function notifyLogout() {
+    debugLog('state', 'logout');
     logoutListeners.forEach(callback => {
         try {
             callback();
@@ -2270,6 +2386,7 @@ const AUTO_REFRESH_DEFAULTS = {
  * stopAutoRefresh();
  */
 export function startAutoRefresh(options = {}) {
+    debugLog('refresh', 'autoRefresh:start', { intervalMs: options.intervalMs || AUTO_REFRESH_DEFAULTS.intervalMs });
     // Clean up any existing timer
     stopAutoRefresh();
 
@@ -2338,6 +2455,7 @@ export function startAutoRefresh(options = {}) {
  * Stop automatic background token refresh.
  */
 export function stopAutoRefresh() {
+    debugLog('refresh', 'autoRefresh:stop');
     if (_autoRefreshTimer) {
         clearInterval(_autoRefreshTimer);
         _autoRefreshTimer = null;
@@ -2368,6 +2486,7 @@ logoutListeners.add(() => stopAutoRefresh());
  * @private
  */
 function notifySessionExpired(reason) {
+    debugLog('session', 'sessionExpired', { reason });
     sessionExpiredListeners.forEach(callback => {
         try {
             callback(reason);
@@ -2515,5 +2634,9 @@ export default {
     isPasskeySupported,
     isConditionalMediationAvailable,
     isPlatformAuthenticatorAvailable,
-    getPasskeyCapabilities
+    getPasskeyCapabilities,
+    // Debug & diagnostics (v0.11.0+)
+    getDebugHistory,
+    getDiagnostics,
+    clearDebugHistory
 };

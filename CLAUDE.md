@@ -4,9 +4,9 @@
 
 L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for AWS Cognito with WebAuthn/Passkey support. It's designed to be copied into projects (no CDN dependency) and used as an ES module.
 
-**Current Version**: 0.10.1
+**Current Version**: 0.11.0
 **License**: Apache-2.0
-**Tests**: ~350 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests)
+**Tests**: ~384 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests)
 
 ## Quick Start for Claude Instances
 
@@ -57,6 +57,7 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 | `docs/handler-mode.md` | Token Handler mode documentation |
 | `scripts/sync-version.js` | Syncs version across all files |
 | `docs/RELEASING.md` | Release process documentation |
+| `plugin/templates/debug-diagnostics.test.js` | Debug logging & diagnostics tests |
 
 ## Security Patterns (CRITICAL)
 
@@ -212,6 +213,27 @@ For custom domain handling:
 configure({
     cookieDomain: '.yourdomain.com'
 });
+```
+
+## Debug & Diagnostics (v0.11.0)
+
+Enable debug logging to diagnose auth issues:
+
+```javascript
+configure({
+    clientId: 'xxx',
+    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
+    debug: true  // or 'verbose' or function(event)
+});
+
+// Get current auth state snapshot (works even without debug mode)
+console.table(getDiagnostics());
+
+// View last 100 debug events
+console.log(getDebugHistory());
+
+// Clear debug buffer
+clearDebugHistory();
 ```
 
 ## Troubleshooting
