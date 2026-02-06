@@ -167,7 +167,7 @@ const cognitoGroupArb = fc.constantFrom(
     'readonly', 'read-only', 'viewer', 'viewers',
     'user', 'users', 'editor', 'editors',
     'publisher', 'publishers', 'reviewer',
-    'player', 'dm', 'moderator',
+    'moderator',
     'developer', 'developers'
 );
 
@@ -177,7 +177,7 @@ const userGroupsArb = fc.array(cognitoGroupArb, { minLength: 0, maxLength: 5 });
 /** Arbitrary for role names used with UI_ONLY_hasRole */
 const roleNameArb = fc.constantFrom(
     'admin', 'readonly', 'user', 'editor', 'publisher',
-    'reviewer', 'player', 'dm', 'moderator'
+    'reviewer', 'moderator'
 );
 
 /** Arbitrary for valid-looking hostnames */

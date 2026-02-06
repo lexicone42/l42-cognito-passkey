@@ -201,7 +201,7 @@ describe('PROPERTY: Permission Inheritance', () => {
                     const hasIt = hasPermission(roleA, permB);
                     // This property may not hold for all role combinations
                     // as roles can have different permission sets by design
-                    // (e.g., 'dm' has game perms, 'editor' has content perms)
+                    // (e.g., 'moderator' has community perms, 'editor' has content perms)
                 }
                 return true;
             }),

@@ -4,7 +4,7 @@ This plugin provides quick setup for AWS Cognito authentication with WebAuthn pa
 
 **Plugin Name**: `l42-cognito-passkey`
 **Current Version**: 0.10.0
-**Tests**: 379 passing
+**Tests**: 350 passing
 
 ## Overview
 
@@ -216,22 +216,7 @@ Architecture for content-focused sites:
 
 **Roles**: `readonly`, `user`, `editor`, `reviewer`, `publisher`, `admin`
 
-### 2. Multi-User WASM Pattern (`wasm-multiuser-pattern.html`)
-
-Architecture for real-time collaborative applications:
-- WebSocket connections for player synchronization
-- WASM modules for game logic (client-side)
-- Session-based gameplay with DM control
-
-**Roles**: `player`, `moderator`, `dm`, `admin`
-
-**Hierarchy**:
-- **Player** (level 10): Basic participant, chat, move character
-- **Moderator** (level 30): Mute/kick players
-- **DM** (level 50): Full session control, spawn NPCs, reveal areas
-- **Admin** (level 100): System administration
-
-### 3. Admin Panel Pattern (`admin-panel-pattern.html`)
+### 2. Admin Panel Pattern (`admin-panel-pattern.html`)
 
 Architecture for user management interfaces:
 - Admin-only access (Cognito `admin` group required)
@@ -287,8 +272,8 @@ if (hasPermission('editor', 'publish:content')) {
 }
 
 // Check role hierarchy
-if (hasRoleLevel('dm', 'moderator')) {
-    // DM has at least moderator level
+if (hasRoleLevel('developer', 'moderator')) {
+    // Developer has at least moderator level
 }
 ```
 
@@ -319,7 +304,6 @@ if (result.authorized) { deleteUser(id); }
 
 Each template has an accompanying test file:
 - `plugin/templates/static-site-pattern.test.js`
-- `plugin/templates/wasm-multiuser-pattern.test.js`
 - `plugin/templates/admin-panel-pattern.test.js`
 - `plugin/templates/rbac-roles.property.test.js` (22 property-based tests)
 - `plugin/templates/version-consistency.test.js`
@@ -327,7 +311,7 @@ Each template has an accompanying test file:
 - `plugin/templates/auto-refresh.test.js` (35 auto-refresh, fetchWithAuth, CSRF tests)
 - `plugin/templates/auth-properties.test.js` (31 auth property-based tests)
 
-**Total: 379 tests**
+**Total: 350 tests**
 
 Run tests with:
 ```bash

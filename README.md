@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/version-0.10.0-blue)](https://github.com/lexicone42/l42-cognito-passkey/blob/main/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-379-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
+[![Tests](https://img.shields.io/badge/tests-350-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
 [![TypeScript](https://img.shields.io/badge/types-included-blue?logo=typescript&logoColor=white)](src/auth.d.ts)
 
 AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configurable, no build step required.
@@ -162,7 +162,7 @@ console.log(VERSION); // "0.10.0"
 This project was built with [Claude Code](https://claude.ai/code). See [`CLAUDE.md`](CLAUDE.md) for integration guidelines, security patterns, and RBAC documentation.
 
 ```bash
-pnpm test            # Run all 379 tests
+pnpm test            # Run all 350 tests
 pnpm release:patch   # Bump version (0.10.0 -> 0.10.1)
 ```
 

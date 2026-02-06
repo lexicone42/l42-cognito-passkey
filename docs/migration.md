@@ -47,7 +47,7 @@ If you imported specific roles from `rbac-roles.js`, the following were removed 
 - E-commerce: `customer`, `vipCustomer`
 - Other: `supportAgent`, `analyst`, `auditor`, `serviceAccount`, `billingAdmin`
 
-**Still available:** `admin`, `readonly`, `user`, `editor`, `reviewer`, `publisher`, `player`, `dm`, `moderator`, `developer`.
+**Still available:** `admin`, `readonly`, `user`, `editor`, `reviewer`, `publisher`, `moderator`, `developer`.
 
 Also removed: `CONTENTFUL_ROLE_MAPPING`, `SITE_PATTERNS.healthcare`, `SITE_PATTERNS.education`, `SITE_PATTERNS.saas`.
 

@@ -12,11 +12,11 @@ All notable changes to this project will be documented in this file.
 
 - **`decodeJwtPayload()` and `parseJwt()` deprecated aliases**: These have been deprecated since v0.4.0. Use `UNSAFE_decodeJwtPayload()` instead.
 
-- **Healthcare, Education, SaaS RBAC roles**: Removed speculative role templates from `rbac-roles.js` (patient, nurse, doctor, student, ta, teacher, freeTier, proTier, enterpriseTier, and related COGNITO_GROUPS entries). Also removed API, Organization, E-commerce, Analytics, and Service roles. Kept: admin, readonly, user, editor, reviewer, publisher, player, dm, moderator, developer.
+- **Healthcare, Education, SaaS RBAC roles**: Removed speculative role templates from `rbac-roles.js` (patient, nurse, doctor, student, ta, teacher, freeTier, proTier, enterpriseTier, and related COGNITO_GROUPS entries). Also removed API, Organization, E-commerce, Analytics, and Service roles. Kept: admin, readonly, user, editor, reviewer, publisher, moderator, developer.
 
 - **`CONTENTFUL_ROLE_MAPPING` stub**: Removed empty placeholder from `rbac-roles.js`.
 
-- **Healthcare/Education/SaaS site patterns**: Removed from `SITE_PATTERNS`. Kept: staticSite, wasmMultiuser.
+- **Healthcare/Education/SaaS site patterns**: Removed from `SITE_PATTERNS`. Kept: staticSite.
 
 - **Speculative docs**: Removed `docs/cedar-integration.md`, `docs/dpop-future.md`, `docs/v1-token-storage-proposal.md` (implemented feature — historical artifact).
 
@@ -488,13 +488,6 @@ configure({
   - Public static site + protected auth area architecture
   - Roles: readonly, user, editor, reviewer, publisher, admin
   - 27 unit tests for RBAC and permission logic
-
-- **Multi-User WASM Pattern** (`plugin/templates/wasm-multiuser-pattern.html`)
-  - Real-time WebSocket + WASM architecture for collaborative apps
-  - Role hierarchy: player (10) → moderator (30) → dm (50) → admin (100)
-  - Session management with 6-character codes (excludes confusing chars)
-  - DM controls overlay for session management
-  - 29 unit tests for roles, permissions, and session logic
 
 - **Admin Panel Pattern** (`plugin/templates/admin-panel-pattern.html`)
   - Admin-only interface for user management

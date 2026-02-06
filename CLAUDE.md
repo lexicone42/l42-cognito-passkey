@@ -6,7 +6,7 @@ L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for A
 
 **Current Version**: 0.10.0
 **License**: Apache-2.0
-**Tests**: ~379 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests)
+**Tests**: ~350 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests)
 
 ## Quick Start for Claude Instances
 
@@ -51,7 +51,6 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 | `src/auth.js` | Main authentication library (~1100 lines) |
 | `plugin/templates/rbac-roles.js` | RBAC role definitions and permission helpers |
 | `plugin/templates/static-site-pattern.html` | Static site integration template |
-| `plugin/templates/wasm-multiuser-pattern.html` | Multi-user WASM app template |
 | `plugin/templates/admin-panel-pattern.html` | Admin panel template |
 | `plugin/templates/handler-token-store.test.js` | Token Handler mode tests |
 | `examples/backends/express/` | Token Handler Express backend |
@@ -160,8 +159,7 @@ if (isInAnyCognitoGroup(groups, ['ADMIN', 'EDITOR', 'PUBLISHER'])) {
 ```javascript
 COGNITO_GROUPS = {
     ADMIN, READONLY, USER, EDITOR, REVIEWER, PUBLISHER,
-    PLAYER, DM, MODERATOR, DEVELOPER, ANALYST, AUDITOR,
-    SUPPORT, BILLING
+    MODERATOR, DEVELOPER
 }
 ```
 
@@ -179,12 +177,6 @@ COGNITO_GROUPS = {
 site.domain/           → Public (CDN-cached)
 site.domain/auth/      → Protected (requires login)
 site.domain/admin/     → Admin (editor/publisher roles)
-```
-
-### Multi-User WASM Pattern
-```
-Role Hierarchy:
-player (10) < moderator (30) < dm (50) < admin (100)
 ```
 
 ## Adding a New Role

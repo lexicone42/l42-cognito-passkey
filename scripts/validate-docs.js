@@ -111,7 +111,6 @@ const fileReferences = [
     'src/auth.js',
     'plugin/templates/rbac-roles.js',
     'plugin/templates/static-site-pattern.html',
-    'plugin/templates/wasm-multiuser-pattern.html',
     'plugin/templates/admin-panel-pattern.html',
     'scripts/sync-version.js',
     'docs/RELEASING.md',

@@ -6,7 +6,6 @@
  *
  * Site Architecture Patterns Supported:
  * 1. Static Site Pattern: site.domain (public) + /auth (protected) + admin push
- * 2. Multi-User WASM Pattern: Players, DM/Moderators, Admin hierarchy
  */
 
 // =============================================================================
@@ -27,8 +26,6 @@ export const COGNITO_GROUPS = {
     EDITOR: { canonical: 'editors', aliases: ['editor', 'editors'] },
     REVIEWER: { canonical: 'reviewers', aliases: ['reviewer', 'reviewers'] },
     PUBLISHER: { canonical: 'publishers', aliases: ['publisher', 'publishers'] },
-    PLAYER: { canonical: 'players', aliases: ['player', 'players'] },
-    DM: { canonical: 'dms', aliases: ['dm', 'dms', 'dungeon-master', 'game-master', 'gm'] },
     MODERATOR: { canonical: 'moderators', aliases: ['moderator', 'moderators', 'mod', 'mods'] },
     DEVELOPER: { canonical: 'developers', aliases: ['developer', 'developers', 'dev', 'devs'] }
 };
@@ -172,34 +169,8 @@ export const STANDARD_ROLES = {
     },
 
     // -------------------------------------------------------------------------
-    // Multi-User WASM Roles (Game/Collaborative Pattern)
+    // Community & Operations Roles
     // -------------------------------------------------------------------------
-
-    /**
-     * Player - Basic participant in WASM application
-     */
-    player: {
-        name: 'player',
-        displayName: 'Player',
-        description: 'Participant in multi-user WASM application',
-        level: 20,
-        permissions: ['read:game', 'write:own-character', 'join:session'],
-        cognitoGroup: 'players',
-        pattern: 'wasm-multiuser'
-    },
-
-    /**
-     * Dungeon Master / Game Master - Session controller
-     */
-    dm: {
-        name: 'dm',
-        displayName: 'Dungeon Master',
-        description: 'Controls game sessions, manages NPCs and world state',
-        level: 60,
-        permissions: ['read:game', 'write:game', 'manage:session', 'manage:npcs', 'kick:players'],
-        cognitoGroup: 'dms',
-        pattern: 'wasm-multiuser'
-    },
 
     /**
      * Moderator - Community moderation
@@ -210,8 +181,7 @@ export const STANDARD_ROLES = {
         description: 'Community moderation, can mute/kick users',
         level: 55,
         permissions: ['read:users', 'mute:users', 'kick:users', 'manage:chat'],
-        cognitoGroup: 'moderators',
-        pattern: 'wasm-multiuser'
+        cognitoGroup: 'moderators'
     },
 
     // -------------------------------------------------------------------------
@@ -266,41 +236,7 @@ export const SITE_PATTERNS = {
             cdnCaching: true,
             incrementalBuilds: true
         }
-    },
-
-    /**
-     * Multi-User WASM Pattern
-     *
-     * Architecture:
-     * - Real-time WebSocket connections
-     * - WASM modules for game logic/computation
-     * - Player/DM hierarchy for session control
-     *
-     * Typical roles:
-     * 1. Players: Join sessions, control their character
-     * 2. DM/GM: Control session, NPCs, world state
-     * 3. Moderators: Community management
-     * 4. Admin: System configuration
-     */
-    wasmMultiuser: {
-        name: 'wasm-multiuser',
-        displayName: 'Multi-User WASM',
-        description: 'Real-time multi-user application with WASM',
-        roles: ['player', 'dm', 'moderator', 'admin'],
-        routes: {
-            public: ['/', '/join'],
-            protected: ['/game', '/game/*', '/session/*'],
-            dm: ['/dm', '/dm/*', '/session/*/control'],
-            admin: ['/admin', '/admin/*']
-        },
-        features: {
-            websockets: true,
-            wasmModules: true,
-            realtimeSync: true,
-            sessionManagement: true
-        }
-    },
-
+    }
 };
 
 

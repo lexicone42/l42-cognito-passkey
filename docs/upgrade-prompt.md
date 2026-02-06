@@ -33,7 +33,7 @@ These functions no longer exist:
 ### 2. Trimmed RBAC Roles
 
 Healthcare, Education, SaaS, E-commerce, API, and Org roles removed from rbac-roles.js.
-Still available: admin, readonly, user, editor, reviewer, publisher, player, dm, moderator, developer.
+Still available: admin, readonly, user, editor, reviewer, publisher, moderator, developer.
 
 ### 3. Role Checks Should Use Helpers
 
