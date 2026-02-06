@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.1] - 2026-02-05
+
+### Removed
+
+- **TTRPG roles (`player`, `dm`)**: Removed niche Dungeon Master / Game Master roles from `COGNITO_GROUPS` and `STANDARD_ROLES` in `rbac-roles.js`. Define domain-specific roles in your own project instead.
+
+- **`wasm-multiuser-pattern.html`**: Removed WASM multi-user site pattern template and its 29 tests. The `staticSite` pattern remains as the only built-in site pattern.
+
+- **`wasmMultiuser` site pattern**: Removed from `SITE_PATTERNS` in `rbac-roles.js`.
+
+### Changed
+
+- **`moderator` role** is now pattern-agnostic (previously tied to `wasm-multiuser` pattern). It remains available as a general-purpose community moderation role.
+
+- **Test count**: 379 → 350 (removed 29 wasm-multiuser-pattern tests).
+
 ## [0.10.0] - 2026-02-05
 
 ### Removed (BREAKING)
