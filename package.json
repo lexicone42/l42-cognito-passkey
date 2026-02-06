@@ -5,13 +5,18 @@
   "type": "module",
   "main": "src/auth.js",
   "module": "src/auth.js",
+  "types": "src/auth.d.ts",
   "exports": {
     ".": {
-      "import": "./src/auth.js"
+      "import": "./src/auth.js",
+      "types": "./src/auth.d.ts"
     }
   },
   "files": [
     "src/auth.js",
+    "src/auth.d.ts",
+    "dist/auth.js",
+    "dist/auth.d.ts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
@@ -26,7 +31,7 @@
     "setup-hooks": "node scripts/setup-hooks.js",
     "process-issue": "node scripts/process-issue.js",
     "preversion": "pnpm test && node scripts/check-dist-sync.js",
-    "version": "node scripts/sync-version.js && cp src/auth.js dist/auth.js && git add -A",
+    "version": "node scripts/sync-version.js && cp src/auth.js dist/auth.js && cp src/auth.d.ts dist/auth.d.ts && git add -A",
     "postversion": "git push && git push --tags",
     "release:patch": "npm version patch",
     "release:minor": "npm version minor",
