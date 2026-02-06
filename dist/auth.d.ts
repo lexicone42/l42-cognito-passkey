@@ -32,7 +32,6 @@ export interface IdTokenClaims {
   email: string;
   email_verified: boolean;
   'cognito:groups'?: string[];
-  'custom:characterSlug'?: string;
   [key: string]: unknown;
 }
 
