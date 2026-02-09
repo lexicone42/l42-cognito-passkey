@@ -1,36 +1,16 @@
-# Cedar Policy Authorization — Integration Plan
+# Cedar Policy Authorization
 
-**Status**: Post-1.0, design documented
-**Estimated effort**: ~3 focused days
-**Dependencies**: `@cedar-policy/cedar-wasm` (v4.8.2, Apache-2.0, ~13 MB WASM)
+**Status**: Implemented (v0.13.0)
+**Dependencies**: `@cedar-policy/cedar-wasm` (v4.8.2, Apache-2.0, ~4.3 MB runtime)
+**Tests**: 101 (including 5 property-based tests)
 
 ## Overview
 
-Replace hardcoded RBAC checks with the open-source Cedar policy engine. Cedar evaluates authorization decisions as `(principal, action, resource, context)` tuples against declarative `.cedar` policy files.
+Cedar replaces hardcoded RBAC checks with declarative policy evaluation. Authorization decisions are `(principal, action, resource, context)` tuples evaluated against `.cedar` policy files by the Cedar WASM engine.
 
-This is a **server-side feature** that pairs with handler mode. The 13 MB WASM bundle rules out client-side use. Existing client-side helpers (`isAdmin()`, `isReadonly()`) remain unchanged for UI hints.
-
-## Why Cedar
-
-- **Formal verification** — Cedar's type system catches invalid policies at write-time (e.g., referencing a nonexistent action), unlike our current string-based permissions (`'admin:delete-user'`)
-- **Externalized policies** — Update authorization rules without redeploying (store `.cedar` files in S3, DynamoDB, or filesystem)
-- **ABAC support** — Attribute-based conditions beyond simple role checks (resource ownership, time-of-day, IP ranges)
-- **Self-hosted** — `@cedar-policy/cedar-wasm` runs in Node.js, Deno, browsers. No AWS managed service dependency
+This is a **server-side feature** that pairs with handler mode. The WASM bundle rules out client-side use. Existing client-side helpers (`isAdmin()`, `isReadonly()`) remain unchanged for UI hints.
 
 ## Architecture
-
-### Current Flow
-
-```
-Client                          Server
-──────                          ──────
-isAdmin() → UI hint only
-requireServerAuthorization() → POST /auth/authorize
-                                → manual role/permission checks
-                                → { authorized: true/false }
-```
-
-### With Cedar
 
 ```
 Client                          Server
@@ -38,260 +18,221 @@ Client                          Server
 isAdmin() → UI hint only        (unchanged)
 requireServerAuthorization() → POST /auth/authorize
                                 → Cedar engine evaluates policies
-                                → { authorized: true/false }
+                                → { authorized: true/false, reason, diagnostics }
 ```
 
-The external API (`requireServerAuthorization()`) doesn't change. Cedar replaces the internals of the server endpoint.
+The client-side API (`requireServerAuthorization()`) doesn't change. Cedar replaces the internals of the server endpoint.
 
-## Implementation Plan
+## File Layout
 
-### Day 1: Schema + Policy Migration
-
-**Goal**: Map existing RBAC concepts to Cedar types and write initial policies.
-
-#### 1a. Define Cedar Schema
-
-Map `STANDARD_ROLES` and `COGNITO_GROUPS` from `rbac-roles.js` to Cedar entity types:
-
-```cedar
-// schema.cedarschema
-namespace App {
-    entity User in [UserGroup] = {
-        email: String,
-        sub: String,
-    };
-
-    entity UserGroup;
-
-    entity Resource = {
-        owner: User,
-        type: String,
-    };
-
-    // Map existing permission strings to typed actions
-    action "read:content"  appliesTo { principal: User, resource: Resource };
-    action "write:own"     appliesTo { principal: User, resource: Resource };
-    action "write:all"     appliesTo { principal: User, resource: Resource };
-    action "delete:own"    appliesTo { principal: User, resource: Resource };
-    action "delete:all"    appliesTo { principal: User, resource: Resource };
-    action "admin:manage"  appliesTo { principal: User, resource: Resource };
-    action "api:read"      appliesTo { principal: User, resource: Resource };
-    action "api:write"     appliesTo { principal: User, resource: Resource };
-}
+```
+examples/backends/express/
+├── server.js                    # Express server with /auth/authorize endpoint
+├── cedar-engine.js              # Cedar WASM wrapper (~300 lines)
+└── cedar/
+    ├── schema.cedarschema.json  # Cedar JSON schema (entity types + actions)
+    └── policies/
+        ├── admin.cedar          # Admin wildcard permit
+        ├── editor.cedar         # Content editing
+        ├── reviewer.cedar       # Content review
+        ├── publisher.cedar      # Content publishing + deploy
+        ├── readonly.cedar       # Read-only access
+        ├── user.cedar           # Standard user (own resources)
+        ├── moderator.cedar      # Community moderation
+        ├── developer.cedar      # Dev tools, APIs, logs
+        └── owner-only.cedar     # Ownership enforcement (forbid)
 ```
 
-#### 1b. Write Policies
+## Cedar Schema
 
-Translate `STANDARD_ROLES` permissions into `.cedar` policy files:
+The schema maps existing RBAC concepts to Cedar types:
+
+| Cedar Type | Maps From | Description |
+|------------|-----------|-------------|
+| `App::User` | JWT `sub` claim | Authenticated user principal |
+| `App::UserGroup` | Cognito groups | Role groups (admin, editors, etc.) |
+| `App::Resource` | Request body | Resource being accessed |
+
+### Actions (23 total)
+
+All permission strings from `rbac-roles.js` are mapped to typed Cedar actions:
+
+```
+read:content, write:content, publish:content, approve:content, reject:content
+read:own, write:own, delete:own, read:all, write:all, delete:all
+deploy:static, read:users, mute:users, kick:users, manage:chat
+api:read, api:write, read:logs, read:metrics, debug:view
+admin:manage, admin:delete-user
+```
+
+### Resource Attributes
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `resourceType` | String | Yes | Type of resource (default: `"application"`) |
+| `owner` | Entity (User) | No | Resource owner for ownership enforcement |
+
+## Cedar Engine (`cedar-engine.js`)
+
+### Initialization
+
+```javascript
+import { initCedarEngine, authorize } from './cedar-engine.js';
+
+await initCedarEngine({
+    schemaPath: './cedar/schema.cedarschema.json',
+    policyDir: './cedar/policies/'
+});
+```
+
+Options:
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `schemaPath` | string | Path to Cedar JSON schema file |
+| `policyDir` | string | Directory containing `.cedar` policy files |
+| `schema` | object | Inline Cedar JSON schema (alternative to `schemaPath`) |
+| `policies` | string | Inline Cedar policy text (alternative to `policyDir`) |
+| `resolveGroup` | function | Custom Cognito group → Cedar group resolver |
+
+### Authorization
+
+```javascript
+const result = await authorize({
+    session: req.session,
+    action: 'admin:delete-user',
+    resource: { id: 'doc-123', type: 'document', owner: 'user-sub-456' },
+    context: {}
+});
+// { authorized: boolean, reason: string, diagnostics: object }
+```
+
+### Group Alias Resolution
+
+Cognito group names are resolved to Cedar `UserGroup` entity IDs using the same alias mapping from `rbac-roles.js`:
+
+```
+'admin', 'admins', 'administrators' → 'admin'
+'readonly', 'read-only', 'viewer'   → 'readonly'
+'editor', 'editors'                 → 'editors'
+'dev', 'devs', 'developer'          → 'developers'
+```
+
+Custom resolution is supported via the `resolveGroup` option.
+
+### Performance
+
+The engine uses Cedar's `statefulIsAuthorized` with pre-parsed policies and schema. Per-request evaluation is typically <0.1ms vs ~1-5ms for `isAuthorized` with on-the-fly parsing.
+
+### Fail-Closed Design
+
+If Cedar fails to initialize (e.g., invalid schema), the server still starts but `/auth/authorize` returns HTTP 503:
+
+```json
+{ "error": "Authorization engine not available", "authorized": false }
+```
+
+## Writing Policies
+
+### Basic Permit
 
 ```cedar
-// policies/admin.cedar
-permit(
-    principal in App::UserGroup::"administrators",
-    action,
-    resource
-);
-
-// policies/editor.cedar
+@id("editor-content")
 permit(
     principal in App::UserGroup::"editors",
     action in [
         App::Action::"read:content",
-        App::Action::"write:own",
-        App::Action::"write:all",
-        App::Action::"delete:own"
+        App::Action::"write:content",
+        App::Action::"publish:content"
     ],
     resource
 );
+```
 
-// policies/readonly.cedar
+### Admin Wildcard
+
+```cedar
+@id("admin-permit-all")
 permit(
-    principal in App::UserGroup::"readonly",
-    action == App::Action::"read:content",
+    principal in App::UserGroup::"admin",
+    action,
     resource
 );
+```
 
-// policies/owner-only.cedar
-permit(
+### Ownership Enforcement (forbid)
+
+Cedar's `forbid` always overrides `permit`. This pattern denies non-owners from writing/deleting owned resources:
+
+```cedar
+@id("deny-non-owner-write")
+forbid(
     principal,
-    action in [App::Action::"write:own", App::Action::"delete:own"],
+    action == App::Action::"write:own",
     resource
-) when { resource.owner == principal };
+) when { resource has owner && resource.owner != principal };
 ```
 
-#### 1c. Cognito Group Mapping
+The `when { resource has owner && ... }` pattern is required for Cedar's validator to prove safe access to the optional `owner` attribute. If the caller omits `resource.owner`, the `has` check fails and the forbid does not fire — permit policies still apply.
 
-The existing `COGNITO_GROUPS` aliases map to Cedar `UserGroup` parents:
+## Entity Provider Interface (Post-1.0)
+
+The `authorize()` function accepts an optional `entityProvider` parameter for loading entities from external stores:
 
 ```javascript
-// "admin", "admins", "administrators" all resolve to App::UserGroup::"administrators"
-function resolveCanonicalGroup(cognitoGroup) {
-    for (const [key, config] of Object.entries(COGNITO_GROUPS)) {
-        if (config.aliases.includes(cognitoGroup.toLowerCase())) {
-            return config.canonical;
-        }
+// Future: load entities from DynamoDB, Redis, etc.
+const provider = {
+    async getEntities(claims, resource, context) {
+        // Return Cedar EntityJson[]
+        return [
+            { uid: { type: 'App::User', id: claims.sub }, attrs: {...}, parents: [...] },
+            // ...
+        ];
     }
-    return cognitoGroup; // passthrough unknown groups
-}
-```
+};
 
-### Day 2: Engine Integration
-
-**Goal**: Wire Cedar engine into the Express handler mode backend.
-
-#### 2a. Principal Builder
-
-Map Cognito JWT claims to Cedar entities:
-
-```javascript
-import { UNSAFE_decodeJwtPayload, getUserGroups } from './auth.js';
-
-function buildCedarPrincipal(tokens) {
-    const claims = UNSAFE_decodeJwtPayload(tokens.idToken);
-    const groups = getUserGroups();
-    return {
-        uid: { type: 'App::User', id: claims.sub },
-        attrs: { email: claims.email },
-        parents: groups.map(g => ({
-            type: 'App::UserGroup',
-            id: resolveCanonicalGroup(g)
-        }))
-    };
-}
-```
-
-#### 2b. Engine Setup
-
-```javascript
-import { CedarInlineAuthorizationEngine } from '@cedar-policy/cedar-authorization';
-
-const engine = new CedarInlineAuthorizationEngine({
-    staticPolicies: loadPoliciesFromDirectory('./policies/'),
-    schema: {
-        type: 'jsonString',
-        schema: fs.readFileSync('./schema.cedarschema.json', 'utf8')
-    }
+const result = await authorize({
+    session: req.session,
+    action: 'write:own',
+    resource: { id: 'doc-123' },
+    entityProvider: provider
 });
 ```
 
-#### 2c. Authorization Endpoint
+Default behavior (no provider): builds entities from the current request (JWT claims + request body).
 
-Replace manual checks in the `/auth/authorize` Express route:
+## Testing
 
-```javascript
-app.post('/auth/authorize', async (req, res) => {
-    const { action, resource, context } = req.body;
-    const principal = buildCedarPrincipal(req.session.tokens);
+101 tests cover:
 
-    const decision = engine.isAuthorized({
-        principal: principal.uid,
-        action: { type: 'App::Action', id: action },
-        resource: { type: 'App::Resource', id: resource.id },
-        context: { ...context, hour: new Date().getHours() },
-        entities: [principal, ...buildGroupEntities()]
-    });
+| Category | Count | Description |
+|----------|-------|-------------|
+| Policy Validation | 5 | Schema/policy parsing and validation |
+| Admin Supremacy | 24 | Admin permits all actions |
+| Role-Based Access | 16 | Editor, reviewer, publisher, moderator, developer |
+| Readonly Restriction | 16 | Readonly denies all write/admin actions |
+| User Own-Resource | 4 | Standard user permissions |
+| Ownership Enforcement | 7 | Forbid policies for non-owner access |
+| Unauthenticated | 2 | Missing groups denied |
+| Multi-Group | 2 | Users in multiple groups |
+| Diagnostics | 2 | Policy evaluation diagnostics |
+| Engine Integration | 5 | `authorize()` function via cedar-engine.js |
+| Group Aliases | 8 | Cognito group alias resolution |
+| Initialization Errors | 3 | Missing schema/policy handling |
+| Property-Based | 5 | fast-check invariants |
+| Schema-RBAC Consistency | 3 | Schema matches rbac-roles.js |
 
-    res.json({
-        authorized: decision.decision === 'Allow',
-        diagnostics: decision.diagnostics  // which policies matched
-    });
-});
+Run Cedar tests:
+```bash
+pnpm test -- cedar-authorization
 ```
 
-#### 2d. Optional: Express Middleware
+## License
 
-For apps that want per-route authorization instead of explicit calls:
-
-```javascript
-import { ExpressAuthorizationMiddleware } from '@cedar-policy/authorization-for-expressjs';
-
-// Drop-in middleware that auto-maps routes to Cedar actions
-const cedarMiddleware = new ExpressAuthorizationMiddleware({
-    schema: { type: 'jsonString', schema: schemaJson },
-    authorizationEngine: engine,
-    principalConfiguration: {
-        type: 'custom',
-        getPrincipalEntity: (req) => buildCedarPrincipal(req.session.tokens)
-    },
-    skippedEndpoints: [
-        { httpVerb: 'get', path: '/login' },
-        { httpVerb: 'get', path: '/health' }
-    ]
-});
-```
-
-### Day 3: Tests + Config API
-
-**Goal**: Test suite and the user-facing configuration surface.
-
-#### 3a. Configuration
-
-Add optional Cedar config to `configure()`:
-
-```javascript
-configure({
-    clientId: 'xxx',
-    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
-    tokenStorage: 'handler',
-    tokenEndpoint: '/auth/token',
-    // New: Cedar authorization (server-side only)
-    cedar: {
-        policyDirectory: './policies/',
-        schemaPath: './schema.cedarschema.json',
-        // or inline:
-        // policies: policyString,
-        // schema: schemaJson,
-    }
-});
-```
-
-#### 3b. Tests
-
-- Policy validation: schema catches malformed policies
-- Admin supremacy: admin group permits all actions (mirrors existing property test)
-- Owner-only: `write:own` denied when `resource.owner !== principal`
-- Group alias resolution: all Cognito aliases map to correct Cedar groups
-- Readonly restriction: readonly group can only `read:content`
-- Context conditions: time-based deny policies work
-- Missing principal: unauthenticated requests denied
-- Diagnostics: response includes which policies matched
-
-#### 3c. Migration Guide
-
-Document in `docs/migration.md`:
-- Cedar is optional — existing `isAdmin()`/`isReadonly()` keeps working
-- `requireServerAuthorization()` API unchanged from caller's perspective
-- How to write first policy file
-- How to test policies locally before deploying
-
-## Key Decisions (To Resolve)
-
-1. **Policy loading**: Filesystem only? Or also support S3/DynamoDB for dynamic updates?
-   - Recommendation: Start with filesystem, add remote loading later
-
-2. **Client-side evaluation**: Skip for now (13 MB). Revisit if Cedar ships a lighter build
-   - Keep `isAdmin()`/`isReadonly()` for client UI hints
-
-3. **Policy hot-reload**: Watch filesystem for changes in dev mode?
-   - Recommendation: Yes for dev, explicit reload for production
-
-4. **Backward compatibility**: Keep `rbac-roles.js` as the "simple mode"?
-   - Recommendation: Yes — Cedar is the advanced path, RBAC roles stay for simple apps
-
-## npm Packages
-
-| Package | Purpose | Size |
-|---------|---------|------|
-| `@cedar-policy/cedar-wasm` | Core WASM engine | ~13 MB |
-| `@cedar-policy/cedar-authorization` | Higher-level JS wrapper | Small |
-| `@cedar-policy/authorization-for-expressjs` | Express middleware | Small |
-
-All Apache-2.0, maintained by AWS Cedar team.
+`@cedar-policy/cedar-wasm` is Apache-2.0, same as this project. No license conflicts.
 
 ## References
 
 - [Cedar Policy Language Docs](https://docs.cedarpolicy.com/)
 - [Cedar Playground](https://www.cedarpolicy.com/)
 - [@cedar-policy/cedar-wasm on npm](https://www.npmjs.com/package/@cedar-policy/cedar-wasm)
-- [Cedar Authorization for Express.js](https://github.com/cedar-policy/authorization-for-expressjs)
-- [AWS Blog: Secure Express APIs with Cedar](https://aws.amazon.com/blogs/opensource/secure-your-application-apis-in-5-minutes-with-cedar/)

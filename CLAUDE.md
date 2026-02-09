@@ -6,7 +6,7 @@ L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for A
 
 **Current Version**: 0.12.2
 **License**: Apache-2.0
-**Tests**: ~532 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests)
+**Tests**: ~633 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 101 Cedar authorization tests)
 
 ## Quick Start for Claude Instances
 
@@ -63,6 +63,10 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 | `plugin/templates/token-validation.test.js` | Token validation on load tests |
 | `plugin/templates/webauthn-capabilities.test.js` | WebAuthn Level 3 capabilities tests |
 | `plugin/templates/login-rate-limiting.test.js` | Login rate limiting tests |
+| `plugin/templates/cedar-authorization.test.js` | Cedar policy authorization tests |
+| `examples/backends/express/cedar-engine.js` | Cedar WASM engine wrapper |
+| `examples/backends/express/cedar/` | Cedar schema and policy files |
+| `docs/cedar-integration.md` | Cedar integration documentation |
 
 ## Security Patterns (CRITICAL)
 
@@ -317,10 +321,39 @@ The function now generates a PKCE code challenge before redirecting. Since the r
 
 See `docs/migration.md` for the complete migration guide covering all versions.
 
+## Cedar Authorization (v0.13.0)
+
+Server-side Cedar policy authorization for handler mode. Replaces manual role checks with declarative `.cedar` policy evaluation.
+
+```javascript
+// Server-side: cedar-engine.js wraps @cedar-policy/cedar-wasm
+import { initCedarEngine, authorize } from './cedar-engine.js';
+await initCedarEngine({
+    schemaPath: './cedar/schema.cedarschema.json',
+    policyDir: './cedar/policies/'
+});
+
+// Per-request evaluation (<0.1ms with pre-parsed policies)
+const result = await authorize({
+    session: req.session,
+    action: 'admin:delete-user',
+    resource: { id: 'doc-123', owner: 'user-sub' }
+});
+```
+
+Key features:
+- 9 policy files mapping all RBAC roles to Cedar policies
+- Ownership enforcement via `forbid` policies
+- Cognito group alias resolution (mirrors `rbac-roles.js`)
+- EntityProvider interface for future persistent entity stores
+- Fail-closed: returns 503 if Cedar unavailable
+
+See `docs/cedar-integration.md` for complete documentation.
+
 ## Future Plans
 
-- **Cedar Policy Authorization** - Externalized authorization via open-source Cedar (`@cedar-policy/cedar-wasm`) (post-1.0)
 - **Semgrep Rules** - Security scanning (post-1.0)
+- **Persistent Entity Store** - DynamoDB/Redis entity provider for Cedar (post-1.0)
 
 ## Submitting Feedback
 

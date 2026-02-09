@@ -25,6 +25,11 @@ import express from 'express';
 import session from 'express-session';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { initCedarEngine, authorize, isInitialized as isCedarReady } from './cedar-engine.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 
@@ -362,28 +367,112 @@ app.get('/auth/me', (req, res) => {
 });
 
 // ============================================================================
+// Cedar Authorization (v0.13.0+)
+// ============================================================================
+
+/**
+ * POST /auth/authorize - Evaluate a Cedar authorization request
+ *
+ * This is the endpoint that requireServerAuthorization() in auth.js calls.
+ * Cedar policies replace manual role/permission checks with declarative
+ * policy evaluation.
+ *
+ * Body: { action: "admin:delete-user", resource?: { id, type, owner? }, context?: {} }
+ * Response: { authorized: boolean, reason?: string, diagnostics?: object }
+ */
+app.post('/auth/authorize', requireCsrfHeader, async (req, res) => {
+    const tokens = req.session.tokens;
+
+    if (!tokens || !tokens.id_token) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    if (isTokenExpired(tokens.id_token)) {
+        return res.status(401).json({ error: 'Token expired' });
+    }
+
+    if (!isCedarReady()) {
+        // Fallback: Cedar not loaded — deny by default (fail-closed)
+        return res.status(503).json({
+            error: 'Authorization engine not available',
+            authorized: false
+        });
+    }
+
+    const { action, resource, context } = req.body;
+
+    if (!action || typeof action !== 'string') {
+        return res.status(400).json({ error: 'Missing or invalid action' });
+    }
+
+    try {
+        const result = await authorize({
+            session: req.session,
+            action,
+            resource: resource || {},
+            context: context || {}
+        });
+
+        const status = result.authorized ? 200 : 403;
+        res.status(status).json({
+            authorized: result.authorized,
+            reason: result.reason,
+            diagnostics: result.diagnostics
+        });
+    } catch (error) {
+        console.error('Authorization error:', error.message);
+        res.status(500).json({
+            authorized: false,
+            error: 'Authorization evaluation failed'
+        });
+    }
+});
+
+// ============================================================================
 // Health Check
 // ============================================================================
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', mode: 'token-handler' });
+    res.json({
+        status: 'ok',
+        mode: 'token-handler',
+        cedar: isCedarReady() ? 'ready' : 'unavailable'
+    });
 });
 
 // ============================================================================
 // Start Server
 // ============================================================================
 
-app.listen(config.port, () => {
-    console.log(`\n🔐 L42 Token Handler Backend`);
-    console.log(`   Mode: Token Handler (server-side sessions)`);
-    console.log(`   Port: ${config.port}`);
-    console.log(`   Frontend: ${config.frontendUrl}`);
-    console.log(`   Cognito: ${config.cognitoDomain}`);
-    console.log(`\n   Endpoints:`);
-    console.log(`   GET  /auth/token    - Get tokens from session`);
-    console.log(`   POST /auth/refresh  - Refresh tokens`);
-    console.log(`   POST /auth/logout   - Logout`);
-    console.log(`   GET  /auth/callback - OAuth callback`);
-    console.log(`   GET  /auth/me       - Get current user`);
-    console.log('');
-});
+// Initialize Cedar engine before starting (non-blocking — server starts
+// even if Cedar fails, with /auth/authorize returning 503)
+async function startServer() {
+    try {
+        await initCedarEngine({
+            schemaPath: join(__dirname, 'cedar', 'schema.cedarschema.json'),
+            policyDir: join(__dirname, 'cedar', 'policies')
+        });
+        console.log(`   Cedar: initialized (policies validated)`);
+    } catch (error) {
+        console.error(`   Cedar: FAILED — ${error.message}`);
+        console.error(`   Authorization endpoint will return 503`);
+    }
+
+    app.listen(config.port, () => {
+        console.log(`\n🔐 L42 Token Handler Backend`);
+        console.log(`   Mode: Token Handler (server-side sessions)`);
+        console.log(`   Port: ${config.port}`);
+        console.log(`   Frontend: ${config.frontendUrl}`);
+        console.log(`   Cognito: ${config.cognitoDomain}`);
+        console.log(`\n   Endpoints:`);
+        console.log(`   GET  /auth/token      - Get tokens from session`);
+        console.log(`   POST /auth/refresh    - Refresh tokens`);
+        console.log(`   POST /auth/logout     - Logout`);
+        console.log(`   GET  /auth/callback   - OAuth callback`);
+        console.log(`   GET  /auth/me         - Get current user`);
+        console.log(`   POST /auth/authorize  - Cedar authorization`);
+        console.log('');
+    });
+}
+
+startServer();

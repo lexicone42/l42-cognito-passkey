@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@cedar-policy/cedar-wasm':
+        specifier: ^4.8.2
+        version: 4.8.2
       fast-check:
         specifier: ^4.5.3
         version: 4.5.3
@@ -31,6 +34,9 @@ packages:
 
   '@asamuzakjp/nwsapi@2.3.9':
     resolution: {integrity: sha512-n8GuYSrI9bF7FFZ/SjhwevlHc8xaVlb/7HmHelnc/PZXBD2ZR49NnN9sMMuDdEGPeeRQ5d0hqlSlEpgCX3Wl0Q==}
+
+  '@cedar-policy/cedar-wasm@4.8.2':
+    resolution: {integrity: sha512-S37Kd4wP/IMZN3pdKEcsV8av7jMj4AKRovxzJEYZNTEYq0Wj4fno3dsw8xHHDXqT0dkQGTNUBuQNF8CTvOgE/Q==}
 
   '@csstools/color-helpers@5.1.0':
     resolution: {integrity: sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA==}
@@ -741,6 +747,8 @@ snapshots:
       lru-cache: 11.2.4
 
   '@asamuzakjp/nwsapi@2.3.9': {}
+
+  '@cedar-policy/cedar-wasm@4.8.2': {}
 
   '@csstools/color-helpers@5.1.0': {}
 

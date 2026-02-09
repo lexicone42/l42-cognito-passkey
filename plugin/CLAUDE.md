@@ -4,7 +4,7 @@ This plugin provides quick setup for AWS Cognito authentication with WebAuthn pa
 
 **Plugin Name**: `l42-cognito-passkey`
 **Current Version**: 0.12.2
-**Tests**: 532 passing
+**Tests**: 633 passing
 
 ## Overview
 
@@ -316,8 +316,9 @@ Each template has an accompanying test file:
 - `plugin/templates/token-validation.test.js` (31 token validation on load tests)
 - `plugin/templates/webauthn-capabilities.test.js` (22 WebAuthn Level 3 capabilities tests)
 - `plugin/templates/login-rate-limiting.test.js` (40 login rate limiting tests)
+- `plugin/templates/cedar-authorization.test.js` (101 Cedar policy authorization tests)
 
-**Total: 532 tests**
+**Total: 633 tests**
 
 Run tests with:
 ```bash

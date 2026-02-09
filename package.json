@@ -63,6 +63,7 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
+    "@cedar-policy/cedar-wasm": "^4.8.2",
     "fast-check": "^4.5.3",
     "jsdom": "^27.4.0",
     "vitest": "^4.0.17"
