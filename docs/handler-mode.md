@@ -4,6 +4,55 @@ Token Handler mode is the **recommended production deployment**. It stores token
 
 > **Note:** `localStorage` and `memory` token storage modes are deprecated as of v0.14.0 and will be removed in v1.0. All production deployments should use handler mode.
 
+## BFF vs Token Handler — What's the Difference?
+
+You'll see both terms used in auth security discussions. They're related:
+
+**BFF (Backend for Frontend)** is a broad architectural pattern — a thin backend layer that sits between your browser app and your APIs. A BFF can do many things: aggregate API calls, transform data, handle auth, enforce rate limits, etc.
+
+**Token Handler** is a specific kind of BFF focused on one job: managing OAuth/OIDC tokens so the browser never has to store them.
+
+```
+BFF (broad pattern)
+ └── Token Handler (BFF specifically for token management)  ← this library
+      └── + Cedar authorization gateway                     ← this library also does this
+```
+
+Every Token Handler is a BFF. Not every BFF is a Token Handler. A BFF might aggregate microservice calls without doing any token management.
+
+### What this library implements
+
+This library's handler mode is a Token Handler with an authorization extension:
+
+| Endpoint | Role | Pattern |
+|----------|------|---------|
+| `/auth/token` | Return tokens from server session | Token Handler |
+| `/auth/refresh` | Refresh tokens server-side | Token Handler |
+| `/auth/logout` | Destroy server session | Token Handler |
+| `/auth/callback` | Handle OAuth code exchange | Token Handler |
+| `/auth/authorize` | Cedar policy evaluation | Authorization gateway (beyond Token Handler) |
+
+The first four endpoints are pure Token Handler — they manage the token lifecycle so the browser only gets an HttpOnly session cookie. The fifth endpoint (`/auth/authorize`) goes further: it evaluates Cedar policies server-side, making this an **authorization BFF** as well.
+
+### Why Token Handler instead of full BFF?
+
+A full BFF proxies **all** API calls through the backend — the browser never talks directly to your APIs. A Token Handler is lighter: the browser still makes API calls directly, but gets tokens from the backend instead of storing them locally.
+
+```
+Full BFF:            Browser  →  BFF Server  →  Your APIs
+                     (never talks to APIs directly)
+
+Token Handler:       Browser  →  Token Handler  →  (get tokens)
+                     Browser  →  Your APIs        (use tokens directly)
+```
+
+This library uses the Token Handler approach because:
+- **Lighter to deploy** — no need to proxy every API call
+- **Still gets the key security win** — HttpOnly cookies mean XSS can't steal tokens
+- **Cedar adds server-verified authorization** — so even though the browser talks to APIs directly, sensitive actions are gated by server-side policy checks
+
+For apps with extremely high security requirements (healthcare, finance), you can layer a full API proxy on top. But for most apps, Token Handler + Cedar is the right balance of security and simplicity.
+
 ## Overview
 
 ```

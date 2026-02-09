@@ -195,7 +195,11 @@ onLogout(() => {
 
 ## Architecture: Backend for Frontend (BFF)
 
-**Recommended for medium-to-high risk applications.**
+A BFF (Backend for Frontend) is a broad pattern — a thin backend layer between your browser and your APIs. A **Token Handler** is a specific kind of BFF focused on managing OAuth tokens server-side.
+
+This library's handler mode is a Token Handler. See [handler-mode.md](handler-mode.md#bff-vs-token-handler--whats-the-difference) for a detailed comparison.
+
+**Recommended for all production applications.**
 
 ### How BFF Protects Tokens
 
@@ -347,10 +351,12 @@ async function logout() {
 
 ## Architecture: Token Handler Pattern
 
-Lighter-weight alternative to full BFF.
+The Token Handler pattern is a **specific type of BFF** focused on token management. It's lighter than a full BFF because the browser still makes API calls directly — it just gets tokens from the backend instead of storing them locally.
+
+This is what l42-cognito-passkey's handler mode implements. The example below shows the core idea:
 
 ```javascript
-// Token Handler - minimal backend
+// Token Handler - backend manages tokens, browser gets them on demand
 app.get('/auth/token', (req, res) => {
     if (!req.session.accessToken) {
         return res.status(401).json({ error: 'Not authenticated' });
@@ -545,7 +551,7 @@ configure({
 ### Medium Risk (Public SPA)
 
 All of the above, plus:
-- [ ] Migrate to Token Handler pattern
+- [ ] Migrate to Token Handler mode (this library's handler mode)
 - [ ] Remove unnecessary third-party scripts
 - [ ] Implement token usage monitoring
 - [ ] Add impossible travel detection
@@ -553,7 +559,7 @@ All of the above, plus:
 ### High Risk (Healthcare/Finance)
 
 All of the above, plus:
-- [ ] Implement full BFF pattern
+- [ ] Implement full BFF with API proxy (beyond Token Handler)
 - [ ] Add DPoP when available
 - [ ] Implement session binding
 - [ ] Regular penetration testing
@@ -568,8 +574,8 @@ All of the above, plus:
 | CSP with nonces | Basic XSS | Low |
 | Security headers | Various attacks | Low |
 | Short token expiry | Token theft impact | Low |
-| Token Handler | XSS token theft | Medium |
-| BFF pattern | XSS token theft | High |
+| Token Handler (this library) | XSS token theft | Medium |
+| Full BFF (API proxy) | XSS token theft + API abuse | High |
 | DPoP | All token theft | Medium (when available) |
 
-**The key insight:** No client-side token storage is fully secure against XSS. For high-risk applications, architectural changes (BFF) provide the strongest protection.
+**The key insight:** No client-side token storage is fully secure against XSS. This library's Token Handler mode (a type of BFF) eliminates token theft from storage. For the highest-risk applications, a full BFF that also proxies API calls provides additional protection.
