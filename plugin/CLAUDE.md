@@ -3,8 +3,8 @@
 This plugin provides quick setup for AWS Cognito authentication with WebAuthn passkey support.
 
 **Plugin Name**: `l42-cognito-passkey`
-**Current Version**: 0.12.2
-**Tests**: 633 passing
+**Current Version**: 0.13.0
+**Tests**: 649 passing
 
 ## Overview
 
@@ -200,7 +200,7 @@ Cookie domain is auto-detected based on current hostname, or can be explicitly c
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.12.2"
+console.log(VERSION); // "0.13.0"
 ```
 
 ## Site Architecture Patterns
@@ -318,7 +318,7 @@ Each template has an accompanying test file:
 - `plugin/templates/login-rate-limiting.test.js` (40 login rate limiting tests)
 - `plugin/templates/cedar-authorization.test.js` (101 Cedar policy authorization tests)
 
-**Total: 633 tests**
+**Total: 649 tests**
 
 Run tests with:
 ```bash

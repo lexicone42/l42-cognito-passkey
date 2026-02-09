@@ -2,10 +2,10 @@
 
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-blueviolet?logo=anthropic&logoColor=white)](https://claude.ai/code)
 [![CI](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml/badge.svg)](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.12.2-blue)](https://github.com/lexicone42/l42-cognito-passkey/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.13.0-blue)](https://github.com/lexicone42/l42-cognito-passkey/blob/main/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-633-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
+[![Tests](https://img.shields.io/badge/tests-649-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
 [![TypeScript](https://img.shields.io/badge/types-included-blue?logo=typescript&logoColor=white)](src/auth.d.ts)
 
 AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configurable, no build step required.
@@ -134,10 +134,12 @@ declare module '/auth/auth.js' {
 
 | Guide | Description |
 |-------|-------------|
+| [Architecture](docs/architecture.md) | How the library works internally |
 | [Cognito Setup](docs/cognito-setup.md) | AWS Cognito configuration (CDK, CloudFormation, boto3) |
 | [API Reference](docs/api-reference.md) | Complete function documentation |
 | [Migration Guide](docs/migration.md) | Upgrading between versions |
 | [Handler Mode](docs/handler-mode.md) | Server-side token storage setup |
+| [Cedar Authorization](docs/cedar-integration.md) | Server-side Cedar policy authorization |
 | [Integration Guide](docs/integration-guide.md) | Integration advice for Claude Code |
 | [Accessibility](docs/accessibility.md) | ARIA patterns, keyboard navigation, screen readers |
 | [Design Decisions](docs/design-decisions.md) | Code choices, trade-offs, and common misconfigurations |
@@ -158,7 +160,7 @@ declare module '/auth/auth.js' {
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.12.2"
+console.log(VERSION); // "0.13.0"
 ```
 
 ## Claude Code Integration

@@ -19,6 +19,31 @@ Complete migration guide for l42-cognito-passkey version upgrades.
 | v0.11.0 | v0.12.0 | Conditional UI, passkey upgrade, token validation, WebAuthn capabilities |
 | v0.12.0 | v0.12.1 | Client-side login rate limiting |
 | v0.12.1 | v0.12.2 | Tree-shaking support |
+| v0.12.2 | v0.13.0 | Cedar policy authorization (server-side) |
+
+---
+
+## v0.12.2 → v0.13.0 (Cedar Authorization)
+
+### New: Server-Side Cedar Policy Engine
+
+Cedar replaces hardcoded RBAC checks on the server with declarative policy evaluation. This is a **server-side feature** that pairs with Token Handler mode. The client-side API (`requireServerAuthorization()`) is unchanged.
+
+**New server components:**
+- `cedar-engine.js` — Cedar WASM wrapper for Express backends
+- 9 Cedar policy files covering all RBAC roles
+- Cedar JSON schema mapping Cognito groups to Cedar entity types
+
+**Improved `requireServerAuthorization()`:**
+- Now supports handler mode (sends session cookies + CSRF header)
+- Accepts `resource` parameter for ownership enforcement
+- Default endpoint changed from `/api/authorize` to `/auth/authorize`
+
+**No action required if:**
+- You only use client-side auth functions
+- You don't have a Token Handler backend yet
+
+See [cedar-integration.md](./cedar-integration.md) for the complete setup guide.
 
 ---
 

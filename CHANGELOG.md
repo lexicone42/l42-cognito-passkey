@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.0] - 2026-02-09
+
+### Added
+
+- **Cedar Policy Authorization** — server-side authorization via `@cedar-policy/cedar-wasm` (Apache-2.0)
+  - `cedar-engine.js` — Cedar WASM wrapper for Express backends with pre-parsed stateful evaluation (<0.1ms/request)
+  - 9 Cedar policy files covering all RBAC roles (admin, editor, reviewer, publisher, readonly, user, moderator, developer, owner-only)
+  - Cedar JSON schema mapping Cognito groups, users, and resources to typed Cedar entities
+  - Group alias resolution matching `rbac-roles.js` (e.g., 'admins' → 'admin', 'dev' → 'developers')
+  - `EntityProvider` interface for post-1.0 persistent entity stores (DynamoDB, Redis)
+  - Fail-closed design: server returns 503 if Cedar unavailable
+  - Ownership enforcement via `forbid` policies (Cedar forbid-overrides-permit)
+- **Improved `requireServerAuthorization()`** — now supports handler mode (session cookies + CSRF header) and accepts `resource` parameter
+  - Default endpoint changed from `/api/authorize` to `/auth/authorize`
+- **Sharp-edges property tests** — 16 new property-based tests for token validation, rate limiting, ownership, and context injection
+
+### Tests
+
+- 101 Cedar authorization tests + 16 sharp-edges property tests (649 total)
+
 ## [0.12.2] - 2026-02-06
 
 ### Added

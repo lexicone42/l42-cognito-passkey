@@ -33,7 +33,7 @@ Copy `plugin/templates/callback.html` to your site at `/callback.html` or `/call
 import * as auth from '/auth/auth.js';
 
 // Test 1: Check version
-console.log('Auth version:', auth.VERSION); // Should be 0.12.2
+console.log('Auth version:', auth.VERSION); // Should be 0.13.0
 
 // Test 2: Login flow
 auth.loginWithHostedUI();

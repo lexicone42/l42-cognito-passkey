@@ -696,3 +696,187 @@ describe('EDGE CASES: Auth Property Regressions', () => {
         expect(isReadonly([])).toBe(false);
     });
 });
+
+// ============================================================================
+// SHARP-EDGES: Token Validation Missing Claims (S2)
+// ============================================================================
+
+/**
+ * Mirrors auth.js validateTokenClaims() — must match exactly.
+ * Tests the invariant that tokens missing critical claims should NOT pass.
+ */
+function validateTokenClaims(tokens, testConfig) {
+    if (!tokens || !tokens.id_token) return false;
+
+    try {
+        const claims = UNSAFE_decodeJwtPayload(tokens.id_token);
+
+        if (claims.iss) {
+            const expectedIssPrefix = 'https://cognito-idp.' + testConfig.cognitoRegion + '.amazonaws.com/';
+            if (!claims.iss.startsWith(expectedIssPrefix)) return false;
+        }
+
+        const tokenClientId = claims.aud || claims.client_id;
+        if (tokenClientId && tokenClientId !== testConfig.clientId) return false;
+
+        if (claims.exp) {
+            const maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
+            if (claims.exp > maxReasonableExp) return false;
+        }
+
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+describe('SHARP-EDGE: Token Validation Missing Claims (S2)', () => {
+    const testConfig = {
+        clientId: 'test-client-id',
+        cognitoRegion: 'us-west-2'
+    };
+
+    it('token with only sub (no iss, aud, exp) passes validation — known gap', () => {
+        // This documents the current behavior (finding S2):
+        // Tokens missing iss, aud, and exp PASS validation because each check
+        // is guarded by `if (field)` — absence means "skip check."
+        const minimalToken = createTestJwt({ sub: 'user-123' });
+        const result = validateTokenClaims({ id_token: minimalToken }, testConfig);
+        // Current behavior: true (skip all checks)
+        expect(result).toBe(true);
+    });
+
+    it('token with wrong issuer is always rejected', () => {
+        fc.assert(fc.property(
+            fc.string({ minLength: 1, maxLength: 50 }),
+            (randomIss) => {
+                fc.pre(!randomIss.startsWith('https://cognito-idp.us-west-2.amazonaws.com/'));
+                const token = createTestJwt({
+                    sub: 'user-123',
+                    iss: randomIss,
+                    aud: testConfig.clientId,
+                    exp: Math.floor(Date.now() / 1000) + 3600
+                });
+                return validateTokenClaims({ id_token: token }, testConfig) === false;
+            }
+        ));
+    });
+
+    it('token with wrong client_id is always rejected', () => {
+        fc.assert(fc.property(
+            fc.string({ minLength: 1, maxLength: 50 }),
+            (randomClientId) => {
+                fc.pre(randomClientId !== testConfig.clientId);
+                const token = createTestJwt({
+                    sub: 'user-123',
+                    iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_ABC123',
+                    aud: randomClientId,
+                    exp: Math.floor(Date.now() / 1000) + 3600
+                });
+                return validateTokenClaims({ id_token: token }, testConfig) === false;
+            }
+        ));
+    });
+
+    it('token with exp > 30 days from now is always rejected', () => {
+        fc.assert(fc.property(
+            fc.integer({ min: 31 * 24 * 60 * 60, max: 365 * 24 * 60 * 60 }),
+            (secondsFuture) => {
+                const token = createTestJwt({
+                    sub: 'user-123',
+                    iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_ABC123',
+                    aud: testConfig.clientId,
+                    exp: Math.floor(Date.now() / 1000) + secondsFuture
+                });
+                return validateTokenClaims({ id_token: token }, testConfig) === false;
+            }
+        ));
+    });
+
+    it('valid token with all claims passes', () => {
+        const validToken = createTestJwt({
+            sub: 'user-123',
+            iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_ABC123',
+            aud: testConfig.clientId,
+            exp: Math.floor(Date.now() / 1000) + 3600
+        });
+        expect(validateTokenClaims({ id_token: validToken }, testConfig)).toBe(true);
+    });
+});
+
+// ============================================================================
+// SHARP-EDGES: Login Rate Limiting Config Edge Cases (S3)
+// ============================================================================
+
+/**
+ * Mirrors auth.js checkLoginRateLimit / getLoginAttemptInfo logic.
+ */
+function computeBackoffDelay(attemptCount, threshold, baseMs, maxMs) {
+    if (attemptCount < threshold) return 0;
+    const attemptsOverThreshold = attemptCount - threshold;
+    const exponentialDelay = baseMs * Math.pow(2, attemptsOverThreshold);
+    return Math.min(exponentialDelay, maxMs);
+}
+
+describe('SHARP-EDGE: Rate Limiting Config Boundaries (S3)', () => {
+    it('backoff delay is always non-negative', () => {
+        fc.assert(fc.property(
+            fc.integer({ min: 0, max: 100 }),      // attemptCount
+            fc.integer({ min: 0, max: 20 }),        // threshold
+            fc.integer({ min: 1, max: 60000 }),     // baseMs
+            fc.integer({ min: 1, max: 120000 }),    // maxMs
+            (count, threshold, baseMs, maxMs) => {
+                return computeBackoffDelay(count, threshold, baseMs, maxMs) >= 0;
+            }
+        ));
+    });
+
+    it('backoff delay never exceeds maxMs', () => {
+        fc.assert(fc.property(
+            fc.integer({ min: 0, max: 100 }),
+            fc.integer({ min: 0, max: 20 }),
+            fc.integer({ min: 1, max: 60000 }),
+            fc.integer({ min: 1, max: 120000 }),
+            (count, threshold, baseMs, maxMs) => {
+                return computeBackoffDelay(count, threshold, baseMs, maxMs) <= maxMs;
+            }
+        ));
+    });
+
+    it('backoff delay is zero when under threshold', () => {
+        fc.assert(fc.property(
+            fc.integer({ min: 1, max: 20 }),  // threshold (>= 1)
+            fc.integer({ min: 1, max: 60000 }),
+            fc.integer({ min: 1, max: 120000 }),
+            (threshold, baseMs, maxMs) => {
+                // Under-threshold attempts should have zero delay
+                for (let i = 0; i < threshold; i++) {
+                    if (computeBackoffDelay(i, threshold, baseMs, maxMs) !== 0) return false;
+                }
+                return true;
+            }
+        ));
+    });
+
+    it('backoff delay is monotonically non-decreasing as attempts grow', () => {
+        fc.assert(fc.property(
+            fc.integer({ min: 1, max: 10 }),  // threshold
+            fc.integer({ min: 1, max: 5000 }),  // baseMs
+            fc.integer({ min: 1, max: 60000 }),  // maxMs
+            (threshold, baseMs, maxMs) => {
+                let prev = 0;
+                for (let i = 0; i <= threshold + 20; i++) {
+                    const delay = computeBackoffDelay(i, threshold, baseMs, maxMs);
+                    if (delay < prev) return false;
+                    prev = delay;
+                }
+                return true;
+            }
+        ));
+    });
+
+    it('threshold=0 throttles from first failure', () => {
+        const delay = computeBackoffDelay(0, 0, 1000, 30000);
+        expect(delay).toBe(1000); // 1000 * 2^0 = 1000
+    });
+});

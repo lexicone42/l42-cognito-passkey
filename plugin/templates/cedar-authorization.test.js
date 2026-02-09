@@ -704,3 +704,134 @@ describe('Schema-RBAC Consistency', () => {
         }
     });
 });
+
+// ============================================================================
+// SHARP-EDGES: Resource Owner Caller-Controlled (S1)
+// ============================================================================
+//
+// Finding: resource.owner comes from the HTTP request body. A malicious client
+// can claim to own any resource, bypassing the ownership forbid policy.
+// The EntityProvider interface (post-1.0) will fix this by loading ownership
+// from a trusted store. These tests document the current trust boundary.
+
+describe('SHARP-EDGE: Resource Owner is Caller-Controlled (S1)', () => {
+    // Only test actions that the 'users' group actually has permits for
+    const USER_OWN_ACTIONS = ['write:own', 'read:own'];
+    const userOwnActionArb = fc.constantFrom(...USER_OWN_ACTIONS);
+
+    it('owner claim bypasses forbid — whoever claims ownership is trusted', () => {
+        // Bob claims to own Alice's doc. Since the server trusts the client-supplied
+        // owner field, Bob is treated as the owner and the forbid doesn't fire.
+        // write:own is the key test — it has both a permit (users) and a forbid (owner-only)
+        const withLie = cedarCheck({
+            principal: 'bob',
+            groups: ['users'],
+            action: 'write:own',
+            resourceId: 'alice-doc',
+            resourceOwner: 'bob'  // Bob lies about ownership
+        });
+        const withTruth = cedarCheck({
+            principal: 'bob',
+            groups: ['users'],
+            action: 'write:own',
+            resourceId: 'alice-doc',
+            resourceOwner: 'alice'  // Truthful owner
+        });
+        // The lie succeeds, the truth is denied
+        expect(isAllowed(withLie)).toBe(true);
+        expect(isDenied(withTruth)).toBe(true);
+    });
+
+    it('omitting owner bypasses ownership enforcement entirely', () => {
+        // When no owner is provided, the forbid's `resource has owner` check
+        // fails, so the forbid never fires — any permitted user can access.
+        fc.assert(fc.property(userOwnActionArb, (action) => {
+            const result = cedarCheck({
+                principal: 'bob',
+                groups: ['users'],
+                action,
+                resourceId: 'some-doc'
+                // No resourceOwner — ownership check is skipped
+            });
+            return isAllowed(result);
+        }));
+    });
+
+    it('forbid fires correctly when owner is provided and differs from principal', () => {
+        fc.assert(fc.property(
+            fc.stringMatching(/^[a-z]{3,8}$/),
+            fc.stringMatching(/^[a-z]{3,8}$/),
+            (principal, owner) => {
+                // Skip if they happen to match
+                if (principal === owner) return true;
+                const result = cedarCheck({
+                    principal,
+                    groups: ['users'],
+                    action: 'write:own',
+                    resourceId: 'doc-1',
+                    resourceOwner: owner
+                });
+                return isDenied(result);
+            }
+        ));
+    });
+});
+
+// ============================================================================
+// SHARP-EDGES: Context from Request Body is Unvalidated (S5)
+// ============================================================================
+//
+// Finding: The `context` object in authorize() comes directly from req.body.
+// Current policies don't reference context, but future policies could rely on
+// context values (e.g., IP address, department) that an attacker controls.
+// These tests verify Cedar doesn't crash on arbitrary context and document
+// the trust boundary.
+
+describe('SHARP-EDGE: Context Injection from Request Body (S5)', () => {
+    const ALL_ACTIONS = [
+        'read:content', 'write:content', 'publish:content', 'approve:content', 'reject:content',
+        'read:own', 'write:own', 'delete:own', 'read:all', 'write:all', 'delete:all',
+        'deploy:static', 'read:users', 'mute:users', 'kick:users', 'manage:chat',
+        'api:read', 'api:write', 'read:logs', 'read:metrics', 'debug:view',
+        'admin:manage', 'admin:delete-user'
+    ];
+    const actionArb = fc.constantFrom(...ALL_ACTIONS);
+
+    it('Cedar rejects unknown context attributes (schema-enforced)', () => {
+        // Cedar's isAuthorized validates context against the schema.
+        // Since the schema defines no context shape, unknown attributes cause errors.
+        // This is actually GOOD — it means context injection can't sneak in
+        // extra attributes that future policies might accidentally trust.
+        const result = cedarCheck({
+            groups: ['editors'],
+            action: 'write:content',
+            context: { is_admin: true, bypass_auth: true }
+        });
+        // Cedar rejects requests with unknown context — result.type is 'success'
+        // but response is undefined (authorization couldn't proceed), OR
+        // result.type is 'error'. Either way, it's not a clean 'allow'.
+        expect(isAllowed(result)).toBe(false);
+    });
+
+    it('empty context always succeeds for any action', () => {
+        // With empty (valid) context, authorization should always succeed
+        // (i.e., return a decision without errors)
+        fc.assert(fc.property(actionArb, (action) => {
+            const result = cedarCheck({ groups: ['editors'], action, context: {} });
+            return result.type === 'success' && result.response.diagnostics.errors.length === 0;
+        }));
+    });
+
+    it('engine authorize() passes context from request body to Cedar', async () => {
+        // The authorize() function passes req.body.context directly to Cedar.
+        // If the schema later adds context attributes, callers could inject values.
+        // This test documents that the engine doesn't sanitize or filter context.
+        const session = createSession('editor@test.com', ['editors']);
+        const result = await cedarEngine.authorize({
+            session,
+            action: 'write:content',
+            context: {}  // Empty is fine — just verifying the passthrough
+        });
+        expect(result.authorized).toBe(true);
+    });
+});

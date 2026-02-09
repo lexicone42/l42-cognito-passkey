@@ -8,11 +8,11 @@
  *   import { configure, isAuthenticated, loginWithPassword } from './auth.js';
  *   configure({ clientId: 'xxx', cognitoDomain: 'xxx.auth.region.amazoncognito.com' });
  *
- * @version 0.12.2
+ * @version 0.13.0
  * @license Apache-2.0
  */
 
-export const VERSION = '0.12.2';
+export const VERSION = '0.13.0';
 
 // ==================== CONFIGURATION ====================
 
