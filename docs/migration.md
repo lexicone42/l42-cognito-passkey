@@ -15,6 +15,85 @@ Complete migration guide for l42-cognito-passkey version upgrades.
 | v0.6.0 | v0.7.0 | Memory mode token storage |
 | v0.7.0 | v0.8.0 | Token Handler mode (server-side token storage) |
 | v0.8.0/v0.9.0 | v0.10.0 | Removed speculative features, trimmed export surface |
+| v0.10.0 | v0.11.0 | Debug logging & diagnostics mode |
+| v0.11.0 | v0.12.0 | Conditional UI, passkey upgrade, token validation, WebAuthn capabilities |
+| v0.12.0 | v0.12.1 | Client-side login rate limiting |
+| v0.12.1 | v0.12.2 | Tree-shaking support |
+
+---
+
+## v0.12.0 → v0.12.2 (Incremental)
+
+### v0.12.2 — Tree-Shaking + Cedar Plan
+
+No breaking changes. Added ES module tree-shaking support and documented Cedar authorization integration plan.
+
+### v0.12.1 — Client-Side Login Rate Limiting
+
+No breaking changes. New functions for login throttling:
+
+- `checkLoginRateLimit(email)` — applies exponential backoff delay
+- `recordLoginFailure(email)` — tracks per-email attempt count
+- `resetLoginAttempts(email)` — clears on successful login
+- `getLoginAttemptInfo(email)` — returns `{ attemptsRemaining, nextRetryMs, isThrottled }`
+
+Rate limiting is automatically integrated into `loginWithPassword()`, `loginWithPasskey()`, and `loginWithConditionalUI()` (Mode A).
+
+---
+
+## v0.11.0 → v0.12.0 (Conditional UI + Token Validation)
+
+### New Features
+
+**Conditional UI (passkey autofill):**
+
+```javascript
+// Mode A: email-scoped
+await loginWithConditionalUI({ mode: 'email', email: 'user@example.com' });
+
+// Mode B: discovery (browser picks passkey)
+await loginWithConditionalUI({ mode: 'discovery' });
+```
+
+**Passkey upgrade after password login:**
+
+```javascript
+await upgradeToPasskey({ silent: true });
+```
+
+**Token validation on load** — `isAuthenticated()` now validates `iss`, `aud`/`client_id`, and `exp` claims.
+
+**WebAuthn Level 3 capabilities:**
+
+```javascript
+const caps = await getPasskeyCapabilities();
+// { platformAuthenticator, conditionalMediation, userVerification, ... }
+```
+
+### No Action Required If...
+
+- You only use core auth functions — all new features are additive
+- `isAuthenticated()` now rejects tokens with wrong issuer/audience (this is more secure, not less)
+
+---
+
+## v0.10.0 → v0.11.0 (Debug Diagnostics)
+
+### New Debug Mode
+
+No breaking changes. Enable with:
+
+```javascript
+configure({
+    clientId: 'xxx',
+    cognitoDomain: 'xxx',
+    debug: true  // or 'verbose' or function(event)
+});
+
+console.table(getDiagnostics());    // Auth state snapshot
+console.log(getDebugHistory());      // Last 100 events
+clearDebugHistory();                 // Clear buffer
+```
 
 ---
 

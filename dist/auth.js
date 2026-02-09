@@ -2755,7 +2755,8 @@ export async function deletePasskey(credentialId) {
  *
  * @param {string} action - The action being authorized (e.g., 'admin:delete-user')
  * @param {Object} [options] - Optional configuration
- * @param {string} [options.endpoint='/api/authorize'] - Authorization endpoint
+ * @param {string} [options.endpoint='/auth/authorize'] - Authorization endpoint
+ * @param {Object} [options.resource] - Resource descriptor { id?, type?, owner? }
  * @param {Object} [options.context={}] - Additional context for authorization
  * @returns {Promise<{authorized: boolean, reason?: string}>} Authorization result
  * @throws {Error} If not authenticated or network error
@@ -2773,9 +2774,15 @@ export async function deletePasskey(credentialId) {
  *
  *     // Proceed with deletion...
  * }
+ *
+ * @example
+ * // Ownership-scoped action with resource
+ * const authResult = await requireServerAuthorization('write:own', {
+ *     resource: { id: 'doc-123', type: 'document', owner: currentOwnerSub }
+ * });
  */
 export async function requireServerAuthorization(action, options = {}) {
-    const { endpoint = '/api/authorize', context = {} } = options;
+    const { endpoint = '/auth/authorize', resource, context = {} } = options;
 
     const tokens = await ensureValidTokens();
     if (!tokens) {
@@ -2783,14 +2790,25 @@ export async function requireServerAuthorization(action, options = {}) {
     }
 
     try {
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${tokens.access_token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ action, context })
-        });
+        const headers = { 'Content-Type': 'application/json' };
+        const fetchOptions = { method: 'POST', headers };
+
+        if (isHandlerMode()) {
+            // Handler mode: session cookie carries auth, CSRF header required
+            fetchOptions.credentials = 'include';
+            headers['X-L42-CSRF'] = '1';
+        } else {
+            // localStorage/memory mode: send Bearer token
+            headers['Authorization'] = `Bearer ${tokens.access_token}`;
+        }
+
+        const body = { action, context };
+        if (resource) {
+            body.resource = resource;
+        }
+        fetchOptions.body = JSON.stringify(body);
+
+        const response = await fetch(endpoint, fetchOptions);
 
         if (response.status === 401) {
             clearTokens();

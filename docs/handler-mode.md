@@ -85,6 +85,7 @@ Your backend must implement these endpoints:
 | `/auth/refresh` | POST | Refresh tokens, return new `{access_token, id_token}` |
 | `/auth/logout` | POST | Destroy session |
 | `/auth/callback` | GET | (Optional) OAuth callback handler |
+| `/auth/authorize` | POST | (Optional) Cedar policy authorization (v0.13.0+) |
 
 See `examples/backends/express/` for a complete implementation.
 
@@ -182,13 +183,40 @@ Key features:
 - HttpOnly cookies
 - Refresh token stored server-side
 
-### AWS Lambda + API Gateway
+## Cedar Policy Authorization (v0.13.0+)
 
-Coming in v0.8.1. Will use DynamoDB for session storage.
+Token Handler mode pairs naturally with Cedar because the authorization engine runs server-side where the session tokens already live.
 
-### Cloudflare Workers
+```javascript
+// Client: request authorization (works in all modes)
+const result = await requireServerAuthorization('write:own', {
+    resource: { id: 'doc-123', type: 'document', owner: ownerSub }
+});
 
-Coming in v0.8.1. Will use Workers KV for session storage.
+if (!result.authorized) {
+    showError(result.reason);
+}
+```
+
+The backend evaluates the request against Cedar `.cedar` policy files:
+
+```
+Client                              Server
+──────                              ──────
+requireServerAuthorization()   ──►  POST /auth/authorize
+                                      │ session cookie (HttpOnly)
+                                      │ X-L42-CSRF header
+                                      ▼
+                                    Cedar engine evaluates policies
+                                      │
+                               ◄──  { authorized: true/false, reason }
+```
+
+Key points:
+- Cedar runs server-side only (~4 MB WASM, not suitable for client)
+- Existing client-side helpers (`isAdmin()`, `isReadonly()`) still work for UI hints
+- If Cedar fails to initialize, `/auth/authorize` returns 503 (fail-closed)
+- See `docs/cedar-integration.md` for full setup guide
 
 ## FAQ
 

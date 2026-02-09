@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/version-0.12.2-blue)](https://github.com/lexicone42/l42-cognito-passkey/blob/main/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-350-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
+[![Tests](https://img.shields.io/badge/tests-633-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
 [![TypeScript](https://img.shields.io/badge/types-included-blue?logo=typescript&logoColor=white)](src/auth.d.ts)
 
 AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configurable, no build step required.
@@ -13,13 +13,17 @@ AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configura
 ## Features
 
 - Password + Passkey authentication via AWS Cognito
+- Passkey autofill (Conditional UI) with email-scoped and discovery modes
 - OAuth2 with PKCE and CSRF protection
 - Automatic background token refresh with visibility API
 - Token Handler mode for server-side token storage (XSS protection)
+- Cedar policy authorization for server-side access control
 - Role-based access control (RBAC) via Cognito groups
+- Client-side login rate limiting with exponential backoff
+- Debug logging and diagnostics mode
 - TypeScript type declarations included
 - Self-hosted - copy to your project, no CDN dependency
-- ES module - zero build step required
+- ES module with tree-shaking support - zero build step required
 
 ## Quick Start
 

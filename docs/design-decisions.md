@@ -600,19 +600,19 @@ If your custom `securityLogger` function throws, the error is caught and logged 
 
 ## 14. Known Limitations
 
-### No Client-Side Rate Limiting
+### Client-Side Rate Limiting (v0.12.1+)
 
-`loginWithPassword()` has no client-side throttling. Cognito has server-side rate limiting, but a compromised page could rapidly attempt passwords. If this concerns you, implement exponential backoff in your login form.
+`loginWithPassword()`, `loginWithPasskey()`, and `loginWithConditionalUI()` (Mode A) include client-side exponential backoff throttling. After `maxLoginAttemptsBeforeDelay` (default: 3) failures per email, subsequent attempts are delayed with exponential backoff up to `loginBackoffMaxMs` (default: 30s). This is in-memory only and resets on page reload. Cognito also enforces server-side rate limiting.
 
-### No Token Validation on Load
+### Token Validation on Load (v0.12.0+)
 
-When tokens are loaded from `localStorage`, the library checks `exp` (expiry) but does not verify:
+When tokens are loaded, `validateTokenClaims()` checks:
 
 - `iss` (issuer) matches the configured Cognito domain
 - `aud` / `client_id` matches the configured client ID
-- `exp` is within a reasonable range
+- `exp` is not expired
 
-This means injected tokens with a valid structure but wrong issuer will be accepted as valid. The `UNSAFE_` naming convention signals this — client-side JWT validation without signature verification provides minimal security guarantees.
+Tokens that fail validation are rejected by `isAuthenticated()`. Note that this is still client-side validation without signature verification — the `UNSAFE_` naming convention signals this. Server-side verification remains authoritative.
 
 ### `setTokens()` Is Publicly Exported
 
@@ -620,13 +620,13 @@ Any JavaScript on the page can call `setTokens()` with arbitrary token data. Thi
 
 **Mitigation**: In handler mode, `setTokens()` only updates the local cache — the server maintains the authoritative session state.
 
-### Conditional UI (Passkey Autofill) Not Yet Implemented
+### Conditional UI and AbortController (v0.12.0+)
 
-The library exports `isConditionalMediationAvailable()` for feature detection, but does not yet provide a `loginWithConditionalUI()` function. This is the expected passkey UX in 2025/2026 — see `BACKLOG.md` for implementation status.
+`loginWithConditionalUI()` supports passkey autofill with two modes:
+- **Mode A** (email-scoped): User types email, then selects passkey from autofill
+- **Mode B** (discovery): Browser shows available passkeys without email input
 
-### No AbortController for WebAuthn Ceremonies
-
-`loginWithPasskey()` and `registerPasskey()` do not accept an `AbortSignal`. You cannot cancel in-flight WebAuthn ceremonies from application code. This will be addressed when Conditional UI is implemented (which requires AbortController management).
+The library manages `_conditionalAbortController` internally — starting a new login or calling `logout()` automatically aborts any in-flight conditional UI ceremony.
 
 ---
 
