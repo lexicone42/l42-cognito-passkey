@@ -1,6 +1,8 @@
-# Token Handler Mode (v0.8.0+)
+# Token Handler Mode (Recommended)
 
-Token Handler mode is the most secure token storage option, storing tokens server-side in HttpOnly session cookies. This makes tokens completely inaccessible to JavaScript, providing strong protection against XSS attacks.
+Token Handler mode is the **recommended production deployment**. It stores tokens server-side in HttpOnly session cookies, making them completely inaccessible to JavaScript and providing strong protection against XSS attacks.
+
+> **Note:** `localStorage` and `memory` token storage modes are deprecated as of v0.14.0 and will be removed in v1.0. All production deployments should use handler mode.
 
 ## Overview
 

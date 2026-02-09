@@ -4,7 +4,7 @@
 
 L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for AWS Cognito with WebAuthn/Passkey support. It's designed to be copied into projects (no CDN dependency) and used as an ES module.
 
-**Current Version**: 0.13.0
+**Current Version**: 0.14.0
 **License**: Apache-2.0
 **Tests**: ~649 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 101 Cedar authorization tests)
 
@@ -107,15 +107,15 @@ element.textContent = userInput;
 
 ## Token Storage Modes (v0.8.0)
 
-Three storage modes are available:
+Three storage modes exist. Handler mode is the recommended production approach; localStorage and memory are deprecated.
 
-| Mode | Security | Persistence | Use Case |
-|------|----------|-------------|----------|
-| `localStorage` | XSS-accessible | Yes | Default, simple apps |
-| `memory` | Not in storage | No | Session-only use |
-| `handler` | HttpOnly session | Yes | Maximum security |
+| Mode | Security | Persistence | Status |
+|------|----------|-------------|--------|
+| `handler` | HttpOnly session | Yes | **Recommended** |
+| `localStorage` | XSS-accessible | Yes | Deprecated (removed in v1.0) |
+| `memory` | Not in storage | No | Deprecated (removed in v1.0) |
 
-### Token Handler Mode (Recommended for Production)
+### Token Handler Mode (Recommended)
 
 Handler mode stores tokens server-side in HttpOnly cookies, making them inaccessible to XSS:
 

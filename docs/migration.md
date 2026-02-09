@@ -20,6 +20,46 @@ Complete migration guide for l42-cognito-passkey version upgrades.
 | v0.12.0 | v0.12.1 | Client-side login rate limiting |
 | v0.12.1 | v0.12.2 | Tree-shaking support |
 | v0.12.2 | v0.13.0 | Cedar policy authorization (server-side) |
+| v0.13.0 | v0.14.0 | Deprecate localStorage/memory modes |
+
+---
+
+## v0.13.0 → v0.14.0 (Storage Mode Deprecation)
+
+### localStorage and memory modes are deprecated
+
+`tokenStorage: 'localStorage'` and `tokenStorage: 'memory'` now emit a console warning at configure time. Both modes will be **removed in v1.0**.
+
+**Migration checklist:**
+
+1. Set up the Express backend from `examples/backends/express/`
+2. Install Cedar: `npm install @cedar-policy/cedar-wasm`
+3. Change your config:
+
+```javascript
+configure({
+    clientId: 'xxx',
+    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
+    tokenStorage: 'handler',          // was: 'localStorage'
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout'
+});
+```
+
+4. Change `getTokens()` calls to use `await`:
+
+```javascript
+// Before (sync — deprecated)
+const tokens = getTokens();
+
+// After (works in all modes, required for handler)
+const tokens = await getTokens();
+```
+
+5. Test end-to-end and verify session cookies are set
+
+See [Handler Mode](./handler-mode.md) for complete backend setup.
 
 ---
 

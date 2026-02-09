@@ -8,11 +8,11 @@
  *   import { configure, isAuthenticated, loginWithPassword } from './auth.js';
  *   configure({ clientId: 'xxx', cognitoDomain: 'xxx.auth.region.amazoncognito.com' });
  *
- * @version 0.13.0
+ * @version 0.14.0
  * @license Apache-2.0
  */
 
-export const VERSION = '0.13.0';
+export const VERSION = '0.14.0';
 
 // ==================== CONFIGURATION ====================
 
@@ -751,6 +751,15 @@ export function configure(options = {}) {
                 '})'
             );
         }
+    }
+
+    // Deprecation warning for non-handler modes
+    if (newConfig.tokenStorage !== 'handler') {
+        console.warn(
+            `[l42-auth] DEPRECATION: tokenStorage "${newConfig.tokenStorage}" is deprecated and will be removed in v1.0.\n` +
+            'Migrate to handler mode for production security (HttpOnly cookies, Cedar authorization).\n' +
+            'See: https://github.com/lexicone42/l42-cognito-passkey/blob/main/docs/handler-mode.md'
+        );
     }
 
     // Validate redirectUri if provided

@@ -34,15 +34,15 @@ A deep-dive into why `l42-cognito-passkey` works the way it does, what can go wr
 
 ### Design Decision
 
-The library offers three storage modes, chosen at `configure()` time:
+The library offers three storage modes, chosen at `configure()` time. **Handler mode is recommended for production.** The other modes are deprecated and will be removed in v1.0.
 
-| Mode | Where tokens live | Persists across reloads? | XSS-accessible? | Requires backend? |
-|------|------------------|-------------------------|------------------|--------------------|
-| `localStorage` (default) | `window.localStorage` | Yes | Yes | No |
-| `memory` | JavaScript variable | No | Via `getTokens()` only | No |
-| `handler` | Server-side HttpOnly cookies | Yes | No | Yes |
+| Mode | Where tokens live | Persists across reloads? | XSS-accessible? | Requires backend? | Status |
+|------|------------------|-------------------------|------------------|--------------------|--------|
+| `handler` | Server-side HttpOnly cookies | Yes | No | Yes | **Recommended** |
+| `localStorage` | `window.localStorage` | Yes | Yes | No | Deprecated |
+| `memory` | JavaScript variable | No | Via `getTokens()` only | No | Deprecated |
 
-**Why three modes?** Different deployment scenarios need different trade-offs. A static site on Netlify cannot set HttpOnly cookies (no backend), so `localStorage` is the pragmatic default. A high-security SaaS app should use `handler` mode with a backend.
+**Why did localStorage/memory exist?** They were the original modes before the handler backend existed. A static site on Netlify without a backend required localStorage. Now that the Express backend is available and Cedar authorization requires server-side evaluation, handler mode is the standard deployment path. The deprecated modes remain for backwards compatibility and prototyping only.
 
 ### Common Misconfigurations
 

@@ -62,36 +62,11 @@ It handles:
 
 ## Token Storage Modes
 
-The library supports three ways to store tokens. This is the most important architectural decision you'll make.
+The library supports three storage modes. **Handler mode is the recommended production approach.** The other two modes are deprecated and will be removed in v1.0.
 
-### localStorage (default)
+### handler (recommended)
 
-Tokens live in `window.localStorage` under the key `l42_auth_tokens`. This is the simplest option — tokens persist across page reloads and tabs.
-
-```
-Browser tab ──► localStorage['l42_auth_tokens']
-                  ├── access_token (JWT, ~1 hour)
-                  ├── id_token (JWT, ~1 hour)
-                  ├── refresh_token (opaque, ~30 days)
-                  └── auth_method ('password' | 'passkey' | 'oauth')
-```
-
-**Trade-off**: Any JavaScript on the page can read these tokens. If your site has an XSS vulnerability, an attacker can steal the tokens.
-
-### memory
-
-Tokens live in a JavaScript variable. They vanish on page reload.
-
-```
-Browser tab ──► JavaScript variable (MemoryTokenStore._tokens)
-                  ├── access_token
-                  ├── id_token
-                  └── refresh_token
-```
-
-**Trade-off**: More resistant to persistent XSS token theft, but the user has to re-authenticate every time they refresh the page.
-
-### handler (recommended for production)
+This is the recommended mode for all production deployments.
 
 Tokens live on your server in an HttpOnly session cookie. The browser never sees the refresh token.
 
@@ -107,17 +82,22 @@ Your Server ──► req.session.tokens
 
 **Trade-off**: Requires a backend server. But tokens are invisible to JavaScript entirely — XSS can't steal them.
 
-### How the Modes Affect the API
+### localStorage and memory (deprecated)
 
-Most functions work identically across modes. The key difference is `getTokens()`:
+These modes are deprecated and will be removed in v1.0. They exist for backwards compatibility and prototyping only.
 
-| Mode | `getTokens()` returns | `isAuthenticated()` |
-|------|----------------------|---------------------|
-| localStorage | Object (sync) | Sync — reads localStorage |
-| memory | Object (sync) | Sync — reads variable |
-| handler | **Promise** (async) | Sync — reads 30-second cache |
+- **localStorage** — tokens in `window.localStorage`, XSS-accessible, persists across reloads
+- **memory** — tokens in a JavaScript variable, lost on page reload
 
-Because JavaScript lets you `await` a non-Promise, `await getTokens()` works in all modes. This is the recommended pattern.
+Both modes store the refresh token in the browser, which means an XSS vulnerability can steal long-lived credentials. Migrate to handler mode for production.
+
+### `getTokens()` and `await`
+
+Always use `await getTokens()` — it works in all modes and is required for handler mode:
+
+```javascript
+const tokens = await getTokens();
+```
 
 ## Authentication Flows
 
@@ -501,10 +481,10 @@ configure({
     clientId: 'your-cognito-client-id',
     cognitoDomain: 'yourapp.auth.us-west-2.amazoncognito.com',
 
-    // Token storage (pick one)
-    tokenStorage: 'localStorage',  // or 'memory' or 'handler'
+    // Token storage — handler mode recommended for production
+    tokenStorage: 'handler',  // 'localStorage' and 'memory' are deprecated
 
-    // Handler mode endpoints (required if tokenStorage: 'handler')
+    // Handler mode endpoints (required)
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
     logoutEndpoint: '/auth/logout',

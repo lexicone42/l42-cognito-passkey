@@ -18,11 +18,12 @@ configure({
     redirectUri: '/callback',              // default: origin + '/callback'
     scopes: 'openid email aws.cognito.signin.user.admin',
     tokenKey: 'l42_auth_tokens',          // storage key
-    tokenStorage: 'localStorage',          // 'localStorage', 'memory', or 'handler'
+    tokenStorage: 'handler',              // RECOMMENDED: 'handler'
+                                          // DEPRECATED: 'localStorage', 'memory' (removed in v1.0)
     cookieName: 'l42_id_token',           // cookie name
     cookieDomain: '.myapp.com',           // auto-detected if not set
     allowedDomains: ['myapp.com'],        // auto-allows current domain if not set
-    // Handler mode (v0.8.0+)
+    // Handler mode endpoints (required for handler mode)
     tokenEndpoint: '/auth/token',          // GET endpoint returning tokens
     refreshEndpoint: '/auth/refresh',      // POST endpoint to refresh tokens
     logoutEndpoint: '/auth/logout',        // POST endpoint to logout
@@ -69,7 +70,7 @@ Library version string.
 
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.13.0"
+console.log(VERSION); // "0.14.0"
 ```
 
 ## Authentication State
@@ -92,16 +93,16 @@ if (isAuthenticated()) {
 
 ### getTokens()
 
-Get stored authentication tokens.
+Get stored authentication tokens. Always use `await` — required for handler mode, works in all modes.
 
 ```javascript
 import { getTokens } from '/auth/auth.js';
 
-const tokens = getTokens();
+const tokens = await getTokens();
 // { access_token, id_token, refresh_token, auth_method }
 ```
 
-**Returns:** `Object | null`
+**Returns:** `Object | Promise<Object> | null` — Promise in handler mode, sync in deprecated localStorage/memory modes. Use `await` for all modes.
 
 ### getAuthMethod()
 

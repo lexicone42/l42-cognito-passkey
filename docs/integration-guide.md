@@ -40,15 +40,13 @@ if (isAuthenticated()) {
 }
 ```
 
-## Choosing a Token Storage Mode
+## Token Storage Mode
 
-| Mode | When to use |
-|------|------------|
-| `localStorage` (default) | Simple apps, prototypes, admin tools with trusted users |
-| `memory` | Session-only apps where persistence isn't needed |
-| `handler` | Production apps with sensitive data, multi-site deployments |
+**Handler mode is recommended for all production deployments.** It stores tokens server-side in HttpOnly cookies, making them invisible to JavaScript.
 
-### Handler mode setup
+`localStorage` and `memory` modes are deprecated and will be removed in v1.0. They remain available for prototyping only.
+
+### Handler mode setup (recommended)
 
 Handler mode requires a backend. See `examples/backends/express/` for a reference implementation.
 

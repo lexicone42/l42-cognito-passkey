@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.0] - 2026-02-09
+
+### Deprecated
+
+- **`localStorage` and `memory` token storage modes** — `configure()` now emits a console warning when using non-handler storage modes. Both modes will be removed in v1.0. Use `tokenStorage: 'handler'` for all production deployments.
+
+### Changed
+
+- **Handler mode is now the recommended default** — all documentation, README, and examples updated to present handler mode as the primary deployment path
+- README restructured with "Client + Server" (recommended) and "Client-Only" (deprecated) tiers
+
+### Documentation
+
+- All docs updated to reflect handler mode as recommended: architecture.md, api-reference.md, design-decisions.md, handler-mode.md, integration-guide.md, security-hardening.md, migration.md
+- Added v0.14.0 migration guide with localStorage → handler checklist
+
 ## [0.13.0] - 2026-02-09
 
 ### Added
