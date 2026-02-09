@@ -180,13 +180,13 @@ See `docs/cognito-setup.md` for complete instructions.
 When integrating, your CSP must allow:
 
 ```
-script-src: 'self' 'unsafe-inline'
-style-src: 'self' 'unsafe-inline'
-connect-src: 'self' https://cognito-idp.{region}.amazonaws.com https://*.amazoncognito.com https://{cognitoDomain}
+script-src: 'nonce-{RANDOM}' 'strict-dynamic'
+style-src: 'nonce-{RANDOM}'
+connect-src: 'self' https://cognito-idp.{region}.amazonaws.com https://*.amazoncognito.com
 form-action: 'self' https://{cognitoDomain}
 ```
 
-Note: Since auth.js is self-hosted, you don't need external script sources.
+> **Note:** Use nonce-based CSP (requires server-side nonce generation). For static files without a server, `script-src 'self'` is acceptable. Avoid `'unsafe-inline'` in production. See `docs/security-hardening.md`.
 
 ## Token Storage
 

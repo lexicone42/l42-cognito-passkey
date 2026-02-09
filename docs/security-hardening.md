@@ -57,8 +57,8 @@ Content-Security-Policy:
   img-src 'self' data:;
   font-src 'self';
   connect-src 'self'
-    https://*.auth.*.amazoncognito.com
-    https://cognito-idp.*.amazonaws.com;
+    https://*.amazoncognito.com
+    https://cognito-idp.{REGION}.amazonaws.com;
   form-action 'self';
   frame-ancestors 'none';
   object-src 'none';
@@ -81,7 +81,7 @@ app.use((req, res, next) => {
         script-src 'nonce-${nonce}' 'strict-dynamic';
         style-src 'nonce-${nonce}';
         default-src 'none';
-        connect-src 'self' https://*.amazoncognito.com;
+        connect-src 'self' https://*.amazoncognito.com https://cognito-idp.${process.env.AWS_REGION}.amazonaws.com;
         img-src 'self' data:;
         base-uri 'none';
         object-src 'none';

@@ -12,9 +12,10 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ## Prerequisites
 
-1. **NPM_TOKEN**: Set up in GitHub repository secrets for npm publishing
+1. **`gh` CLI**: Installed and authenticated (for GitHub release creation)
 2. **Clean working directory**: All changes committed
 3. **Tests passing**: `pnpm test` should pass
+4. **CHANGELOG updated**: Add entry for the new version before releasing
 
 ## Release Commands
 
@@ -45,29 +46,54 @@ pnpm release:prerelease
 
 ## What Happens During Release
 
-1. **Tests run** (`preversion` hook)
-   - All tests must pass before version bump
+When you run `pnpm release:patch` (or minor/major), npm's version lifecycle runs automatically:
 
-2. **Version synced** (`version` hook)
-   - `package.json` version is bumped by npm
-   - `scripts/sync-version.js` updates:
-     - `src/auth.js` (@version JSDoc)
-     - `dist/auth.js` (@version JSDoc)
-     - `plugin/plugin.json`
-     - `plugin/CLAUDE.md`
-     - `CLAUDE.md`
-     - `docs/api-reference.md`
-   - Changes are staged for commit
+### 1. `preversion` — Tests + dist check
 
-3. **Git operations** (`postversion` hook)
-   - Commits version bump
-   - Creates git tag (e.g., `v0.5.0`)
-   - Pushes commit and tag to GitHub
+```
+pnpm test && node scripts/check-dist-sync.js
+```
 
-4. **CI/CD Pipeline** (GitHub Actions)
-   - Runs tests on tag push
-   - Publishes to npm with provenance
-   - Creates GitHub Release with changelog
+All 649+ tests must pass. `dist/auth.js` must match `src/auth.js`.
+
+### 2. `version` — Sync version across all files
+
+```
+node scripts/sync-version.js && cp src/auth.js dist/auth.js && cp src/auth.d.ts dist/auth.d.ts && git add -A
+```
+
+`sync-version.js` updates version references in:
+- `src/auth.js` — `@version` JSDoc + `VERSION` constant
+- `dist/auth.js` — same
+- `plugin/plugin.json` — `version` field
+- `plugin/CLAUDE.md` — version references
+- `CLAUDE.md` — version references
+- `docs/api-reference.md` — version examples
+- `docs/architecture.md` — version header
+- `docs/integration-feedback.md` — version example
+- `docs/ocsf-logging.md` — version in JSON example
+- `docs/claude-workflow.md` — version in templates
+- `README.md` — version badge + VERSION examples
+
+npm then commits the changes and creates the git tag (e.g., `v0.15.0`).
+
+### 3. `postversion` — Push + create GitHub release
+
+```
+git push && git push --tags && node scripts/create-release.js
+```
+
+`create-release.js`:
+- Extracts release notes from `CHANGELOG.md` for the version
+- Creates a GitHub release via `gh release create`
+- Skips gracefully if `gh` isn't installed or the release already exists
+
+## Before Releasing
+
+1. **Update CHANGELOG.md** with the new version entry
+2. **Run tests**: `pnpm test`
+3. **Run doc validation**: `pnpm validate-docs`
+4. **Ensure dist is in sync**: `pnpm check-dist`
 
 ## Manual Release (if automation fails)
 
@@ -76,26 +102,31 @@ pnpm release:prerelease
 # 2. Run sync script
 node scripts/sync-version.js
 
-# 3. Commit
+# 3. Copy dist
+cp src/auth.js dist/auth.js && cp src/auth.d.ts dist/auth.d.ts
+
+# 4. Commit
 git add -A
-git commit -m "v0.5.0"
+git commit -m "v0.15.0"
 
-# 4. Tag
-git tag -a v0.5.0 -m "v0.5.0 - Description"
+# 5. Tag
+git tag -a v0.15.0 -m "v0.15.0"
 
-# 5. Push
+# 6. Push
 git push origin main --tags
 
-# 6. Publish manually (if workflow fails)
-npm publish --access public
+# 7. Create GitHub release
+node scripts/create-release.js
+# or manually:
+gh release create v0.15.0 --title "v0.15.0" --notes "Release notes here"
 ```
 
-## Changelog
+## Changelog Format
 
-Before releasing, update `CHANGELOG.md` with:
+Use [Keep a Changelog](https://keepachangelog.com/) format:
 
 ```markdown
-## [0.5.0] - YYYY-MM-DD
+## [0.15.0] - YYYY-MM-DD
 
 ### Added
 - New feature X
@@ -106,23 +137,11 @@ Before releasing, update `CHANGELOG.md` with:
 ### Fixed
 - Bug in Z
 
+### Deprecated
+- Old API W (removed in v1.0)
+
 ### Security
-- Fixed vulnerability in W
-```
-
-## Version History
-
-All versions are kept on npm and can be installed by version:
-
-```bash
-# Latest
-pnpm add l42-cognito-passkey
-
-# Specific version
-pnpm add l42-cognito-passkey@0.4.0
-
-# Check available versions
-npm view l42-cognito-passkey versions
+- Fixed vulnerability in V
 ```
 
 ## Troubleshooting
@@ -134,19 +153,25 @@ Run the version consistency tests:
 pnpm test -- plugin/templates/version-consistency.test.js
 ```
 
-### NPM publish fails
+### Files not updated by sync-version.js
 
-1. Check `NPM_TOKEN` secret is set in GitHub
-2. Verify you have publish rights to the package
-3. Check npm registry status: https://status.npmjs.org/
+Check `scripts/sync-version.js` — each file has specific regex patterns for version matching. If you add a new file with version references, add it to the `updates` array in that script.
 
-### GitHub Release missing changelog
+### GitHub Release not created
 
-The workflow extracts changelog from `CHANGELOG.md`. Ensure the version header matches:
-```markdown
-## [0.5.0] - 2024-01-15
+If `gh` CLI isn't authenticated or available:
+```bash
+# Authenticate
+gh auth login
+
+# Create release manually
+node scripts/create-release.js
 ```
-or
-```markdown
-## 0.5.0
+
+### validate-docs fails
+
+```bash
+pnpm validate-docs
 ```
+
+This checks version references, test counts, and file references across CLAUDE.md, plugin/CLAUDE.md, and docs/architecture.md.

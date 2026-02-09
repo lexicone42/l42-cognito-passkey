@@ -222,11 +222,11 @@ Since auth.js is self-hosted, the CSP is straightforward:
 
 ```
 script-src: 'self'
-connect-src: 'self' https://cognito-idp.{region}.amazonaws.com https://{cognitoDomain}
+connect-src: 'self' https://cognito-idp.{region}.amazonaws.com https://*.amazoncognito.com
 form-action: 'self' https://{cognitoDomain}
 ```
 
-No external script sources needed.
+No external script sources needed. For stronger CSP, use nonce-based policies — see `docs/security-hardening.md`.
 
 ## Cognito Setup Checklist
 

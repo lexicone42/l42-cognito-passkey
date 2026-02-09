@@ -100,6 +100,14 @@ const updates = [
     ]
   },
   {
+    file: 'docs/architecture.md',
+    optional: true,
+    patterns: [
+      // Match "**Version**: X.Y.Z" in the header line
+      { regex: /\*\*Version\*\*:\s*[\d.]+(-[\w.]+)?/g, replacement: `**Version**: ${newVersion}` }
+    ]
+  },
+  {
     file: 'docs/claude-workflow.md',
     optional: true,
     patterns: [

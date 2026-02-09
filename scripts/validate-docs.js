@@ -35,7 +35,8 @@ console.log(`\nValidating documentation (expected version: ${expectedVersion})..
 
 const claudeFiles = [
   'CLAUDE.md',
-  'plugin/CLAUDE.md'
+  'plugin/CLAUDE.md',
+  'docs/architecture.md'
 ];
 
 for (const file of claudeFiles) {
