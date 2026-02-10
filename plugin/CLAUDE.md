@@ -305,7 +305,7 @@ Each template has an accompanying test file:
 - `plugin/templates/version-consistency.test.js`
 - `plugin/templates/token-storage.test.js` (15 token storage tests)
 - `plugin/templates/auto-refresh.test.js` (35 auto-refresh, fetchWithAuth, CSRF tests)
-- `plugin/templates/auth-properties.test.js` (31 auth property-based tests)
+- `plugin/templates/auth-properties.test.js` (41 auth property-based tests)
 - `plugin/templates/debug-diagnostics.test.js` (34 debug logging & diagnostics tests)
 - `plugin/templates/conditional-ui.test.js` (32 conditional UI / passkey autofill tests)
 - `plugin/templates/conditional-create.test.js` (23 conditional create / passkey upgrade tests)

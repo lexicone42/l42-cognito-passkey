@@ -499,10 +499,10 @@ The library has 658 tests across 17 files, organized by feature:
 | `cedar-authorization.test.js` | 132 | Policy evaluation, ownership, group aliases, property tests |
 | `handler-sync-api.test.js` | 52 | Handler mode token operations |
 | `oauth-security.test.js` | 44 | PKCE, CSRF, OAuth state validation |
-| `token-storage.test.js` | 41 | localStorage/memory/handler storage |
+| `token-storage.test.js` | 15 | localStorage/memory/handler storage |
 | `admin-panel-pattern.test.js` | 41 | Admin UI patterns |
 | `login-rate-limiting.test.js` | 40 | Rate limiting and exponential backoff |
-| `static-site-pattern.test.js` | 36 | Static site integration |
+| `static-site-pattern.test.js` | 27 | Static site integration |
 | `auto-refresh.test.js` | 35 | Background token refresh |
 | `debug-diagnostics.test.js` | 34 | Debug logging |
 | `auth-properties.test.js` | 41 | Property-based tests (fast-check) |
@@ -512,7 +512,7 @@ The library has 658 tests across 17 files, organized by feature:
 | `rbac-roles.property.test.js` | 22 | RBAC property tests |
 | `webauthn-capabilities.test.js` | 22 | WebAuthn feature detection |
 | `version-consistency.test.js` | 11 | Version sync across files |
-| `handler-token-store.test.js` | 37 | Handler mode token store |
+| `handler-token-store.test.js` | 56 | Handler mode token store |
 
 Tests use Vitest with jsdom environment. Property-based tests use fast-check for invariant verification (e.g., "admin is always permitted", "backoff delay never exceeds max").
 

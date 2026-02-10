@@ -48,18 +48,18 @@ pnpm release:prerelease
 
 When you run `pnpm release:patch` (or minor/major), npm's version lifecycle runs automatically:
 
-### 1. `preversion` — Tests + dist check
+### 1. `preversion` — Tests + dist check + doc validation
 
 ```
-pnpm test && node scripts/check-dist-sync.js
+pnpm test && node scripts/check-dist-sync.js && pnpm validate-docs
 ```
 
-All 658+ tests must pass. `dist/auth.js` must match `src/auth.js`.
+All 658+ tests must pass. `dist/auth.js` must match `src/auth.js`. Documentation version and test count references must be current.
 
 ### 2. `version` — Sync version across all files
 
 ```
-node scripts/sync-version.js && cp src/auth.js dist/auth.js && cp src/auth.d.ts dist/auth.d.ts && git add -A
+node scripts/sync-version.js && node scripts/sync-test-counts.js && cp src/auth.js dist/auth.js && cp src/auth.d.ts dist/auth.d.ts && git add -A
 ```
 
 `sync-version.js` updates version references in:
@@ -74,6 +74,12 @@ node scripts/sync-version.js && cp src/auth.js dist/auth.js && cp src/auth.d.ts 
 - `docs/ocsf-logging.md` — version in JSON example
 - `docs/claude-workflow.md` — version in templates
 - `README.md` — version badge + VERSION examples
+
+`sync-test-counts.js` updates per-file and total test counts in:
+- `CLAUDE.md` — total count
+- `plugin/CLAUDE.md` — total + per-file counts
+- `docs/architecture.md` — total + per-file table + file count
+- `docs/RELEASING.md` — total count in preversion description
 
 npm then commits the changes and creates the git tag (e.g., `v0.15.0`).
 
@@ -92,8 +98,9 @@ git push && git push --tags && node scripts/create-release.js
 
 1. **Update CHANGELOG.md** with the new version entry
 2. **Run tests**: `pnpm test`
-3. **Run doc validation**: `pnpm validate-docs`
-4. **Ensure dist is in sync**: `pnpm check-dist`
+3. **Sync test counts**: `pnpm sync-counts` (auto-updates doc files with current counts)
+4. **Run doc validation**: `pnpm validate-docs`
+5. **Ensure dist is in sync**: `pnpm check-dist`
 
 ## Manual Release (if automation fails)
 

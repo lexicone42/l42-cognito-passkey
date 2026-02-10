@@ -89,7 +89,7 @@ try {
     const content = fs.readFileSync(filePath, 'utf8');
 
     // Check test count references
-    const testCountMatches = content.matchAll(/\*\*(?:Tests|Total)\*\*:\s*(\d+)/gi);
+    const testCountMatches = content.matchAll(/\*\*(?:Tests|Total)\*\*:\s*~?(\d+)/gi);
     for (const match of testCountMatches) {
       const docCount = parseInt(match[1], 10);
       if (docCount !== actualTestCount) {
