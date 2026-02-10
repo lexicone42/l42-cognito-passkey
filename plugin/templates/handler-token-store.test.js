@@ -127,30 +127,22 @@ const HandlerTokenStore = {
 // ============================================================================
 
 describe('Handler Mode Configuration', () => {
-    const validStorageModes = ['localStorage', 'memory', 'handler'];
-
     function validateConfig(config) {
-        if (config.tokenStorage && !validStorageModes.includes(config.tokenStorage)) {
+        // Reject deprecated tokenStorage values (removed in v0.15.0)
+        if (config.tokenStorage && config.tokenStorage !== 'handler') {
             throw new Error(
-                `Invalid tokenStorage: '${config.tokenStorage}'.\n` +
-                `Valid options: ${validStorageModes.join(', ')}`
+                `tokenStorage "${config.tokenStorage}" was removed in v0.15.0.\n` +
+                'Only handler mode is supported.'
             );
         }
 
-        if (config.tokenStorage === 'handler') {
-            const requiredEndpoints = ['tokenEndpoint', 'refreshEndpoint', 'logoutEndpoint'];
-            const missing = requiredEndpoints.filter(ep => !config[ep]);
-            if (missing.length > 0) {
-                throw new Error(
-                    `Token handler mode requires: ${missing.join(', ')}.\n` +
-                    'Example: configure({\n' +
-                    '    tokenStorage: "handler",\n' +
-                    '    tokenEndpoint: "/auth/token",\n' +
-                    '    refreshEndpoint: "/auth/refresh",\n' +
-                    '    logoutEndpoint: "/auth/logout"\n' +
-                    '})'
-                );
-            }
+        // Handler endpoints are always required
+        const requiredEndpoints = ['tokenEndpoint', 'refreshEndpoint', 'logoutEndpoint'];
+        const missing = requiredEndpoints.filter(ep => !config[ep]);
+        if (missing.length > 0) {
+            throw new Error(
+                `configure() requires handler endpoints: ${missing.join(', ')}.`
+            );
         }
         return true;
     }
@@ -164,7 +156,7 @@ describe('Handler Mode Configuration', () => {
         })).not.toThrow();
     });
 
-    it('requires tokenEndpoint for handler mode', () => {
+    it('requires tokenEndpoint', () => {
         expect(() => validateConfig({
             tokenStorage: 'handler',
             refreshEndpoint: '/auth/refresh',
@@ -172,7 +164,7 @@ describe('Handler Mode Configuration', () => {
         })).toThrow(/tokenEndpoint/);
     });
 
-    it('requires refreshEndpoint for handler mode', () => {
+    it('requires refreshEndpoint', () => {
         expect(() => validateConfig({
             tokenStorage: 'handler',
             tokenEndpoint: '/auth/token',
@@ -180,7 +172,7 @@ describe('Handler Mode Configuration', () => {
         })).toThrow(/refreshEndpoint/);
     });
 
-    it('requires logoutEndpoint for handler mode', () => {
+    it('requires logoutEndpoint', () => {
         expect(() => validateConfig({
             tokenStorage: 'handler',
             tokenEndpoint: '/auth/token',
@@ -199,26 +191,16 @@ describe('Handler Mode Configuration', () => {
         }
     });
 
-    it('provides helpful example in error message', () => {
-        try {
-            validateConfig({ tokenStorage: 'handler' });
-            expect.fail('Should have thrown');
-        } catch (e) {
-            expect(e.message).toContain('tokenStorage: "handler"');
-            expect(e.message).toContain('/auth/token');
-        }
-    });
-
-    it('does not require handler endpoints for localStorage mode', () => {
+    it('rejects deprecated localStorage mode', () => {
         expect(() => validateConfig({
             tokenStorage: 'localStorage'
-        })).not.toThrow();
+        })).toThrow(/removed in v0\.15\.0/);
     });
 
-    it('does not require handler endpoints for memory mode', () => {
+    it('rejects deprecated memory mode', () => {
         expect(() => validateConfig({
             tokenStorage: 'memory'
-        })).not.toThrow();
+        })).toThrow(/removed in v0\.15\.0/);
     });
 
     it('oauthCallbackUrl is optional', () => {
@@ -834,5 +816,173 @@ describe('Handler Mode Cache TTL', () => {
         // After TTL
         vi.advanceTimersByTime(1500);
         expect(HandlerTokenStore.getCached()).toBeNull();
+    });
+});
+
+// ============================================================================
+// Session Persistence (v0.15.0) — Fix for #12
+// ============================================================================
+
+describe('Session Persistence (_persistHandlerSession)', () => {
+    /**
+     * Mirrors the _persistHandlerSession function from auth.js.
+     * In handler mode, direct login (passkey/password) completes client-side.
+     * This function bridges tokens into a server session.
+     */
+    async function _persistHandlerSession(tokens, cfg) {
+        if (cfg.tokenStorage !== 'handler' || !cfg.sessionEndpoint) {
+            return;
+        }
+
+        const response = await fetch(cfg.sessionEndpoint, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-L42-CSRF': '1'
+            },
+            body: JSON.stringify({
+                access_token: tokens.access_token,
+                id_token: tokens.id_token,
+                refresh_token: tokens.refresh_token,
+                auth_method: tokens.auth_method
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Session persist failed: ${response.status}`);
+        }
+    }
+
+    beforeEach(() => {
+        vi.restoreAllMocks();
+        global.fetch = vi.fn();
+    });
+
+    afterEach(() => {
+        delete global.fetch;
+    });
+
+    const handlerConfig = {
+        tokenStorage: 'handler',
+        sessionEndpoint: '/auth/session',
+        tokenEndpoint: '/auth/token',
+        refreshEndpoint: '/auth/refresh',
+        logoutEndpoint: '/auth/logout'
+    };
+
+    const sampleTokens = {
+        access_token: 'access-abc',
+        id_token: 'id-xyz',
+        refresh_token: 'refresh-123',
+        auth_method: 'passkey'
+    };
+
+    it('POSTs tokens to sessionEndpoint in handler mode', async () => {
+        global.fetch.mockResolvedValue({ ok: true, status: 200 });
+
+        await _persistHandlerSession(sampleTokens, handlerConfig);
+
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(fetch).toHaveBeenCalledWith('/auth/session', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-L42-CSRF': '1'
+            },
+            body: JSON.stringify({
+                access_token: 'access-abc',
+                id_token: 'id-xyz',
+                refresh_token: 'refresh-123',
+                auth_method: 'passkey'
+            })
+        });
+    });
+
+    it('sends CSRF header for cross-origin protection', async () => {
+        global.fetch.mockResolvedValue({ ok: true, status: 200 });
+
+        await _persistHandlerSession(sampleTokens, handlerConfig);
+
+        const callHeaders = fetch.mock.calls[0][1].headers;
+        expect(callHeaders['X-L42-CSRF']).toBe('1');
+    });
+
+    it('sends credentials: include for session cookies', async () => {
+        global.fetch.mockResolvedValue({ ok: true, status: 200 });
+
+        await _persistHandlerSession(sampleTokens, handlerConfig);
+
+        expect(fetch.mock.calls[0][1].credentials).toBe('include');
+    });
+
+    it('does NOT call sessionEndpoint when not configured', async () => {
+        const configWithout = { ...handlerConfig, sessionEndpoint: null };
+
+        await _persistHandlerSession(sampleTokens, configWithout);
+
+        expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call sessionEndpoint in non-handler mode', async () => {
+        const localStorageConfig = {
+            ...handlerConfig,
+            tokenStorage: 'localStorage',
+            sessionEndpoint: '/auth/session'
+        };
+
+        await _persistHandlerSession(sampleTokens, localStorageConfig);
+
+        expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('throws on non-OK response', async () => {
+        global.fetch.mockResolvedValue({ ok: false, status: 500 });
+
+        await expect(_persistHandlerSession(sampleTokens, handlerConfig))
+            .rejects.toThrow('Session persist failed: 500');
+    });
+
+    it('throws on 403 (CSRF/audience mismatch)', async () => {
+        global.fetch.mockResolvedValue({ ok: false, status: 403 });
+
+        await expect(_persistHandlerSession(sampleTokens, handlerConfig))
+            .rejects.toThrow('Session persist failed: 403');
+    });
+
+    it('throws on network error', async () => {
+        global.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+        await expect(_persistHandlerSession(sampleTokens, handlerConfig))
+            .rejects.toThrow('Failed to fetch');
+    });
+
+    it('includes auth_method in POST body for password login', async () => {
+        global.fetch.mockResolvedValue({ ok: true, status: 200 });
+
+        const passwordTokens = { ...sampleTokens, auth_method: 'password' };
+        await _persistHandlerSession(passwordTokens, handlerConfig);
+
+        const body = JSON.parse(fetch.mock.calls[0][1].body);
+        expect(body.auth_method).toBe('password');
+    });
+
+    it('includes refresh_token in POST body (server stores it)', async () => {
+        global.fetch.mockResolvedValue({ ok: true, status: 200 });
+
+        await _persistHandlerSession(sampleTokens, handlerConfig);
+
+        const body = JSON.parse(fetch.mock.calls[0][1].body);
+        expect(body.refresh_token).toBe('refresh-123');
+    });
+
+    it('works with custom sessionEndpoint path', async () => {
+        global.fetch.mockResolvedValue({ ok: true, status: 200 });
+
+        const customConfig = { ...handlerConfig, sessionEndpoint: '/api/v2/auth/session' };
+        await _persistHandlerSession(sampleTokens, customConfig);
+
+        expect(fetch.mock.calls[0][0]).toBe('/api/v2/auth/session');
     });
 });

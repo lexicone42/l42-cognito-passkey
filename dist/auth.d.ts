@@ -60,8 +60,6 @@ export interface AuthConfigOptions {
   scopes?: string;
   /** Allowed redirect domains (auto-allows current domain if not set) */
   allowedDomains?: string[];
-  /** Cookie domain (auto-detected if not set) */
-  cookieDomain?: string;
   /** Cookie name (default: 'l42_id_token') */
   cookieName?: string;
   /** Key for token storage (default: 'l42_auth_tokens') */

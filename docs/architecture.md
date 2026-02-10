@@ -2,7 +2,7 @@
 
 A developer-friendly guide to how L42 Cognito Passkey works internally.
 
-**Version**: 0.14.0 | **Tests**: 649 | **License**: Apache-2.0
+**Version**: 0.15.0 | **Tests**: 633 | **License**: Apache-2.0
 
 ## What This Library Does
 
@@ -62,11 +62,7 @@ It handles:
 
 ## Token Storage Modes
 
-The library supports three storage modes. **Handler mode is the recommended production approach.** The other two modes are deprecated and will be removed in v1.0.
-
-### handler (recommended)
-
-This is the recommended mode for all production deployments.
+Handler mode is the only supported token storage mode (since v0.15.0).
 
 Tokens live on your server in an HttpOnly session cookie. The browser never sees the refresh token.
 
@@ -80,16 +76,7 @@ Your Server ──► req.session.tokens
                   └── refresh_token  ← never sent to browser
 ```
 
-**Trade-off**: Requires a backend server. But tokens are invisible to JavaScript entirely — XSS can't steal them.
-
-### localStorage and memory (deprecated)
-
-These modes are deprecated and will be removed in v1.0. They exist for backwards compatibility and prototyping only.
-
-- **localStorage** — tokens in `window.localStorage`, XSS-accessible, persists across reloads
-- **memory** — tokens in a JavaScript variable, lost on page reload
-
-Both modes store the refresh token in the browser, which means an XSS vulnerability can steal long-lived credentials. Migrate to handler mode for production.
+Tokens are invisible to JavaScript entirely — XSS can't steal them.
 
 ### `getTokens()` and `await`
 
@@ -443,7 +430,7 @@ dist/
 
 plugin/templates/
 ├── rbac-roles.js        ← Role definitions and permission helpers
-├── *.test.js            ← 17 test files (649 tests)
+├── *.test.js            ← 17 test files (633 tests)
 └── *.html               ← Integration template patterns
 
 examples/backends/express/
@@ -505,7 +492,7 @@ configure({
 
 ## Testing
 
-The library has 649 tests across 17 files, organized by feature:
+The library has 633 tests across 17 files, organized by feature:
 
 | Test File | Tests | What It Covers |
 |-----------|-------|----------------|

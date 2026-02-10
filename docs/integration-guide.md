@@ -42,11 +42,9 @@ if (isAuthenticated()) {
 
 ## Token Storage Mode
 
-**Handler mode is recommended for all production deployments.** It stores tokens server-side in HttpOnly cookies, making them invisible to JavaScript.
+**Handler mode is the only supported token storage mode** (since v0.15.0). It stores tokens server-side in HttpOnly cookies, making them invisible to JavaScript.
 
-`localStorage` and `memory` modes are deprecated and will be removed in v1.0. They remain available for prototyping only.
-
-### Handler mode setup (recommended)
+### Handler mode setup
 
 Handler mode requires a backend. See `examples/backends/express/` for a reference implementation.
 

@@ -65,17 +65,16 @@ function createSoonExpiringTokens() {
 // ============================================================================
 
 let config = {
-    tokenStorage: 'localStorage',
+    tokenStorage: 'handler',
     tokenKey: 'l42_auth_tokens',
     clientId: 'test-client-id',
-    cognitoDomain: 'test.auth.us-west-2.amazoncognito.com'
+    cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout'
 };
 
 let _storedTokens = null;
-
-function isHandlerMode() {
-    return config.tokenStorage === 'handler';
-}
 
 function getTokens() {
     return _storedTokens;
@@ -93,7 +92,6 @@ function isTokenExpired(tokens) {
 
 function shouldRefreshToken(tokens) {
     if (!tokens || !tokens.id_token) return false;
-    if (!isHandlerMode() && !tokens.refresh_token) return false;
     try {
         const payload = UNSAFE_decodeJwtPayload(tokens.id_token);
         const expiresAt = payload.exp * 1000;
@@ -164,12 +162,6 @@ function startAutoRefresh(options = {}) {
                 return;
             }
             if (isTokenExpired(tokens)) {
-                if (!isHandlerMode() && !tokens.refresh_token) {
-                    clearTokens();
-                    notifySessionExpired('Token expired with no refresh token');
-                    stopAutoRefresh();
-                    return;
-                }
                 try {
                     await refreshTokens();
                 } catch (e) {
@@ -352,16 +344,16 @@ describe('Auto-Refresh', () => {
         expect(_storedTokens).toBeNull(); // clearTokens was called
     });
 
-    it('fires onSessionExpired when no refresh token (non-handler mode)', async () => {
+    it('attempts server refresh even without client-side refresh_token (handler mode)', async () => {
         _storedTokens = createExpiredTokens();
-        _storedTokens.refresh_token = undefined; // No refresh token
-        const expiredCallback = vi.fn();
-        onSessionExpired(expiredCallback);
+        _storedTokens.refresh_token = undefined; // Server holds refresh token
+        _refreshMock = vi.fn().mockResolvedValue(undefined); // Server refreshes OK
 
         startAutoRefresh({ intervalMs: 1000 });
         await vi.advanceTimersByTimeAsync(1001);
 
-        expect(expiredCallback).toHaveBeenCalledWith('Token expired with no refresh token');
+        // Handler mode delegates refresh to server, doesn't check client-side refresh_token
+        expect(_refreshMock).toHaveBeenCalledTimes(1);
     });
 
     it('stops auto-refresh when no tokens found', async () => {

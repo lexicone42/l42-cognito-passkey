@@ -7,6 +7,7 @@
  *
  * Endpoints:
  * - GET  /auth/token    - Return tokens from session
+ * - POST /auth/session  - Store tokens from direct login (passkey/password)
  * - POST /auth/refresh  - Refresh tokens via Cognito
  * - POST /auth/logout   - Destroy session
  * - GET  /auth/callback - OAuth callback (exchange code for tokens)
@@ -225,6 +226,47 @@ app.get('/auth/token', (req, res) => {
         id_token: tokens.id_token,
         auth_method: tokens.auth_method || 'handler'
     });
+});
+
+/**
+ * POST /auth/session - Store tokens from direct login (passkey/password)
+ *
+ * When a user authenticates via loginWithPasskey() or loginWithPassword(),
+ * the WebAuthn/Cognito flow completes client-side and returns tokens to
+ * JavaScript. This endpoint bridges those tokens into a server-side session
+ * so the auth state survives page reloads.
+ *
+ * The OAuth flow (loginWithHostedUI) doesn't need this — it goes through
+ * /auth/callback which stores tokens directly.
+ *
+ * Body: { access_token, id_token, refresh_token, auth_method }
+ */
+app.post('/auth/session', requireCsrfHeader, (req, res) => {
+    const { access_token, id_token, refresh_token, auth_method } = req.body;
+
+    if (!access_token || !id_token) {
+        return res.status(400).json({ error: 'Missing access_token or id_token' });
+    }
+
+    // Validate id_token audience matches our client ID
+    try {
+        const claims = decodeJwtPayload(id_token);
+        if (claims.aud !== config.cognitoClientId) {
+            return res.status(403).json({ error: 'Token audience mismatch' });
+        }
+    } catch (error) {
+        return res.status(400).json({ error: 'Invalid id_token' });
+    }
+
+    // Store tokens in session (same structure as OAuth callback)
+    req.session.tokens = {
+        access_token,
+        id_token,
+        refresh_token: refresh_token || null,
+        auth_method: auth_method || 'direct'
+    };
+
+    res.json({ success: true });
 });
 
 /**
@@ -466,6 +508,7 @@ async function startServer() {
         console.log(`   Cognito: ${config.cognitoDomain}`);
         console.log(`\n   Endpoints:`);
         console.log(`   GET  /auth/token      - Get tokens from session`);
+        console.log(`   POST /auth/session    - Store tokens (direct login)`);
         console.log(`   POST /auth/refresh    - Refresh tokens`);
         console.log(`   POST /auth/logout     - Logout`);
         console.log(`   GET  /auth/callback   - OAuth callback`);

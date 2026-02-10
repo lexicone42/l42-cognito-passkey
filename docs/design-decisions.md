@@ -34,15 +34,13 @@ A deep-dive into why `l42-cognito-passkey` works the way it does, what can go wr
 
 ### Design Decision
 
-The library offers three storage modes, chosen at `configure()` time. **Handler mode is recommended for production.** The other modes are deprecated and will be removed in v1.0.
+Handler mode is the only supported token storage mode (since v0.15.0). Tokens are stored server-side in HttpOnly session cookies.
 
-| Mode | Where tokens live | Persists across reloads? | XSS-accessible? | Requires backend? | Status |
-|------|------------------|-------------------------|------------------|--------------------|--------|
-| `handler` | Server-side HttpOnly cookies | Yes | No | Yes | **Recommended** |
-| `localStorage` | `window.localStorage` | Yes | Yes | No | Deprecated |
-| `memory` | JavaScript variable | No | Via `getTokens()` only | No | Deprecated |
+| Mode | Where tokens live | Persists across reloads? | XSS-accessible? | Requires backend? |
+|------|------------------|-------------------------|------------------|-------------------|
+| `handler` | Server-side HttpOnly cookies | Yes | No | Yes |
 
-**Why did localStorage/memory exist?** They were the original modes before the handler backend existed. A static site on Netlify without a backend required localStorage. Now that the Express backend is available and Cedar authorization requires server-side evaluation, handler mode is the standard deployment path. The deprecated modes remain for backwards compatibility and prototyping only.
+**Why was localStorage/memory removed?** They were the original modes before the handler backend existed. Now that the Express backend is available and Cedar authorization requires server-side evaluation, handler mode is the standard deployment path. The old modes were deprecated in v0.14.0 and removed in v0.15.0.
 
 ### Common Misconfigurations
 

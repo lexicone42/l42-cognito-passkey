@@ -4,9 +4,9 @@
 
 L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for AWS Cognito with WebAuthn/Passkey support. It's designed to be copied into projects (no CDN dependency) and used as an ES module.
 
-**Current Version**: 0.14.0
+**Current Version**: 0.15.0
 **License**: Apache-2.0
-**Tests**: ~649 (including 53 property-based tests + 33 token storage tests + 50 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 101 Cedar authorization tests)
+**Tests**: ~633 (including 53 property-based tests + 15 token storage tests + 56 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 101 Cedar authorization tests)
 
 ## Quick Start for Claude Instances
 
@@ -105,40 +105,30 @@ element.textContent = userInput;
 // DANGEROUS - never use dynamic HTML with user data
 ```
 
-## Token Storage Modes (v0.8.0)
+## Token Storage (v0.15.0)
 
-Three storage modes exist. Handler mode is the recommended production approach; localStorage and memory are deprecated.
-
-| Mode | Security | Persistence | Status |
-|------|----------|-------------|--------|
-| `handler` | HttpOnly session | Yes | **Recommended** |
-| `localStorage` | XSS-accessible | Yes | Deprecated (removed in v1.0) |
-| `memory` | Not in storage | No | Deprecated (removed in v1.0) |
-
-### Token Handler Mode (Recommended)
-
-Handler mode stores tokens server-side in HttpOnly cookies, making them inaccessible to XSS:
+Tokens are stored server-side in HttpOnly session cookies via the Token Handler pattern. This is the only supported mode as of v0.15.0 (localStorage and memory modes were removed).
 
 ```javascript
 configure({
     clientId: 'xxx',
     cognitoDomain: 'xxx.auth.region.amazoncognito.com',
-    tokenStorage: 'handler',
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
     logoutEndpoint: '/auth/logout',
-    oauthCallbackUrl: '/auth/callback'  // Optional
+    sessionEndpoint: '/auth/session',   // Persists tokens after passkey/password login
+    oauthCallbackUrl: '/auth/callback'  // Optional — for OAuth flow
 });
 
-// In handler mode, getTokens() returns a Promise
+// getTokens() returns a Promise (fetches from server or returns cache)
 const tokens = await getTokens();
 ```
 
 **Key points:**
 - Requires a backend (see `examples/backends/express/`)
-- `await getTokens()` works in ALL modes (safe migration)
 - `isAuthenticated()` stays sync (uses cache)
 - `logout()` calls server endpoint
+- `sessionEndpoint` is called automatically after `loginWithPasskey()` / `loginWithPassword()` to persist the server session
 
 See `docs/handler-mode.md` for complete documentation.
 
@@ -211,19 +201,6 @@ NEW_ROLE: { canonical: 'new-roles', aliases: ['new-role', 'new-roles'] }
 
 3. Create Cognito User Pool Group with the canonical name.
 
-## Cookie Domain Handling
-
-The library handles ccTLDs (country-code TLDs) correctly:
-- `app.example.com` → `.example.com`
-- `app.example.co.uk` → `.example.co.uk` (3-part domain preserved)
-
-For custom domain handling:
-```javascript
-configure({
-    cookieDomain: '.yourdomain.com'
-});
-```
-
 ## Debug & Diagnostics (v0.11.0)
 
 Enable debug logging to diagnose auth issues:
@@ -280,6 +257,38 @@ The RBAC system has 22 property-based tests using fast-check:
 - Cognito group alias consistency
 
 ## Upgrade Notes
+
+### v0.15.0 (Handler-Only + Session Persistence)
+
+**BREAKING: `localStorage` and `memory` storage modes removed.**
+
+`configure()` now requires handler endpoints and throws if `tokenStorage` is set to anything other than `'handler'`. All deployments must use a Token Handler backend.
+
+**New: `sessionEndpoint` config option.** After `loginWithPasskey()` or `loginWithPassword()` succeeds, the library automatically POSTs tokens to `sessionEndpoint` to create a server session. This fixes the issue where direct login didn't persist across page reloads (#12).
+
+```javascript
+// Before (v0.14.0) — still worked briefly due to cache, broke on reload
+configure({
+    clientId: 'xxx',
+    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
+    tokenStorage: 'handler',
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout'
+});
+
+// After (v0.15.0) — add sessionEndpoint for direct login persistence
+configure({
+    clientId: 'xxx',
+    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session'  // NEW: persists passkey/password sessions
+});
+```
+
+Backend: Add `POST /auth/session` to your Token Handler (see `examples/backends/express/server.js`).
 
 ### v0.5.4 (Dist Sync)
 

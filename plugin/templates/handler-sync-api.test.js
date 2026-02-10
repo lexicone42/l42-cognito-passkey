@@ -94,20 +94,11 @@ const HandlerTokenStore = {
     }
 };
 
-function isHandlerMode() {
-    return config.tokenStorage === 'handler';
-}
-
 /**
- * The fix: getTokensSync() uses getCached() in handler mode
- * instead of the async get() method.
+ * getTokensSync() uses getCached() for synchronous access.
  */
 function getTokensSync() {
-    if (isHandlerMode()) {
-        return HandlerTokenStore.getCached();
-    }
-    // In non-handler modes, this would return from localStorage/memory
-    return null;
+    return HandlerTokenStore.getCached();
 }
 
 // Sync API functions that now use getTokensSync()
@@ -171,8 +162,6 @@ function isTokenExpired(tokens) {
 
 function shouldRefreshToken(tokens) {
     if (!tokens || !tokens.id_token) return false;
-    // Handler mode fix: don't require refresh_token (it's server-side)
-    if (!isHandlerMode() && !tokens.refresh_token) return false;
     try {
         const exp = UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000;
         const authMethod = tokens.auth_method || 'password';
@@ -184,12 +173,8 @@ function shouldRefreshToken(tokens) {
 }
 
 function isAuthenticated() {
-    if (isHandlerMode()) {
-        const cached = HandlerTokenStore.getCached();
-        return !!(cached && !isTokenExpired(cached));
-    }
-    const tokens = getTokensSync();
-    return !!(tokens && !isTokenExpired(tokens));
+    const cached = HandlerTokenStore.getCached();
+    return !!(cached && !isTokenExpired(cached));
 }
 
 // ============================================================================
@@ -645,8 +630,8 @@ describe('shouldRefreshToken() Handler Mode', () => {
         expect(shouldRefreshToken(tokens)).toBe(true);
     });
 
-    it('requires refresh_token in non-handler modes', () => {
-        config.tokenStorage = 'localStorage';
+    it('does not require client-side refresh_token in handler mode (server holds it)', () => {
+        config.tokenStorage = 'handler';
 
         const nearExpiry = Math.floor(Date.now() / 1000) + 120;
         const idToken = createTestJwt({
@@ -658,14 +643,15 @@ describe('shouldRefreshToken() Handler Mode', () => {
             access_token: 'x',
             id_token: idToken,
             auth_method: 'password'
-            // No refresh_token
+            // No refresh_token — server has it
         };
 
-        expect(shouldRefreshToken(tokens)).toBe(false);
+        // Handler mode can refresh via server even without client-side refresh_token
+        expect(shouldRefreshToken(tokens)).toBe(true);
     });
 
-    it('works with refresh_token in non-handler modes', () => {
-        config.tokenStorage = 'localStorage';
+    it('works with refresh_token present', () => {
+        config.tokenStorage = 'handler';
 
         const nearExpiry = Math.floor(Date.now() / 1000) + 120;
         const idToken = createTestJwt({

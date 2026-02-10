@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.0] - 2026-02-10
+
+### BREAKING CHANGES
+
+- **Removed `localStorage` and `memory` token storage modes** — handler mode is now the only supported mode. Passing `tokenStorage: 'localStorage'` or `tokenStorage: 'memory'` to `configure()` will throw an error. All deployments must use a Token Handler backend.
+- **Handler endpoints are always required** — `tokenEndpoint`, `refreshEndpoint`, and `logoutEndpoint` must be provided to `configure()`.
+
+### Added
+
+- **`sessionEndpoint` config option** — new endpoint for persisting server sessions after direct login (passkey/password). When configured, the library automatically POSTs tokens to this endpoint after `loginWithPasskey()`, `loginWithPassword()`, or `loginWithConditionalUI()` completes. This fixes the issue where direct login in handler mode didn't create a server session, causing the user to appear logged out on page reload (#12).
+- **`POST /auth/session` endpoint** in Express backend — accepts tokens from direct login, validates `id_token` audience claim, and stores tokens in the server session.
+- **11 new session persistence tests** — covers CSRF protection, error handling, and mode guards.
+
+### Removed
+
+- `LocalStorageTokenStore` and `MemoryTokenStore` — dead code removed from `src/auth.js`
+- Client-side cookie management in `setTokens()` and `clearTokens()` — server manages session cookies
+- Deprecation warnings for non-handler modes — replaced with hard error
+
+### Tests
+
+- 633 tests (was 649 — localStorage/memory tests removed, session persistence tests added)
+
 ## [0.14.0] - 2026-02-09
 
 ### Deprecated

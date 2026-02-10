@@ -3,8 +3,8 @@
 This plugin provides quick setup for AWS Cognito authentication with WebAuthn passkey support.
 
 **Plugin Name**: `l42-cognito-passkey`
-**Current Version**: 0.14.0
-**Tests**: 649 passing
+**Current Version**: 0.15.0
+**Tests**: 633 passing
 
 ## Overview
 
@@ -66,7 +66,6 @@ isConfigured()        // Check if configured
 //   cognitoRegion: 'us-west-2', // AWS region (default: us-west-2)
 //   redirectUri: '/callback',   // OAuth callback URL
 //   allowedDomains: ['myapp.com'], // Allowed redirect domains (auto-allows current)
-//   cookieDomain: '.myapp.com',    // Cookie domain (auto-detected if not set)
 //   scopes: 'openid email profile aws.cognito.signin.user.admin'
 // }
 
@@ -190,20 +189,14 @@ form-action: 'self' https://{cognitoDomain}
 
 ## Token Storage
 
-**Handler mode (recommended):** Tokens stored server-side in HttpOnly session cookies via the Express backend.
-
-**Deprecated modes** (removed in v1.0):
-- `localStorage`: `l42_auth_tokens` key — XSS-accessible
-- `memory`: JavaScript variable — lost on page reload
-
-Cookie domain is auto-detected based on current hostname, or can be explicitly configured.
+Tokens are stored server-side in HttpOnly session cookies via the Token Handler pattern (the only supported mode as of v0.15.0). The `sessionEndpoint` config option enables automatic session persistence after direct login methods (passkey/password).
 
 ## Version
 
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.14.0"
+console.log(VERSION); // "0.15.0"
 ```
 
 ## Site Architecture Patterns
@@ -310,7 +303,7 @@ Each template has an accompanying test file:
 - `plugin/templates/admin-panel-pattern.test.js`
 - `plugin/templates/rbac-roles.property.test.js` (22 property-based tests)
 - `plugin/templates/version-consistency.test.js`
-- `plugin/templates/token-storage.test.js` (33 token storage tests)
+- `plugin/templates/token-storage.test.js` (15 token storage tests)
 - `plugin/templates/auto-refresh.test.js` (35 auto-refresh, fetchWithAuth, CSRF tests)
 - `plugin/templates/auth-properties.test.js` (31 auth property-based tests)
 - `plugin/templates/debug-diagnostics.test.js` (34 debug logging & diagnostics tests)
@@ -321,7 +314,7 @@ Each template has an accompanying test file:
 - `plugin/templates/login-rate-limiting.test.js` (40 login rate limiting tests)
 - `plugin/templates/cedar-authorization.test.js` (101 Cedar policy authorization tests)
 
-**Total: 649 tests**
+**Total: 633 tests**
 
 Run tests with:
 ```bash

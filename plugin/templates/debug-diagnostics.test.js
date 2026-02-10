@@ -60,10 +60,11 @@ const DEBUG_HISTORY_MAX = 100;
 let _debugHistory = [];
 let config = {
     debug: false,
-    tokenStorage: 'localStorage',
+    tokenStorage: 'handler',
     tokenKey: 'l42_auth_tokens',
-    cookieName: 'l42_id_token',
-    cookieDomain: null,
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout',
     clientId: 'test-client',
     cognitoDomain: 'test.auth.us-west-2.amazoncognito.com'
 };
@@ -212,10 +213,11 @@ describe('Debug Logging & Diagnostics', () => {
         _autoRefreshTimer = null;
         config = {
             debug: false,
-            tokenStorage: 'localStorage',
+            tokenStorage: 'handler',
             tokenKey: 'l42_auth_tokens',
-            cookieName: 'l42_id_token',
-            cookieDomain: null,
+            tokenEndpoint: '/auth/token',
+            refreshEndpoint: '/auth/refresh',
+            logoutEndpoint: '/auth/logout',
             clientId: 'test-client',
             cognitoDomain: 'test.auth.us-west-2.amazoncognito.com'
         };
@@ -367,7 +369,7 @@ describe('Debug Logging & Diagnostics', () => {
             const diag = getDiagnostics();
             expect(diag).toEqual({
                 configured: false,
-                tokenStorage: 'localStorage',
+                tokenStorage: 'handler',
                 hasTokens: false,
                 isAuthenticated: false,
                 tokenExpiry: null,
@@ -501,12 +503,12 @@ describe('Debug Logging & Diagnostics', () => {
             const events = [];
             config.debug = (event) => events.push(event);
 
-            debugLog('config', 'configured', { tokenStorage: 'localStorage' });
+            debugLog('config', 'configured', { tokenStorage: 'handler' });
 
             expect(events).toHaveLength(1);
             expect(events[0].category).toBe('config');
             expect(events[0].message).toBe('configured');
-            expect(events[0].data).toEqual({ tokenStorage: 'localStorage' });
+            expect(events[0].data).toEqual({ tokenStorage: 'handler' });
             expect(events[0].version).toBe(VERSION);
             expect(typeof events[0].timestamp).toBe('number');
         });
@@ -544,7 +546,7 @@ describe('Debug Logging & Diagnostics', () => {
             expect(history).toHaveLength(1);
             expect(history[0].category).toBe('config');
             expect(history[0].message).toBe('configured');
-            expect(history[0].data.tokenStorage).toBe('localStorage');
+            expect(history[0].data.tokenStorage).toBe('handler');
         });
 
         it('setTokens() logs token event with auth_method', () => {

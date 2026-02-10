@@ -75,10 +75,11 @@ let config = {
     clientId: 'test-client',
     cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
     cognitoRegion: 'us-west-2',
-    tokenStorage: 'localStorage',
+    tokenStorage: 'handler',
     tokenKey: 'l42_auth_tokens',
-    cookieName: 'l42_id_token',
-    cookieDomain: null,
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout',
     autoUpgradeToPasskey: false
 };
 let _configured = false;

@@ -26,9 +26,9 @@ Complete migration guide for l42-cognito-passkey version upgrades.
 
 ## v0.13.0 → v0.14.0 (Storage Mode Deprecation)
 
-### localStorage and memory modes are deprecated
+### localStorage and memory modes removed
 
-`tokenStorage: 'localStorage'` and `tokenStorage: 'memory'` now emit a console warning at configure time. Both modes will be **removed in v1.0**.
+`tokenStorage: 'localStorage'` and `tokenStorage: 'memory'` were removed in **v0.15.0**. Attempting to use them will throw an error. Only handler mode is supported.
 
 **Migration checklist:**
 

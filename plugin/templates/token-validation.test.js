@@ -70,10 +70,11 @@ let config = {
     clientId: 'test-client',
     cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
     cognitoRegion: 'us-west-2',
-    tokenStorage: 'localStorage',
+    tokenStorage: 'handler',
     tokenKey: 'l42_auth_tokens',
-    cookieName: 'l42_id_token',
-    cookieDomain: null
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout'
 };
 let _storedTokens = null;
 let _tokenCleared = false;
@@ -106,10 +107,6 @@ function isTokenExpired(tokens) {
     } catch {
         return true;
     }
-}
-
-function isHandlerMode() {
-    return config.tokenStorage === 'handler';
 }
 
 // The actual validateTokenClaims implementation (matches src/auth.js)
@@ -164,10 +161,7 @@ function validateTokenClaims(tokens) {
 
 // Updated isAuthenticated with validation (matches src/auth.js)
 function isAuthenticated() {
-    if (isHandlerMode()) {
-        // Simplified for testing - handler mode would use cached tokens
-        return false;
-    }
+    // In handler mode, uses cached tokens for sync check
     const tokens = getTokens();
     if (tokens && !validateTokenClaims(tokens)) {
         clearTokens();
