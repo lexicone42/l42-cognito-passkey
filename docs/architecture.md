@@ -2,7 +2,7 @@
 
 A developer-friendly guide to how L42 Cognito Passkey works internally.
 
-**Version**: 0.15.0 | **Tests**: 633 | **License**: Apache-2.0
+**Version**: 0.15.0 | **Tests**: 658 | **License**: Apache-2.0
 
 ## What This Library Does
 
@@ -430,7 +430,7 @@ dist/
 
 plugin/templates/
 ├── rbac-roles.js        ← Role definitions and permission helpers
-├── *.test.js            ← 17 test files (633 tests)
+├── *.test.js            ← 17 test files (658 tests)
 └── *.html               ← Integration template patterns
 
 examples/backends/express/
@@ -492,11 +492,11 @@ configure({
 
 ## Testing
 
-The library has 633 tests across 17 files, organized by feature:
+The library has 658 tests across 17 files, organized by feature:
 
 | Test File | Tests | What It Covers |
 |-----------|-------|----------------|
-| `cedar-authorization.test.js` | 107 | Policy evaluation, ownership, group aliases, property tests |
+| `cedar-authorization.test.js` | 132 | Policy evaluation, ownership, group aliases, property tests |
 | `handler-sync-api.test.js` | 52 | Handler mode token operations |
 | `oauth-security.test.js` | 44 | PKCE, CSRF, OAuth state validation |
 | `token-storage.test.js` | 41 | localStorage/memory/handler storage |

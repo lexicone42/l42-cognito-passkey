@@ -835,3 +835,436 @@ describe('SHARP-EDGE: Context Injection from Request Body (S5)', () => {
         expect(result.authorized).toBe(true);
     });
 });
+
+// ============================================================================
+// EXPANDED CEDAR TESTING — Pre-1.0 Coverage
+// ============================================================================
+
+// ── Complete Role × Action Permission Matrix ─────────────────────────────
+//
+// Exhaustive test: every role is tested against every action, verifying the
+// exact set of permitted actions per role matches what the policy files declare.
+// Catches: policy typos, missing permits, overly broad permits.
+
+describe('Complete Role × Action Permission Matrix', () => {
+    const ALL_ACTIONS = [
+        'read:content', 'write:content', 'publish:content', 'approve:content', 'reject:content',
+        'read:own', 'write:own', 'delete:own', 'read:all', 'write:all', 'delete:all',
+        'deploy:static', 'read:users', 'mute:users', 'kick:users', 'manage:chat',
+        'api:read', 'api:write', 'read:logs', 'read:metrics', 'debug:view',
+        'admin:manage', 'admin:delete-user'
+    ];
+
+    // Exact permitted actions per role, derived from the 9 .cedar policy files.
+    // Any deviation from this matrix means a policy file was changed.
+    const ROLE_PERMISSIONS = {
+        admin: new Set(ALL_ACTIONS),
+        readonly: new Set(['read:content', 'read:own', 'read:all', 'read:users', 'read:logs', 'read:metrics']),
+        users: new Set(['read:own', 'write:own']),
+        editors: new Set(['read:content', 'write:content', 'publish:content']),
+        reviewers: new Set(['read:content', 'approve:content', 'reject:content']),
+        publishers: new Set(['read:content', 'publish:content', 'deploy:static']),
+        moderators: new Set(['read:users', 'mute:users', 'kick:users', 'manage:chat']),
+        developers: new Set(['api:read', 'api:write', 'read:logs', 'read:metrics', 'debug:view'])
+    };
+
+    it.each(Object.keys(ROLE_PERMISSIONS))('%s — permits exactly the expected actions', (role) => {
+        const expected = ROLE_PERMISSIONS[role];
+        for (const action of ALL_ACTIONS) {
+            const result = cedarCheck({ groups: [role], action });
+            if (expected.has(action)) {
+                expect(isAllowed(result), `${role} should be permitted ${action}`).toBe(true);
+            } else {
+                expect(isDenied(result), `${role} should be denied ${action}`).toBe(true);
+            }
+        }
+    });
+});
+
+// ── Delete Action Boundary Testing ───────────────────────────────────────
+//
+// Delete is the highest-risk action. Only admin has delete:all (blanket permit)
+// and delete:own (blanket permit minus ownership forbid). No other role has
+// any delete permissions in the shipped policies.
+
+describe('Delete Action Boundary Testing', () => {
+    const ALL_GROUPS = [
+        'admin', 'readonly', 'users', 'editors', 'reviewers',
+        'publishers', 'moderators', 'developers'
+    ];
+
+    it('only admin is permitted delete:all', () => {
+        for (const group of ALL_GROUPS) {
+            const result = cedarCheck({ groups: [group], action: 'delete:all' });
+            if (group === 'admin') {
+                expect(isAllowed(result), `${group} should be allowed delete:all`).toBe(true);
+            } else {
+                expect(isDenied(result), `${group} should be denied delete:all`).toBe(true);
+            }
+        }
+    });
+
+    it('only admin is permitted delete:own (without ownership context)', () => {
+        // Without a resource owner, the ownership forbid doesn't fire.
+        // Only admin's blanket permit grants delete:own — no other role has it.
+        for (const group of ALL_GROUPS) {
+            const result = cedarCheck({ groups: [group], action: 'delete:own' });
+            if (group === 'admin') {
+                expect(isAllowed(result), `${group} should be allowed delete:own`).toBe(true);
+            } else {
+                expect(isDenied(result), `${group} should be denied delete:own`).toBe(true);
+            }
+        }
+    });
+});
+
+// ── Multi-Role Combinatorial ─────────────────────────────────────────────
+//
+// Random subsets of 2-4 roles × random actions. Verifies:
+// (a) combined permissions are the union of individual role permissions
+// (b) forbid policies still override permits regardless of role count
+
+describe('Multi-Role Combinatorial', () => {
+    const ALL_ACTIONS = [
+        'read:content', 'write:content', 'publish:content', 'approve:content', 'reject:content',
+        'read:own', 'write:own', 'delete:own', 'read:all', 'write:all', 'delete:all',
+        'deploy:static', 'read:users', 'mute:users', 'kick:users', 'manage:chat',
+        'api:read', 'api:write', 'read:logs', 'read:metrics', 'debug:view',
+        'admin:manage', 'admin:delete-user'
+    ];
+
+    const ALL_GROUPS = [
+        'admin', 'readonly', 'users', 'editors', 'reviewers',
+        'publishers', 'moderators', 'developers'
+    ];
+
+    const NON_ADMIN_GROUPS = ALL_GROUPS.filter(g => g !== 'admin');
+
+    const ROLE_PERMISSIONS = {
+        readonly: new Set(['read:content', 'read:own', 'read:all', 'read:users', 'read:logs', 'read:metrics']),
+        users: new Set(['read:own', 'write:own']),
+        editors: new Set(['read:content', 'write:content', 'publish:content']),
+        reviewers: new Set(['read:content', 'approve:content', 'reject:content']),
+        publishers: new Set(['read:content', 'publish:content', 'deploy:static']),
+        moderators: new Set(['read:users', 'mute:users', 'kick:users', 'manage:chat']),
+        developers: new Set(['api:read', 'api:write', 'read:logs', 'read:metrics', 'debug:view'])
+    };
+
+    it('combined non-admin permissions are the union of individual role permissions', () => {
+        fc.assert(fc.property(
+            fc.subarray(NON_ADMIN_GROUPS, { minLength: 2, maxLength: 4 }),
+            fc.constantFrom(...ALL_ACTIONS),
+            (groups, action) => {
+                const combined = cedarCheck({ groups, action });
+                const anyRolePermits = groups.some(g => ROLE_PERMISSIONS[g].has(action));
+                if (anyRolePermits) {
+                    return isAllowed(combined);
+                } else {
+                    return isDenied(combined);
+                }
+            }
+        ), { numRuns: 200 });
+    });
+
+    it('forbid policies override permits even with multiple roles', () => {
+        fc.assert(fc.property(
+            fc.subarray(ALL_GROUPS, { minLength: 1, maxLength: 4 }),
+            fc.constantFrom('write:own', 'delete:own'),
+            fc.stringMatching(/^[a-z]{3,8}$/),
+            fc.stringMatching(/^[a-z]{3,8}$/),
+            (groups, action, principal, owner) => {
+                if (principal === owner) return true;
+
+                const result = cedarCheck({
+                    principal,
+                    groups,
+                    action,
+                    resourceId: 'doc-1',
+                    resourceOwner: owner
+                });
+                // Forbid always wins when owner != principal
+                return isDenied(result);
+            }
+        ), { numRuns: 200 });
+    });
+});
+
+// ── Admin vs. Forbid Override — Delete Actions ───────────────────────────
+//
+// Complements the existing Ownership Enforcement tests (which cover write:own)
+// by testing delete:own with the same forbid-overrides-permit pattern.
+
+describe('Admin vs. Forbid Override — Delete Actions', () => {
+    it('admin is denied delete:own on non-owned resource', () => {
+        const result = cedarCheck({
+            principal: 'admin-user',
+            groups: ['admin'],
+            action: 'delete:own',
+            resourceId: 'doc-1',
+            resourceOwner: 'alice'
+        });
+        expect(isDenied(result)).toBe(true);
+    });
+
+    it('admin is allowed delete:all on non-owned resource (forbid only covers :own)', () => {
+        const result = cedarCheck({
+            principal: 'admin-user',
+            groups: ['admin'],
+            action: 'delete:all',
+            resourceId: 'doc-1',
+            resourceOwner: 'alice'
+        });
+        expect(isAllowed(result)).toBe(true);
+    });
+
+    it('admin is allowed delete:own on own resource', () => {
+        const result = cedarCheck({
+            principal: 'admin-user',
+            groups: ['admin'],
+            action: 'delete:own',
+            resourceId: 'doc-1',
+            resourceOwner: 'admin-user'
+        });
+        expect(isAllowed(result)).toBe(true);
+    });
+});
+
+// ── Unknown/Invalid Action Handling ──────────────────────────────────────
+//
+// What happens when a non-existent action is evaluated? Cedar validates
+// actions against the schema. An unknown action should never produce a
+// clean 'allow' — catching typo'd actions in application code.
+
+describe('Unknown/Invalid Action Handling', () => {
+    it('cedarCheck rejects unknown actions (schema validation)', () => {
+        const result = cedarCheck({ groups: ['admin'], action: 'nonexistent:action' });
+        // Cedar validates the action against the schema — unknown actions can't be allowed
+        expect(isAllowed(result)).toBe(false);
+    });
+
+    it('engine authorize() rejects unknown actions with validateRequest', async () => {
+        const session = createSession('admin@test.com', ['admin']);
+        const result = await cedarEngine.authorize({
+            session,
+            action: 'nonexistent:action'
+        });
+        // statefulIsAuthorized with validateRequest: true catches schema violations
+        expect(result.authorized).toBe(false);
+    });
+});
+
+// ── Resource ID & Type Edge Cases ────────────────────────────────────────
+//
+// Fuzz resource IDs and resource types to verify Cedar never crashes
+// regardless of the resource metadata content.
+
+describe('Resource ID & Type Edge Cases', () => {
+    it('Cedar handles arbitrary resource IDs without crashing', () => {
+        fc.assert(fc.property(
+            fc.string({ minLength: 1, maxLength: 500 }),
+            (resourceId) => {
+                const result = cedarCheck({
+                    groups: ['editors'],
+                    action: 'read:content',
+                    resourceId
+                });
+                return result.type === 'success';
+            }
+        ), { numRuns: 100 });
+    });
+
+    it('Cedar handles arbitrary resource types without crashing', () => {
+        fc.assert(fc.property(
+            fc.string({ minLength: 1, maxLength: 200 }),
+            (resourceType) => {
+                const result = cedarCheck({
+                    groups: ['editors'],
+                    action: 'read:content',
+                    resourceType
+                });
+                return result.type === 'success';
+            }
+        ), { numRuns: 100 });
+    });
+});
+
+// ============================================================================
+// SHARP-EDGE: Fail-Closed Behavior (S7)
+// ============================================================================
+//
+// Finding: When Cedar evaluation fails (invalid entities, engine errors),
+// the system must fail closed — return authorized:false, never authorized:true.
+// The server handler converts this to a 503 response. These tests verify that
+// the engine never returns authorized:true on evaluation errors.
+
+describe('SHARP-EDGE: Fail-Closed Behavior (S7)', () => {
+    afterEach(async () => {
+        cedarEngine._resetForTesting();
+        await cedarEngine.initCedarEngine({ schema, policies: policyText });
+    });
+
+    it('authorize() returns authorized:false when entity provider returns invalid entity types', async () => {
+        const session = createSession('admin@test.com', ['admin']);
+        const badProvider = {
+            async getEntities() {
+                return [{
+                    uid: { type: 'App::NonexistentType', id: 'bad' },
+                    attrs: {},
+                    parents: []
+                }];
+            }
+        };
+        const result = await cedarEngine.authorize({
+            session,
+            action: 'read:content',
+            entityProvider: badProvider
+        });
+        expect(result.authorized).toBe(false);
+    });
+
+    it('authorize() returns authorized:false when entity provider returns empty entities', async () => {
+        const session = createSession('admin@test.com', ['admin']);
+        const emptyProvider = {
+            async getEntities() { return []; }
+        };
+        const result = await cedarEngine.authorize({
+            session,
+            action: 'read:content',
+            entityProvider: emptyProvider
+        });
+        expect(result.authorized).toBe(false);
+    });
+
+    it('authorize() includes error information in result on evaluation failure', async () => {
+        const session = createSession('admin@test.com', ['admin']);
+        const badProvider = {
+            async getEntities() {
+                return [{
+                    uid: { type: 'App::NonexistentType', id: 'bad' },
+                    attrs: {},
+                    parents: []
+                }];
+            }
+        };
+        const result = await cedarEngine.authorize({
+            session,
+            action: 'read:content',
+            entityProvider: badProvider
+        });
+        expect(result.authorized).toBe(false);
+        // The reason or diagnostics should contain error information
+        expect(result.reason.toLowerCase()).toMatch(/error|no matching/i);
+    });
+});
+
+// ── Entity Provider Edge Cases ───────────────────────────────────────────
+//
+// Custom entity providers can return arbitrary entity data. These tests
+// verify Cedar handles edge cases — mismatched principals, missing groups,
+// and ownership enforcement via provider.
+
+describe('Entity Provider Edge Cases', () => {
+    it('conflicting principal ID in provider → authorization denied', async () => {
+        const session = createSession('real@test.com', ['admin'], 'real-sub');
+        const confusedProvider = {
+            async getEntities() {
+                // Provider returns entity for a DIFFERENT user than the JWT claims.
+                // authorize() uses claims.sub ('real-sub') as principal,
+                // but the entity store only has 'wrong-sub'.
+                return [
+                    {
+                        uid: { type: 'App::User', id: 'wrong-sub' },
+                        attrs: { email: 'wrong@test.com', sub: 'wrong-sub' },
+                        parents: [{ type: 'App::UserGroup', id: 'admin' }]
+                    },
+                    {
+                        uid: { type: 'App::UserGroup', id: 'admin' },
+                        attrs: {},
+                        parents: []
+                    },
+                    {
+                        uid: { type: 'App::Resource', id: '_application' },
+                        attrs: { resourceType: 'application' },
+                        parents: []
+                    }
+                ];
+            }
+        };
+        const result = await cedarEngine.authorize({
+            session,
+            action: 'admin:manage',
+            entityProvider: confusedProvider
+        });
+        // Principal 'real-sub' has no entity in the store → denied or error
+        expect(result.authorized).toBe(false);
+    });
+
+    it('provider stripping group memberships → denied despite JWT groups', async () => {
+        const session = createSession('test@test.com', ['editors'], 'test-sub');
+        const noMembershipsProvider = {
+            async getEntities(claims) {
+                return [
+                    {
+                        uid: { type: 'App::User', id: claims.sub },
+                        attrs: { email: claims.email, sub: claims.sub },
+                        parents: []  // No group memberships — overrides JWT groups
+                    },
+                    {
+                        uid: { type: 'App::Resource', id: '_application' },
+                        attrs: { resourceType: 'application' },
+                        parents: []
+                    }
+                ];
+            }
+        };
+        // JWT says 'editors' but entity provider strips group membership
+        const result = await cedarEngine.authorize({
+            session,
+            action: 'write:content',
+            entityProvider: noMembershipsProvider
+        });
+        // No group membership → no permit policies match → denied
+        expect(result.authorized).toBe(false);
+    });
+
+    it('provider with resource ownership → forbid fires correctly', async () => {
+        const session = createSession('alice@test.com', ['users'], 'alice-sub');
+        const ownershipProvider = {
+            async getEntities(claims) {
+                return [
+                    {
+                        uid: { type: 'App::User', id: claims.sub },
+                        attrs: { email: claims.email, sub: claims.sub },
+                        parents: [{ type: 'App::UserGroup', id: 'users' }]
+                    },
+                    {
+                        uid: { type: 'App::UserGroup', id: 'users' },
+                        attrs: {},
+                        parents: []
+                    },
+                    {
+                        uid: { type: 'App::User', id: 'bob-sub' },
+                        attrs: { email: 'bob@test.com', sub: 'bob-sub' },
+                        parents: []
+                    },
+                    {
+                        uid: { type: 'App::Resource', id: 'doc-1' },
+                        attrs: {
+                            resourceType: 'document',
+                            owner: { __entity: { type: 'App::User', id: 'bob-sub' } }
+                        },
+                        parents: []
+                    }
+                ];
+            }
+        };
+        const result = await cedarEngine.authorize({
+            session,
+            action: 'write:own',
+            resource: { id: 'doc-1' },
+            entityProvider: ownershipProvider
+        });
+        // Alice is not the owner (bob-sub is) → forbid fires → denied
+        expect(result.authorized).toBe(false);
+    });
+});
