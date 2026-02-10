@@ -23,7 +23,17 @@ All notable changes to this project will be documented in this file.
 
 ### Tests
 
-- 633 tests (was 649 — localStorage/memory tests removed, session persistence tests added)
+- 658 tests (was 633 — expanded Cedar authorization suite)
+- **25 new Cedar tests** across 8 test suites:
+  - Exhaustive role × action permission matrix (8 roles × 22 actions)
+  - Delete action boundary testing (only admin gets delete)
+  - Multi-role combinatorial property tests (union semantics + forbid override)
+  - Admin vs. forbid-overrides-permit for delete actions
+  - Unknown/invalid action handling (schema validation)
+  - Resource ID & type edge case fuzzing
+  - S7 sharp-edge: fail-closed behavior (invalid entities, empty providers)
+  - Entity provider edge cases (conflicting principal, stripped groups, ownership)
+- Cedar authorization tests: 132 (was 107)
 
 ## [0.14.0] - 2026-02-09
 
