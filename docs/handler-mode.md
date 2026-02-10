@@ -99,6 +99,24 @@ For apps with extremely high security requirements (healthcare, finance), you ca
 
 *In handler mode, tokens are briefly cached in memory. XSS could theoretically call `getTokens()`, but can't steal the refresh token.
 
+### Trust Boundary: `/auth/session` Token Verification
+
+The `/auth/session` endpoint receives tokens from the browser after passkey/password login. Unlike `/auth/callback` (which gets tokens directly from Cognito over TLS), `/auth/session` is an untrusted channel — a same-origin XSS attacker could forge a JWT with arbitrary claims (e.g., admin groups).
+
+To prevent this, the reference Express backend verifies the `id_token` signature against Cognito's JWKS (JSON Web Key Set) before storing it in the session. This requires the `COGNITO_USER_POOL_ID` environment variable:
+
+```bash
+export COGNITO_USER_POOL_ID=us-west-2_abc123
+```
+
+The server constructs the JWKS URL automatically: `https://cognito-idp.{region}.amazonaws.com/{userPoolId}/.well-known/jwks.json`
+
+Verification checks (via [`jose`](https://github.com/panva/jose)):
+- **RSA signature** — token was signed by Cognito's private key
+- **Issuer (`iss`)** — matches the expected Cognito user pool
+- **Audience (`aud`)** — matches your app's client ID
+- **Expiry (`exp`)** — token hasn't expired
+
 ## Configuration
 
 ### Frontend

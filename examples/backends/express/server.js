@@ -13,19 +13,21 @@
  * - GET  /auth/callback - OAuth callback (exchange code for tokens)
  *
  * Environment variables:
- * - COGNITO_CLIENT_ID    - Cognito app client ID
+ * - COGNITO_CLIENT_ID     - Cognito app client ID
  * - COGNITO_CLIENT_SECRET - Cognito app client secret (if applicable)
- * - COGNITO_DOMAIN       - e.g., 'myapp.auth.us-west-2.amazoncognito.com'
- * - COGNITO_REGION       - e.g., 'us-west-2'
- * - SESSION_SECRET       - Secret for session encryption
- * - FRONTEND_URL         - Frontend URL for CORS and redirects
- * - PORT                 - Server port (default: 3001)
+ * - COGNITO_USER_POOL_ID  - Cognito user pool ID (e.g., 'us-west-2_abc123')
+ * - COGNITO_DOMAIN        - e.g., 'myapp.auth.us-west-2.amazoncognito.com'
+ * - COGNITO_REGION        - e.g., 'us-west-2'
+ * - SESSION_SECRET        - Secret for session encryption
+ * - FRONTEND_URL          - Frontend URL for CORS and redirects
+ * - PORT                  - Server port (default: 3001)
  */
 
 import express from 'express';
 import session from 'express-session';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { initCedarEngine, authorize, isInitialized as isCedarReady } from './cedar-engine.js';
@@ -41,6 +43,7 @@ const app = express();
 const config = {
     cognitoClientId: process.env.COGNITO_CLIENT_ID,
     cognitoClientSecret: process.env.COGNITO_CLIENT_SECRET,
+    cognitoUserPoolId: process.env.COGNITO_USER_POOL_ID,
     cognitoDomain: process.env.COGNITO_DOMAIN,
     cognitoRegion: process.env.COGNITO_REGION || 'us-west-2',
     sessionSecret: process.env.SESSION_SECRET || 'change-me-in-production',
@@ -49,17 +52,24 @@ const config = {
 };
 
 // Validate required config
-if (!config.cognitoClientId || !config.cognitoDomain) {
+if (!config.cognitoClientId || !config.cognitoDomain || !config.cognitoUserPoolId) {
     console.error('Missing required environment variables:');
-    console.error('  COGNITO_CLIENT_ID and COGNITO_DOMAIN are required');
+    console.error('  COGNITO_CLIENT_ID, COGNITO_DOMAIN, and COGNITO_USER_POOL_ID are required');
     console.error('');
     console.error('Example:');
     console.error('  COGNITO_CLIENT_ID=abc123 \\');
+    console.error('  COGNITO_USER_POOL_ID=us-west-2_abc123 \\');
     console.error('  COGNITO_DOMAIN=myapp.auth.us-west-2.amazoncognito.com \\');
     console.error('  FRONTEND_URL=http://localhost:3000 \\');
     console.error('  node server.js');
     process.exit(1);
 }
+
+// JWKS for verifying tokens received from the browser (/auth/session)
+const cognitoIssuer = `https://cognito-idp.${config.cognitoRegion}.amazonaws.com/${config.cognitoUserPoolId}`;
+const JWKS = createRemoteJWKSet(
+    new URL(`${cognitoIssuer}/.well-known/jwks.json`)
+);
 
 // ============================================================================
 // Middleware
@@ -175,6 +185,23 @@ function isTokenExpired(token) {
     }
 }
 
+/**
+ * Verify a JWT from the browser using Cognito's JWKS.
+ *
+ * Used by /auth/session to ensure tokens sent from the client were actually
+ * issued by Cognito and haven't been tampered with. Other endpoints don't
+ * need this because they receive tokens directly from Cognito over TLS.
+ *
+ * Checks: RS256 signature, issuer, audience, expiry (all via jose).
+ */
+async function verifyToken(token) {
+    const { payload } = await jwtVerify(token, JWKS, {
+        issuer: cognitoIssuer,
+        audience: config.cognitoClientId
+    });
+    return payload;
+}
+
 // ============================================================================
 // CSRF Protection
 // ============================================================================
@@ -241,21 +268,21 @@ app.get('/auth/token', (req, res) => {
  *
  * Body: { access_token, id_token, refresh_token, auth_method }
  */
-app.post('/auth/session', requireCsrfHeader, (req, res) => {
+app.post('/auth/session', requireCsrfHeader, async (req, res) => {
     const { access_token, id_token, refresh_token, auth_method } = req.body;
 
     if (!access_token || !id_token) {
         return res.status(400).json({ error: 'Missing access_token or id_token' });
     }
 
-    // Validate id_token audience matches our client ID
+    // Verify id_token signature, issuer, audience, and expiry via JWKS.
+    // This prevents a same-origin XSS attacker from forging JWTs with
+    // arbitrary claims (e.g., admin groups) into the server session.
     try {
-        const claims = decodeJwtPayload(id_token);
-        if (claims.aud !== config.cognitoClientId) {
-            return res.status(403).json({ error: 'Token audience mismatch' });
-        }
+        await verifyToken(id_token);
     } catch (error) {
-        return res.status(400).json({ error: 'Invalid id_token' });
+        console.error('Token verification failed:', error.message);
+        return res.status(403).json({ error: 'Token verification failed' });
     }
 
     // Store tokens in session (same structure as OAuth callback)

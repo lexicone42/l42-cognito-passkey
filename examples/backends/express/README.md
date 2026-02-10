@@ -14,6 +14,7 @@ npm install
 
 # Set environment variables
 export COGNITO_CLIENT_ID=your-client-id
+export COGNITO_USER_POOL_ID=us-west-2_abc123
 export COGNITO_DOMAIN=your-app.auth.us-west-2.amazoncognito.com
 export FRONTEND_URL=http://localhost:3000
 export SESSION_SECRET=your-secure-secret
@@ -27,6 +28,7 @@ npm start
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `COGNITO_CLIENT_ID` | Yes | Cognito app client ID |
+| `COGNITO_USER_POOL_ID` | Yes | Cognito user pool ID (e.g., `us-west-2_abc123`) — used for JWKS token verification |
 | `COGNITO_DOMAIN` | Yes | Cognito domain (e.g., `myapp.auth.us-west-2.amazoncognito.com`) |
 | `COGNITO_CLIENT_SECRET` | No | Client secret (if your app client has one) |
 | `COGNITO_REGION` | No | AWS region (default: `us-west-2`) |
