@@ -48,7 +48,15 @@ uvicorn app.main:create_app --factory --port 3001
 ### 4. Test
 
 ```bash
+# Unit + e2e tests (integration tests skipped by default)
 uv run pytest -v
+
+# Run integration tests (requires real Cognito credentials)
+COGNITO_CLIENT_ID=xxx COGNITO_USER_POOL_ID=xxx COGNITO_DOMAIN=xxx \
+  uv run pytest -m integration -v
+
+# Smoke test against a running server
+python scripts/smoke_test.py --base-url http://localhost:3001
 ```
 
 ## Configuration
@@ -147,6 +155,50 @@ app/
 | Cedar | `@cedar-policy/cedar-wasm` | `cedarpy` (Rust bindings) |
 | HTTP client | Node `fetch` | `httpx` (async) |
 | Session cookie name | `connect.sid` | `l42_session` |
+
+## Testing
+
+### Unit & E2E Tests
+
+```bash
+uv run pytest -v                    # All non-integration tests
+uv run pytest tests/test_e2e_flows.py -v  # Just e2e flow tests
+```
+
+E2E tests exercise full session lifecycles (login → token → authorize → logout) and only mock at the HTTP boundary (httpx calls to Cognito). Cedar uses real schema and policies.
+
+### Integration Tests
+
+Require real Cognito credentials. Skipped by default via the `integration` marker.
+
+```bash
+export COGNITO_CLIENT_ID=your-client-id
+export COGNITO_USER_POOL_ID=us-west-2_abc123
+export COGNITO_DOMAIN=myapp.auth.us-west-2.amazoncognito.com
+
+uv run pytest -m integration -v
+```
+
+### Smoke Test
+
+Standalone script for deployment verification:
+
+```bash
+# Health check only
+python scripts/smoke_test.py --base-url http://localhost:3001
+
+# Full flow (requires valid tokens)
+python scripts/smoke_test.py --base-url http://localhost:3001 \
+  --access-token <TOKEN> --id-token <TOKEN>
+```
+
+### Proxy Configuration
+
+If your deployment sits behind a reverse proxy (nginx, CloudFront, ALB), ensure:
+
+1. The proxy forwards `Cookie` and `Set-Cookie` headers
+2. `X-Forwarded-Proto` is set so session cookies use `Secure` appropriately
+3. The proxy does not strip the `X-L42-CSRF` header
 
 ## License
 

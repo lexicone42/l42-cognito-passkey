@@ -407,4 +407,4 @@ These invariants **must** hold in any conforming implementation:
 ## Reference Implementations
 
 - **Express/Node.js**: `examples/backends/express/server.js` in this repository
-- **Python/FastAPI**: *(planned — see [issue #13](https://github.com/lexicone42/l42-cognito-passkey/issues/13))*
+- **Python/FastAPI**: [`examples/backends/fastapi/`](../examples/backends/fastapi/) in this repository

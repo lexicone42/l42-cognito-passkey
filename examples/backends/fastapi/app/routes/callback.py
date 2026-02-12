@@ -1,7 +1,7 @@
 """GET /auth/callback — OAuth callback from Cognito Hosted UI."""
 
 import logging
-from urllib.parse import urlencode
+from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
@@ -26,7 +26,7 @@ async def oauth_callback(request: Request):
         logger.error("OAuth error: %s %s", error, error_description)
         msg = error_description or error
         return RedirectResponse(
-            f"{s.frontend_url}/login?error={urlencode({'': msg})[1:]}"
+            f"{s.frontend_url}/login?error={quote_plus(msg)}"
         )
 
     if not code:
