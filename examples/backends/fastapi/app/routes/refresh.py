@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from .. import ocsf
 from ..cognito import cognito_request
 from ..config import get_settings
 from ..dependencies import destroy_session, require_auth, require_csrf
@@ -38,6 +39,15 @@ async def refresh_tokens(
         )
     except Exception as e:
         logger.error("Token refresh error: %s", e)
+        email = ocsf._email_from_session(request.state.session)
+        ocsf.authentication_event(
+            activity_id=ocsf.AuthActivity.SERVICE_TICKET,
+            activity_name="Service Ticket",
+            status_id=ocsf.Status.FAILURE,
+            severity_id=ocsf.Severity.MEDIUM,
+            user_email=email,
+            message=f"Token refresh failed: {e}",
+        )
         destroy_session(request)
         return JSONResponse(
             {"error": "Refresh failed", "message": str(e)}, status_code=401
@@ -54,6 +64,16 @@ async def refresh_tokens(
         "refresh_token": auth_result.get("RefreshToken", tokens["refresh_token"]),
         "auth_method": tokens.get("auth_method"),
     }
+
+    email = ocsf._email_from_session(request.state.session)
+    ocsf.authentication_event(
+        activity_id=ocsf.AuthActivity.SERVICE_TICKET,
+        activity_name="Service Ticket",
+        status_id=ocsf.Status.SUCCESS,
+        severity_id=ocsf.Severity.INFORMATIONAL,
+        user_email=email,
+        message="Token refresh succeeded",
+    )
 
     return {
         "access_token": auth_result["AccessToken"],

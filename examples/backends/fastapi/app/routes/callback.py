@@ -6,6 +6,7 @@ from urllib.parse import quote_plus
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
+from .. import ocsf
 from ..cognito import exchange_code_for_tokens
 from ..config import get_settings
 
@@ -24,6 +25,15 @@ async def oauth_callback(request: Request):
 
     if error:
         logger.error("OAuth error: %s %s", error, error_description)
+        ocsf.authentication_event(
+            activity_id=ocsf.AuthActivity.AUTHENTICATION_TICKET,
+            activity_name="Authentication Ticket",
+            status_id=ocsf.Status.FAILURE,
+            severity_id=ocsf.Severity.HIGH,
+            auth_protocol_id=ocsf.AuthProtocol.OAUTH2,
+            auth_protocol="OAuth 2.0/OIDC",
+            message=f"OAuth error: {error}",
+        )
         msg = error_description or error
         return RedirectResponse(
             f"{s.frontend_url}/login?error={quote_plus(msg)}"
@@ -45,10 +55,31 @@ async def oauth_callback(request: Request):
             "auth_method": "oauth",
         }
 
+        email = ocsf._email_from_session(request.state.session)
+        ocsf.authentication_event(
+            activity_id=ocsf.AuthActivity.AUTHENTICATION_TICKET,
+            activity_name="Authentication Ticket",
+            status_id=ocsf.Status.SUCCESS,
+            severity_id=ocsf.Severity.INFORMATIONAL,
+            user_email=email,
+            auth_protocol_id=ocsf.AuthProtocol.OAUTH2,
+            auth_protocol="OAuth 2.0/OIDC",
+            message="OAuth token exchange succeeded",
+        )
+
         return RedirectResponse(f"{s.frontend_url}/auth/success?state={state}")
 
     except Exception as e:
         logger.error("Token exchange error: %s", e)
+        ocsf.authentication_event(
+            activity_id=ocsf.AuthActivity.AUTHENTICATION_TICKET,
+            activity_name="Authentication Ticket",
+            status_id=ocsf.Status.FAILURE,
+            severity_id=ocsf.Severity.MEDIUM,
+            auth_protocol_id=ocsf.AuthProtocol.OAUTH2,
+            auth_protocol="OAuth 2.0/OIDC",
+            message=f"OAuth token exchange failed: {e}",
+        )
         return RedirectResponse(
             f"{s.frontend_url}/login?error=Authentication+failed"
         )

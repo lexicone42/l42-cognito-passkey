@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.0] - 2026-02-12
+
+### Added
+
+- **OCSF event logging for FastAPI backend** — Server-side security events matching the client-side auth.js OCSF schema (#15)
+  - New `app/ocsf.py` module with `emit()`, `authentication_event()`, and `authorization_event()` helpers
+  - Events logged to Python's `ocsf` named logger as JSON — consumers attach their own handlers (CloudWatch, Firehose, structlog)
+  - Session creation/failure → Logon events (passkey/password/direct protocols detected)
+  - OAuth callback success/failure → Authentication Ticket events
+  - Token refresh success/failure → Service Ticket events
+  - Logout → Logoff events
+  - Cedar permit/deny/error/unavailable → Authorization events (activity 99/Other)
+  - 44 new tests: module unit tests + route emission verification
+  - Updated `docs/ocsf-logging.md` with server-side event table, Python logging integration, and CloudWatch example
+
 ## [0.15.1] - 2026-02-10
 
 ### Tests
