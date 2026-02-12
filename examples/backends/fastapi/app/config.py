@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     session_backend: str = "memory"  # "memory" or "dynamodb"
     dynamodb_table: str = "l42_sessions"
     dynamodb_endpoint: str = ""  # For local DynamoDB
+    session_https_only: bool = False  # Set True for production (Lambda/HTTPS)
 
     @property
     def cognito_issuer(self) -> str:

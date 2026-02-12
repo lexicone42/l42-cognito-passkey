@@ -67,7 +67,7 @@ def create_app(
         SessionMiddleware,
         secret=s.session_secret,
         backend=backend,
-        https_only=False,  # Set True in production
+        https_only=s.session_https_only,
     )
 
     # Routes

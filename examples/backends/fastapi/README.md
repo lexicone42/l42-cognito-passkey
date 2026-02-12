@@ -75,6 +75,7 @@ All configuration is via environment variables:
 | `PORT` | No | `3001` | Server port |
 | `SESSION_BACKEND` | No | `memory` | `memory` or `dynamodb` |
 | `DYNAMODB_TABLE` | No | `l42_sessions` | DynamoDB table name |
+| `SESSION_HTTPS_ONLY` | No | `false` | Set `true` for production (Lambda/HTTPS) |
 
 ## Session Backends
 
@@ -145,6 +146,25 @@ app/
     ├── me.py             # GET  /auth/me
     └── health.py         # GET  /health
 ```
+
+## Lambda Deployment
+
+The backend can be deployed to AWS Lambda behind API Gateway v2 using the included CDK stack:
+
+```bash
+cd deploy
+pip install -r requirements.txt
+cdk deploy \
+  -c cognito_client_id=YOUR_CLIENT_ID \
+  -c cognito_user_pool_id=us-west-2_abc123 \
+  -c cognito_domain=myapp.auth.us-west-2.amazoncognito.com \
+  -c session_secret=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))") \
+  -c frontend_url=https://myapp.example.com
+```
+
+`handler.py` is the Lambda entry point — it wraps the FastAPI app with [Mangum](https://github.com/jordanerber/mangum) and configures DynamoDB sessions from environment variables.
+
+See [Lambda Deployment Guide](../../../docs/lambda-deployment.md) for full details including cold start analysis, session cookie configuration, and security notes.
 
 ## Differences from Express Backend
 
