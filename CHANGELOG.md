@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0] - 2026-02-17
+
+### Added
+
+- **Rust Token Handler backend** — Native Rust implementation replacing WASM/FFI Cedar calls (#18)
+  - New `rust/` directory with full Axum-based HTTP server (8 endpoints matching FastAPI/Express exactly)
+  - Native `cedar-policy` crate evaluation — no WASM marshalling, direct Rust calls
+  - Dual-mode binary: Lambda (`lambda_http`) + local dev (`axum::serve`), auto-detected via `AWS_LAMBDA_RUNTIME_API`
+  - HMAC-SHA256 session cookies with InMemory (dev) + DynamoDB (prod) backends
+  - OCSF structured security event logging via `tracing::info!`
+  - Same `auth.js` client works against Rust backend without changes
+  - 97 tests (75 unit + 22 integration), clippy clean
+  - Comprehensive CLAUDE.md guide for other Claude instances working on the Rust backend
+  - Expected improvements: Lambda cold start 2-5s → 10-50ms, memory 512MB → 128-256MB, single static binary
+
 ## [0.16.0] - 2026-02-12
 
 ### Added
