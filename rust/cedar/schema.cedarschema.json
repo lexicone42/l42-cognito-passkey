@@ -1,0 +1,59 @@
+{
+    "App": {
+        "entityTypes": {
+            "User": {
+                "memberOfTypes": ["UserGroup"],
+                "shape": {
+                    "type": "Record",
+                    "attributes": {
+                        "email": { "type": "String" },
+                        "sub": { "type": "String" }
+                    }
+                }
+            },
+            "UserGroup": {},
+            "Resource": {
+                "shape": {
+                    "type": "Record",
+                    "attributes": {
+                        "owner": { "type": "Entity", "name": "User", "required": false },
+                        "resourceType": { "type": "String" }
+                    }
+                }
+            }
+        },
+        "actions": {
+            "read:content":    { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "write:content":   { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "publish:content": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "approve:content": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "reject:content":  { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+
+            "read:own":   { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "write:own":  { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "delete:own": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "read:all":   { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "write:all":  { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "delete:all": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+
+            "deploy:static": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+
+            "read:users": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "mute:users": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "kick:users": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+
+            "manage:chat": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+
+            "api:read":  { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "api:write": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+
+            "read:logs":    { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "read:metrics": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+
+            "debug:view": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+
+            "admin:manage":      { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } },
+            "admin:delete-user": { "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] } }
+        }
+    }
+}
