@@ -2,7 +2,7 @@
 
 A developer-friendly guide to how L42 Cognito Passkey works internally.
 
-**Version**: 0.16.0 | **Tests**: 658 | **License**: Apache-2.0
+**Version**: 0.17.0 | **Tests**: 658 | **License**: Apache-2.0
 
 ## What This Library Does
 
