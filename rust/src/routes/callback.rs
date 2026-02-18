@@ -40,22 +40,29 @@ pub async fn oauth_callback(
 ) -> Redirect {
     let frontend = &state.config.frontend_url;
 
-    let host = extract_host(&headers);
-
-    // Determine scheme from X-Forwarded-Proto (behind proxy/ALB) or config
-    let scheme = headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(if state.config.session_https_only {
-            "https"
-        } else {
-            "http"
-        });
-    // Build redirect_uri from the backend's own URL (must match Cognito app client config)
-    let self_callback_url = format!(
-        "{}://{}{}/callback",
-        scheme, host, state.config.auth_path_prefix
-    );
+    // Build redirect_uri that must match the one used in the authorization request.
+    // Behind CDN/reverse proxy, Host header may be the internal API Gateway hostname,
+    // not the public domain. Use frontend_url when available (it matches Cognito config).
+    let self_callback_url = if !state.config.frontend_url.is_empty() {
+        format!(
+            "{}{}/callback",
+            state.config.frontend_url, state.config.auth_path_prefix
+        )
+    } else {
+        let host = extract_host(&headers);
+        let scheme = headers
+            .get("x-forwarded-proto")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(if state.config.session_https_only {
+                "https"
+            } else {
+                "http"
+            });
+        format!(
+            "{}://{}{}/callback",
+            scheme, host, state.config.auth_path_prefix
+        )
+    };
 
     // Handle OAuth error from Cognito
     if let Some(ref error) = params.error {
