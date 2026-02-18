@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.18.0] - 2026-02-17
+
+### Added
+
+- **CloudFront deployment config for Rust backend** (#19, #20, #21)
+  - `X-Forwarded-Host` support: OAuth callback prefers `X-Forwarded-Host` over `Host` header for `redirect_uri`
+  - `COOKIE_DOMAIN` env var: sets `Domain=` on session cookies for cross-subdomain SSO
+  - `AUTH_PATH_PREFIX` env var: configurable route prefix (default `/auth`) via `Router::nest()`
+  - `/health` stays at root regardless of prefix
+
+### Fixed
+
+- DynamoDB session save: `PutItem` → `UpdateItem` with `if_not_exists(created_at)` to prevent TTL reset on every write
+- Rust edition 2024, `let` chains in JWKS cache
+
 ## [0.17.0] - 2026-02-17
 
 ### Added
