@@ -71,10 +71,10 @@ impl JwksCache {
         // Try read lock first
         {
             let guard = self.keys.read().await;
-            if let Some((keys, fetched_at)) = guard.as_ref() {
-                if fetched_at.elapsed() < self.ttl {
-                    return Ok(keys.clone());
-                }
+            if let Some((keys, fetched_at)) = guard.as_ref()
+                && fetched_at.elapsed() < self.ttl
+            {
+                return Ok(keys.clone());
             }
         }
 

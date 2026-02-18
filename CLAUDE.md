@@ -258,6 +258,19 @@ The RBAC system has 22 property-based tests using fast-check:
 
 ## Upgrade Notes
 
+### v0.17.0 (Rust Token Handler Backend)
+
+**New: Rust backend alternative** in `rust/` — a native Axum + Cedar implementation that can replace the Express or FastAPI backends. The same `auth.js` client works without changes.
+
+Key features:
+- Native `cedar-policy` crate — no WASM marshalling (the core motivation)
+- Dual-mode binary: Lambda (`lambda_http`) + local dev (`axum::serve`)
+- InMemory + DynamoDB session backends (compatible with FastAPI's DynamoDB table schema)
+- HMAC-SHA256 session cookies (note: **not** compatible with FastAPI's itsdangerous format — users will re-login on backend switch)
+- 97 tests, Rust edition 2024, clippy clean
+
+No changes to `auth.js` or client-side code.
+
 ### v0.15.0 (Handler-Only + Session Persistence)
 
 **BREAKING: `localStorage` and `memory` storage modes removed.**

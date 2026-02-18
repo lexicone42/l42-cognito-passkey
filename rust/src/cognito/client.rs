@@ -66,13 +66,16 @@ pub async fn cognito_request(
         .await
         .map_err(|e| CognitoError::RequestFailed(e.to_string()))?;
 
+    // Capture status before consuming the body
+    let status = resp.status();
+
     let data: Value = resp
         .json()
         .await
         .map_err(|e| CognitoError::RequestFailed(e.to_string()))?;
 
-    // Cognito error responses include a `__type` field
-    if data.get("__type").is_some() {
+    // Check HTTP status AND Cognito error marker (matches FastAPI behavior)
+    if !status.is_success() || data.get("__type").is_some() {
         let msg = data
             .get("message")
             .or_else(|| data.get("__type"))
@@ -137,6 +140,8 @@ mod tests {
             dynamodb_table: "l42_sessions".into(),
             dynamodb_endpoint: String::new(),
             session_https_only: false,
+            cookie_domain: None,
+            auth_path_prefix: "/auth".into(),
         }
     }
 

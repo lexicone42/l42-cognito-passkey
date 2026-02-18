@@ -84,14 +84,23 @@ impl SessionBackend for DynamoDbBackend {
             }
         };
 
+        // Use UpdateItem with if_not_exists to preserve original created_at.
+        // PutItem would overwrite created_at on every save, making the 30-day
+        // TTL reset on each write (effectively "30 days since last activity"
+        // instead of "30 days since creation").
         let _ = self
             .client
-            .put_item()
+            .update_item()
             .table_name(&self.table_name)
-            .item("session_id", AttributeValue::S(session_id.to_string()))
-            .item("data", AttributeValue::S(data_json))
-            .item("created_at", AttributeValue::N(now.to_string()))
-            .item("ttl", AttributeValue::N(ttl.to_string()))
+            .key("session_id", AttributeValue::S(session_id.to_string()))
+            .update_expression(
+                "SET #data = :data, created_at = if_not_exists(created_at, :now), #ttl = :ttl",
+            )
+            .expression_attribute_names("#data", "data")
+            .expression_attribute_names("#ttl", "ttl")
+            .expression_attribute_values(":data", AttributeValue::S(data_json))
+            .expression_attribute_values(":now", AttributeValue::N(now.to_string()))
+            .expression_attribute_values(":ttl", AttributeValue::N(ttl.to_string()))
             .send()
             .await
             .map_err(|e| {

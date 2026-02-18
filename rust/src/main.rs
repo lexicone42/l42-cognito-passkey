@@ -96,6 +96,7 @@ async fn main() {
         backend: Arc::new(session_backend),
         secret: config.session_secret.clone(),
         https_only: config.session_https_only,
+        cookie_domain: config.cookie_domain.clone(),
     });
 
     let state = Arc::new(AppState {

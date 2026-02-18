@@ -5,10 +5,12 @@ Guide for Claude instances working on the Rust Token Handler backend.
 ## Quick Reference
 
 ```bash
-cargo test            # 97 tests (75 unit + 22 integration)
+cargo test            # 108 tests (81 unit + 27 integration)
 cargo clippy -- -D warnings   # Must pass clean
 cargo run             # Local dev server on :3001 (needs .env)
 ```
+
+**Edition**: Rust 2024 (requires Rust 1.85+). Uses `let chains`, `r#gen` (reserved keyword), and `unsafe` for `env::remove_var` in tests.
 
 ## Architecture
 
@@ -43,7 +45,7 @@ This is a **Token Handler** backend — it stores JWT tokens server-side in Http
 | `middleware::csrf` | CSRF header check | `require_csrf` |
 | `ocsf` | OCSF security event logging | `authentication_event`, `authorization_event` |
 | `routes::*` | 8 HTTP handlers | One handler per file |
-| `lib` | App assembly | `AppState`, `create_app()` |
+| `lib` | App assembly (`Router::nest` for auth prefix) | `AppState`, `create_app()` |
 | `main` | Dual-mode entrypoint | Lambda detection via `AWS_LAMBDA_RUNTIME_API` |
 
 ## Common Tasks
@@ -108,7 +110,20 @@ NOT compatible with Python's `itsdangerous.URLSafeTimedSerializer`. If migrating
 Events go to `tracing::info!(target: "ocsf", ...)` as JSON strings. In Lambda, configure the JSON tracing subscriber to capture these. The `emit()` function never panics — errors are silently caught.
 
 ### Callback redirect_uri
-The OAuth callback handler constructs `redirect_uri` from the incoming request's `Host` header and `X-Forwarded-Proto` (for ALB/CloudFront). This MUST match the callback URL registered in your Cognito app client settings.
+The OAuth callback handler constructs `redirect_uri` from the incoming request's `X-Forwarded-Host` header (preferred), falling back to `Host`, then `"localhost"`. The scheme comes from `X-Forwarded-Proto`. The auth path prefix comes from `Config::auth_path_prefix`. This MUST match the callback URL registered in your Cognito app client settings.
+
+### CloudFront / reverse proxy deployment
+Three env vars handle CDN deployment:
+
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `COOKIE_DOMAIN` | (none) | `Domain=` on session cookies for cross-subdomain SSO (e.g. `.example.com`) |
+| `AUTH_PATH_PREFIX` | `/auth` | Route prefix for all auth endpoints. Set to `/_auth` if CloudFront routes `/_auth/*` to Lambda |
+| (none — uses headers) | — | `X-Forwarded-Host` header preferred over `Host` for callback `redirect_uri` |
+
+Example CloudFront config: CloudFront routes `/_auth/*` to Lambda origin, sets `X-Forwarded-Host: app.example.com`. Lambda env: `AUTH_PATH_PREFIX=/_auth`, `COOKIE_DOMAIN=.example.com`.
+
+Auth routes are mounted via `Router::nest(&auth_prefix, auth_routes)` — `/health` always stays at the root.
 
 ## Testing Patterns
 
@@ -119,6 +134,14 @@ seed_session(&state, "sid-1", &tokens).await;
 let req = request_with_session("GET", "/auth/token", "sid-1", &state.config.session_secret);
 let resp = app.oneshot(req).await.unwrap();
 assert_eq!(resp.status(), StatusCode::OK);
+```
+
+### Custom config for tests
+```rust
+let mut config = Config::test_default();
+config.cookie_domain = Some(".example.com".into());
+config.auth_path_prefix = "/_auth".into();
+let (app, state) = build_test_app_with_config(config, false);
 ```
 
 ### Seeding sessions for tests

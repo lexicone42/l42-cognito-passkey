@@ -58,42 +58,48 @@ pub fn create_app(state: Arc<AppState>) -> Router {
         ])
         .allow_credentials(true);
 
-    // Routes that require CSRF
+    let auth_prefix = state.config.auth_path_prefix.clone();
+
+    // Auth routes that require CSRF protection
     let csrf_routes = Router::new()
         .route(
-            "/auth/session",
+            "/session",
             axum::routing::post(routes::session::create_session),
         )
         .route(
-            "/auth/refresh",
+            "/refresh",
             axum::routing::post(routes::refresh::refresh_tokens),
         )
         .route(
-            "/auth/logout",
+            "/logout",
             axum::routing::post(routes::logout::logout),
         )
         .route(
-            "/auth/authorize",
+            "/authorize",
             axum::routing::post(routes::authorize::authorize),
         )
         .layer(from_fn(crate::middleware::csrf::require_csrf));
 
-    // Routes without CSRF
-    let open_routes = Router::new()
-        .route("/health", axum::routing::get(routes::health::health))
+    // Auth routes without CSRF
+    let open_auth_routes = Router::new()
         .route(
-            "/auth/token",
+            "/token",
             axum::routing::get(routes::token::get_token),
         )
         .route(
-            "/auth/callback",
+            "/callback",
             axum::routing::get(routes::callback::oauth_callback),
         )
-        .route("/auth/me", axum::routing::get(routes::me::me));
+        .route("/me", axum::routing::get(routes::me::me));
+
+    // All auth routes nested under configurable prefix
+    let auth_routes = Router::new()
+        .merge(csrf_routes)
+        .merge(open_auth_routes);
 
     Router::new()
-        .merge(csrf_routes)
-        .merge(open_routes)
+        .route("/health", axum::routing::get(routes::health::health))
+        .nest(&auth_prefix, auth_routes)
         .layer(from_fn(move |req, next| {
             let layer = session_layer.clone();
             session_middleware(layer, req, next)

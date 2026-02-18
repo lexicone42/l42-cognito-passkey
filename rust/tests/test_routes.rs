@@ -6,7 +6,8 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{build_test_app, expired_claims, test_claims, TestKeys};
+use common::{build_test_app, build_test_app_with_config, expired_claims, test_claims, TestKeys};
+use l42_token_handler::config::Config;
 use l42_token_handler::session::cookie::sign_session_id;
 use l42_token_handler::session::{SessionBackend, SessionData};
 use l42_token_handler::types::SessionTokens;
@@ -624,4 +625,143 @@ async fn test_authorize_expired_token_rejected() {
 
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+// ───── Cookie Domain ─────
+//
+// POST /auth/session verifies the JWT via JWKS, so we can't easily test set-cookie
+// with fake tokens. Instead, we test Domain= on delete cookies (via logout) since
+// the middleware uses the same `cookie_domain` for both paths. Set-cookie format
+// is covered by unit tests in session::middleware.
+
+#[tokio::test]
+async fn test_cookie_includes_domain_when_configured() {
+    let mut config = Config::test_default();
+    config.cookie_domain = Some(".example.com".into());
+    let (app, state) = build_test_app_with_config(config, false);
+
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-123".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-domain", &tokens).await;
+
+    let req = request_with_session_and_csrf(
+        "POST",
+        "/auth/logout",
+        "sid-domain",
+        &state.config.session_secret,
+    );
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        cookie.contains("Domain=.example.com"),
+        "cookie should include Domain: {cookie}"
+    );
+}
+
+#[tokio::test]
+async fn test_cookie_no_domain_by_default() {
+    let (app, state) = build_test_app(false);
+
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-123".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-no-domain", &tokens).await;
+
+    let req = request_with_session_and_csrf(
+        "POST",
+        "/auth/logout",
+        "sid-no-domain",
+        &state.config.session_secret,
+    );
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        !cookie.contains("Domain="),
+        "cookie should not include Domain by default: {cookie}"
+    );
+}
+
+// ───── Custom Auth Path Prefix ─────
+
+#[tokio::test]
+async fn test_custom_prefix_routes_work() {
+    let mut config = Config::test_default();
+    config.auth_path_prefix = "/_auth".into();
+    let (app, state) = build_test_app_with_config(config, false);
+
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-prefix".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-prefix", &tokens).await;
+
+    let req = request_with_session(
+        "GET",
+        "/_auth/token",
+        "sid-prefix",
+        &state.config.session_secret,
+    );
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["access_token"], "at-prefix");
+}
+
+#[tokio::test]
+async fn test_health_stays_at_root_with_custom_prefix() {
+    let mut config = Config::test_default();
+    config.auth_path_prefix = "/_auth".into();
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    let req = Request::builder()
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["status"], "ok");
+}
+
+#[tokio::test]
+async fn test_old_prefix_404_with_custom_prefix() {
+    let mut config = Config::test_default();
+    config.auth_path_prefix = "/_auth".into();
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    let req = Request::builder()
+        .uri("/auth/token")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

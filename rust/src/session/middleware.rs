@@ -64,6 +64,7 @@ pub struct SessionLayer<B: SessionBackend> {
     pub backend: Arc<B>,
     pub secret: String,
     pub https_only: bool,
+    pub cookie_domain: Option<String>,
 }
 
 /// Axum middleware function for session handling.
@@ -83,12 +84,12 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
     let session_id = session_cookie
         .and_then(|v| verify_cookie(layer.secret.as_bytes(), v));
 
-    let (handle, initial_data, is_new) = match session_id {
+    let (handle, initial_data) = match session_id {
         Some(id) => {
             match layer.backend.load(&id).await {
                 Some(data) => {
                     let initial = data.clone();
-                    (SessionHandle::new(id, data), initial, false)
+                    (SessionHandle::new(id, data), initial)
                 }
                 None => {
                     // Expired or missing — create new session
@@ -96,7 +97,6 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
                     (
                         SessionHandle::new(new_id, SessionData::new()),
                         SessionData::new(),
-                        true,
                     )
                 }
             }
@@ -106,7 +106,6 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
             (
                 SessionHandle::new(new_id, SessionData::new()),
                 SessionData::new(),
-                true,
             )
         }
     };
@@ -121,16 +120,21 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
     let destroyed = *handle.destroyed.lock().await;
     let current_data = handle.data.lock().await.clone();
 
+    let domain = layer.cookie_domain.as_deref();
+
     if destroyed {
         layer.backend.delete(&session_id).await;
-        let cookie = make_delete_cookie(&layer.secret, &session_id, layer.https_only);
+        let cookie = make_delete_cookie(&layer.secret, &session_id, layer.https_only, domain);
         response.headers_mut().append(
             header::SET_COOKIE,
             cookie.parse().unwrap(),
         );
-    } else if current_data != initial_data || is_new {
+    } else if current_data != initial_data {
+        // Only persist when the handler actually modified session data.
+        // Without this check, every unauthenticated request (including GET /health)
+        // would create an empty session in the backend + set a cookie.
         layer.backend.save(&session_id, &current_data).await;
-        let cookie = make_set_cookie(&layer.secret, &session_id, layer.https_only);
+        let cookie = make_set_cookie(&layer.secret, &session_id, layer.https_only, domain);
         response.headers_mut().append(
             header::SET_COOKIE,
             cookie.parse().unwrap(),
@@ -142,13 +146,18 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
 
 fn generate_session_id() -> String {
     use rand::Rng;
-    let bytes: [u8; 32] = rand::thread_rng().gen();
+    let bytes: [u8; 32] = rand::thread_rng().r#gen();
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
 use base64::Engine;
 
-fn make_set_cookie(secret: &str, session_id: &str, https_only: bool) -> String {
+fn make_set_cookie(
+    secret: &str,
+    session_id: &str,
+    https_only: bool,
+    cookie_domain: Option<&str>,
+) -> String {
     let signed = sign_session_id(secret.as_bytes(), session_id);
     let mut parts = vec![
         format!("{}={}", COOKIE_NAME, signed),
@@ -160,10 +169,18 @@ fn make_set_cookie(secret: &str, session_id: &str, https_only: bool) -> String {
     if https_only {
         parts.push("Secure".into());
     }
+    if let Some(domain) = cookie_domain {
+        parts.push(format!("Domain={domain}"));
+    }
     parts.join("; ")
 }
 
-fn make_delete_cookie(_secret: &str, _session_id: &str, https_only: bool) -> String {
+fn make_delete_cookie(
+    _secret: &str,
+    _session_id: &str,
+    https_only: bool,
+    cookie_domain: Option<&str>,
+) -> String {
     let mut parts = vec![
         format!("{}=", COOKIE_NAME),
         "Max-Age=0".into(),
@@ -174,6 +191,9 @@ fn make_delete_cookie(_secret: &str, _session_id: &str, https_only: bool) -> Str
     if https_only {
         parts.push("Secure".into());
     }
+    if let Some(domain) = cookie_domain {
+        parts.push(format!("Domain={domain}"));
+    }
     parts.join("; ")
 }
 
@@ -181,10 +201,10 @@ fn make_delete_cookie(_secret: &str, _session_id: &str, https_only: bool) -> Str
 fn parse_cookie<'a>(header: &'a str, name: &str) -> Option<&'a str> {
     for part in header.split(';') {
         let trimmed = part.trim();
-        if let Some(value) = trimmed.strip_prefix(name) {
-            if let Some(value) = value.strip_prefix('=') {
-                return Some(value);
-            }
+        if let Some(value) = trimmed.strip_prefix(name)
+            && let Some(value) = value.strip_prefix('=')
+        {
+            return Some(value);
         }
     }
     None
@@ -213,24 +233,39 @@ mod tests {
 
     #[test]
     fn test_make_set_cookie_format() {
-        let cookie = make_set_cookie("secret", "sid", false);
+        let cookie = make_set_cookie("secret", "sid", false, None);
         assert!(cookie.starts_with("l42_session="));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("SameSite=Lax"));
         assert!(cookie.contains("Path=/"));
         assert!(!cookie.contains("Secure"));
+        assert!(!cookie.contains("Domain="));
     }
 
     #[test]
     fn test_make_set_cookie_secure() {
-        let cookie = make_set_cookie("secret", "sid", true);
+        let cookie = make_set_cookie("secret", "sid", true, None);
         assert!(cookie.contains("Secure"));
     }
 
     #[test]
+    fn test_make_set_cookie_with_domain() {
+        let cookie = make_set_cookie("secret", "sid", false, Some(".example.com"));
+        assert!(cookie.contains("Domain=.example.com"));
+    }
+
+    #[test]
     fn test_make_delete_cookie() {
-        let cookie = make_delete_cookie("secret", "sid", false);
+        let cookie = make_delete_cookie("secret", "sid", false, None);
         assert!(cookie.contains("Max-Age=0"));
         assert!(cookie.starts_with("l42_session=;"));
+        assert!(!cookie.contains("Domain="));
+    }
+
+    #[test]
+    fn test_make_delete_cookie_with_domain() {
+        let cookie = make_delete_cookie("secret", "sid", false, Some(".example.com"));
+        assert!(cookie.contains("Max-Age=0"));
+        assert!(cookie.contains("Domain=.example.com"));
     }
 }

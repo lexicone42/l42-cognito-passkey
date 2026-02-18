@@ -183,6 +183,43 @@ pub fn build_test_app(with_cedar: bool) -> (axum::Router, Arc<AppState>) {
         backend: Arc::new(session_backend),
         secret: config.session_secret.clone(),
         https_only: config.session_https_only,
+        cookie_domain: config.cookie_domain.clone(),
+    });
+
+    let state = Arc::new(AppState {
+        config,
+        http_client,
+        jwks_cache,
+        cedar,
+        session_layer,
+    });
+
+    let app = create_app(state.clone());
+    (app, state)
+}
+
+/// Build a test app with a custom Config and optional Cedar.
+pub fn build_test_app_with_config(config: Config, with_cedar: bool) -> (axum::Router, Arc<AppState>) {
+    let http_client = reqwest::Client::new();
+    let jwks_cache = Arc::new(JwksCache::new(http_client.clone()));
+
+    let cedar = if with_cedar {
+        let cedar_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("cedar");
+        CedarState::init(
+            &cedar_dir.join("schema.cedarschema.json"),
+            &cedar_dir.join("policies"),
+        )
+        .ok()
+    } else {
+        None
+    };
+
+    let session_backend = AnyBackend::Memory(InMemoryBackend::new());
+    let session_layer = Arc::new(SessionLayer {
+        backend: Arc::new(session_backend),
+        secret: config.session_secret.clone(),
+        https_only: config.session_https_only,
+        cookie_domain: config.cookie_domain.clone(),
     });
 
     let state = Arc::new(AppState {

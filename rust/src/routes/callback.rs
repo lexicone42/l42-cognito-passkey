@@ -12,6 +12,16 @@ use crate::ocsf;
 use crate::session::middleware::SessionHandle;
 use crate::types::SessionTokens;
 
+/// Extract the viewer-facing host, preferring `X-Forwarded-Host` (set by CDN/reverse
+/// proxy) over the standard `Host` header. Falls back to `"localhost"`.
+fn extract_host(headers: &HeaderMap) -> &str {
+    headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost")
+}
+
 /// Query parameters from Cognito OAuth redirect.
 #[derive(Debug, Deserialize)]
 pub struct CallbackParams {
@@ -30,11 +40,7 @@ pub async fn oauth_callback(
 ) -> Redirect {
     let frontend = &state.config.frontend_url;
 
-    // Extract host from Host header (standard HTTP/1.1) or fallback
-    let host = headers
-        .get("host")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("localhost");
+    let host = extract_host(&headers);
 
     // Determine scheme from X-Forwarded-Proto (behind proxy/ALB) or config
     let scheme = headers
@@ -46,7 +52,10 @@ pub async fn oauth_callback(
             "http"
         });
     // Build redirect_uri from the backend's own URL (must match Cognito app client config)
-    let self_callback_url = format!("{}://{}/auth/callback", scheme, host);
+    let self_callback_url = format!(
+        "{}://{}{}/callback",
+        scheme, host, state.config.auth_path_prefix
+    );
 
     // Handle OAuth error from Cognito
     if let Some(ref error) = params.error {
@@ -158,5 +167,31 @@ pub async fn oauth_callback(
                 frontend
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_host_prefers_forwarded() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "internal-lambda.amazonaws.com".parse().unwrap());
+        headers.insert("x-forwarded-host", "app.example.com".parse().unwrap());
+        assert_eq!(extract_host(&headers), "app.example.com");
+    }
+
+    #[test]
+    fn test_extract_host_falls_back_to_host() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "api.example.com".parse().unwrap());
+        assert_eq!(extract_host(&headers), "api.example.com");
+    }
+
+    #[test]
+    fn test_extract_host_defaults_to_localhost() {
+        let headers = HeaderMap::new();
+        assert_eq!(extract_host(&headers), "localhost");
     }
 }

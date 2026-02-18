@@ -135,6 +135,14 @@ impl CedarState {
     ///
     /// Builds entities from JWT claims, constructs a Cedar Request, and
     /// calls the authorizer. Returns the decision.
+    /// Evaluate a Cedar authorization request.
+    ///
+    /// **Note on `context`:** The context parameter is intentionally ignored
+    /// (always uses `Context::empty()`). This is a deliberate safety decision
+    /// per sharp-edge finding S5: client-supplied context is untrusted and
+    /// passing it unvalidated to Cedar would allow callers to influence policy
+    /// evaluation. When Cedar context support is needed (e.g. IP-based policies),
+    /// it should be built from trusted server-side sources, not request bodies.
     pub fn authorize(
         &self,
         claims: &Claims,
@@ -166,6 +174,7 @@ impl CedarState {
             EntityId::from_str(resource_id).unwrap(),
         );
 
+        // Context intentionally empty — see doc comment above (S5 sharp-edge)
         let cedar_context = Context::empty();
 
         let request = cedar_policy::Request::new(

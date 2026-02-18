@@ -19,6 +19,8 @@ pub struct Config {
     pub dynamodb_table: String,
     pub dynamodb_endpoint: String,
     pub session_https_only: bool,
+    pub cookie_domain: Option<String>,
+    pub auth_path_prefix: String,
 }
 
 impl Config {
@@ -33,8 +35,13 @@ impl Config {
             cognito_user_pool_id: required_env("COGNITO_USER_POOL_ID")?,
             cognito_domain: required_env("COGNITO_DOMAIN")?,
             cognito_region: env::var("COGNITO_REGION").unwrap_or_else(|_| "us-west-2".into()),
-            session_secret: env::var("SESSION_SECRET")
-                .unwrap_or_else(|_| "change-me-in-production".into()),
+            session_secret: env::var("SESSION_SECRET").unwrap_or_else(|_| {
+                tracing::warn!(
+                    "SESSION_SECRET not set — using insecure default. \
+                     Set SESSION_SECRET to a random 32+ byte value in production!"
+                );
+                "change-me-in-production".into()
+            }),
             frontend_url: env::var("FRONTEND_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".into()),
             port: env::var("PORT")
@@ -49,6 +56,12 @@ impl Config {
             session_https_only: env::var("SESSION_HTTPS_ONLY")
                 .map(|v| v == "true" || v == "1" || v == "True")
                 .unwrap_or(false),
+            cookie_domain: env::var("COOKIE_DOMAIN")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            auth_path_prefix: normalize_path_prefix(
+                &env::var("AUTH_PATH_PREFIX").unwrap_or_else(|_| "/auth".into()),
+            ),
         })
     }
 
@@ -95,6 +108,8 @@ impl Config {
             dynamodb_table: "l42_sessions".into(),
             dynamodb_endpoint: String::new(),
             session_https_only: false,
+            cookie_domain: None,
+            auth_path_prefix: "/auth".into(),
         }
     }
 }
@@ -109,6 +124,21 @@ fn required_env(key: &str) -> Result<String, ConfigError> {
     env::var(key).map_err(|_| ConfigError::MissingEnv(key.into()))
 }
 
+/// Normalize a path prefix: ensure leading `/`, strip trailing `/`.
+/// Examples: `"_auth"` → `"/_auth"`, `"/auth/"` → `"/auth"`, `""` → `""`.
+fn normalize_path_prefix(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let with_slash = if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    };
+    with_slash.trim_end_matches('/').to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +150,19 @@ mod tests {
         assert_eq!(cfg.cognito_region, "us-west-2");
         assert_eq!(cfg.port, 3001);
         assert!(!cfg.session_https_only);
+        assert_eq!(cfg.cookie_domain, None);
+        assert_eq!(cfg.auth_path_prefix, "/auth");
+    }
+
+    #[test]
+    fn test_normalize_path_prefix() {
+        assert_eq!(normalize_path_prefix("/auth"), "/auth");
+        assert_eq!(normalize_path_prefix("_auth"), "/_auth");
+        assert_eq!(normalize_path_prefix("/auth/"), "/auth");
+        assert_eq!(normalize_path_prefix("/_auth/"), "/_auth");
+        assert_eq!(normalize_path_prefix(""), "");
+        assert_eq!(normalize_path_prefix("  "), "");
+        assert_eq!(normalize_path_prefix("api/auth"), "/api/auth");
     }
 
     #[test]
@@ -145,8 +188,9 @@ mod tests {
 
     #[test]
     fn test_from_env_missing_required() {
-        // Clear any existing env vars to ensure this fails
-        env::remove_var("COGNITO_CLIENT_ID");
+        // Clear any existing env vars to ensure this fails.
+        // SAFETY: This test runs single-threaded — no concurrent env access.
+        unsafe { env::remove_var("COGNITO_CLIENT_ID") };
         let result = Config::from_env();
         assert!(result.is_err());
         let err = result.unwrap_err();
