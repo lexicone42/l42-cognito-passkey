@@ -33,7 +33,7 @@
     "process-issue": "node scripts/process-issue.js",
     "sync-counts": "node scripts/sync-test-counts.js",
     "preversion": "pnpm test && node scripts/check-dist-sync.js && pnpm validate-docs",
-    "version": "node scripts/sync-version.js && node scripts/sync-test-counts.js && cp src/auth.js dist/auth.js && cp src/auth.d.ts dist/auth.d.ts && git add -A",
+    "version": "node scripts/sync-version.js && node scripts/ensure-changelog.js && node scripts/sync-test-counts.js && cp src/auth.js dist/auth.js && cp src/auth.d.ts dist/auth.d.ts && git add -A",
     "postversion": "git push && git push --tags && node scripts/create-release.js",
     "release:patch": "npm version patch",
     "release:minor": "npm version minor",
