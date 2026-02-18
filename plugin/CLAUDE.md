@@ -3,7 +3,7 @@
 This plugin provides quick setup for AWS Cognito authentication with WebAuthn passkey support.
 
 **Plugin Name**: `l42-cognito-passkey`
-**Current Version**: 0.17.0
+**Current Version**: 0.18.0
 **Tests**: 658 passing
 
 ## Overview
@@ -196,7 +196,7 @@ Tokens are stored server-side in HttpOnly session cookies via the Token Handler 
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.17.0"
+console.log(VERSION); // "0.18.0"
 ```
 
 ## Site Architecture Patterns
