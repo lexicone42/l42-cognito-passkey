@@ -243,6 +243,118 @@ Create a second Cognito User Pool with `RelyingPartyId: 'localhost'` for local p
 **Option 3: Use ngrok or similar**
 Tunnel localhost to a subdomain of your production domain.
 
+## Passkey-Only Deployment (Disabling Password Fallback)
+
+**This is the single highest-impact security hardening you can do.** If your deployment supports passkey-only authentication, disabling password auth flows eliminates the entire class of AiTM (Adversary-in-the-Middle) phishing attacks.
+
+### Why This Matters
+
+Phishing proxies like Evilginx, Mamba 2FA, and Tycoon 2FA work by sitting between the user and your login page. They modify the HTML to hide passkey prompts and show a password form instead. Once the user enters their password, the proxy captures the session.
+
+Passkeys are phishing-resistant by design — but only if passwords aren't available as a fallback. Your weakest authentication method defines your real security posture.
+
+### What to Change
+
+Remove `ALLOW_USER_PASSWORD_AUTH` and `ALLOW_USER_SRP_AUTH` from the User Pool Client, and remove `PASSWORD` from the sign-in policy.
+
+#### CDK (TypeScript)
+
+```typescript
+// Passkey-only: no password auth flows
+cfnClient.addPropertyOverride('ExplicitAuthFlows', [
+    'ALLOW_USER_AUTH',           // Required for passkey login
+    'ALLOW_REFRESH_TOKEN_AUTH'   // Required for token refresh
+]);
+```
+
+#### CloudFormation
+
+```yaml
+UserPoolClient:
+  Type: AWS::Cognito::UserPoolClient
+  Properties:
+    UserPoolId: !Ref UserPool
+    ExplicitAuthFlows:
+      - ALLOW_USER_AUTH           # Passkey login
+      - ALLOW_REFRESH_TOKEN_AUTH  # Token refresh
+      # No ALLOW_USER_PASSWORD_AUTH or ALLOW_USER_SRP_AUTH
+    AllowedOAuthScopes:
+      - openid
+      - email
+      - aws.cognito.signin.user.admin
+    # ... rest of config
+```
+
+#### boto3
+
+```python
+# Passkey-only sign-in policy — remove PASSWORD
+client.update_user_pool(
+    UserPoolId=USER_POOL_ID,
+    Policies={
+        'SignInPolicy': {
+            'AllowedFirstAuthFactors': ['WEB_AUTHN']  # No 'PASSWORD'
+        }
+    }
+)
+```
+
+#### AWS Console
+
+1. Go to **Cognito** > **User Pools** > Your Pool > **Sign-in experience**
+2. Under **Multi-factor authentication**, edit to keep only **Passkey** enabled
+3. Go to **App integration** > Your App Client > **Edit hosted UI**
+4. Under **Auth flows**, uncheck `USER_PASSWORD_AUTH` and `USER_SRP_AUTH`
+
+### Impact on auth.js
+
+- `loginWithPasskey()` — works normally
+- `loginWithPassword()` — will throw a Cognito error (`"USER_PASSWORD_AUTH flow not enabled"`). This is the intended behavior — the function still exists in auth.js but Cognito will reject the request.
+- `loginWithHostedUI()` — Cognito Hosted UI will only show the passkey option
+
+You do not need to change any auth.js code or configuration.
+
+### Development Without Passwords
+
+With passwords disabled, you can't use `loginWithPassword()` for local development. Options:
+
+1. **Separate User Pool for development** (recommended): Create a second User Pool with `RelyingPartyId: 'localhost'` and password flows enabled. Use environment variables to switch between pools.
+
+2. **ngrok or Cloudflare Tunnel**: Tunnel localhost through a subdomain of your production domain so passkeys work locally.
+
+3. **Two app clients on the same pool**: Keep one client with password flows for development, one without for production. Use different `CLIENT_ID` values per environment.
+
+### Account Recovery
+
+If a user loses access to all their registered passkeys and passwords are disabled:
+
+- **Admin reset**: An administrator can delete the user's credential and re-enroll them via the Cognito Console or `admin-delete-user-credentials` API
+- **Second passkey**: Encourage users to register at least two passkeys (e.g., phone + hardware key) during onboarding. The `registerPasskey()` function can be called multiple times.
+- **Recovery codes**: Not natively supported by Cognito. If needed, implement a custom challenge flow (`CUSTOM_AUTH`) that validates pre-generated recovery codes.
+
+### Verification
+
+After disabling password flows, verify:
+
+```bash
+# Check auth flows — should NOT include PASSWORD or SRP
+aws cognito-idp describe-user-pool-client \
+    --user-pool-id us-west-2_xxxxxxxxx \
+    --client-id your-client-id \
+    --query 'UserPoolClient.ExplicitAuthFlows'
+
+# Expected: ["ALLOW_USER_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+```
+
+```bash
+# Check sign-in policy — should only have WEB_AUTHN
+aws cognito-idp describe-user-pool \
+    --user-pool-id us-west-2_xxxxxxxxx \
+    --query 'UserPool.Policies.SignInPolicy'
+
+# Expected: {"AllowedFirstAuthFactors": ["WEB_AUTHN"]}
+```
+
 ## Troubleshooting
 
 ### "USER_AUTH flow not enabled for this client"

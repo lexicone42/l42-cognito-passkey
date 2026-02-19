@@ -23,7 +23,7 @@
 |---|---|---|
 | **No attestation enforcement** | Can't distinguish YubiKey from synced iCloud passkey | **Partially mitigated (v0.19.0)**: `attestation: 'direct'` option available; server-side AAGUID validation pending |
 | **No BE/BS flag inspection** | Can't policy-gate "device-bound credentials only" | **Mitigated (v0.19.0)**: BE/BS flags parsed and included in OCSF events + credential responses |
-| **Fallback authentication** | AiTM proxy strips passkey UI, shows password form | Cognito User Pool config: disable password auth flows |
+| **Fallback authentication** | AiTM proxy strips passkey UI, shows password form | **Documented**: See `docs/cognito-setup.md` "Passkey-Only Deployment" section |
 | **Browser extension hijacking** | `webAuthenticationProxy` API allows interception | Cannot mitigate client-side; recommend extension allowlists |
 | **Synced passkey cloud compromise** | iCloud/Google account takeover → passkey access | **Partially mitigated**: AAGUID extraction + attestation option available; Cedar AAGUID allowlist pending |
 
@@ -125,7 +125,7 @@ Download FIDO Alliance Metadata Service blob, map AAGUIDs to authenticator metad
 
 ## Recommendations (Priority Order)
 
-1. **Document "disable password fallback"** — Zero code, highest impact. If passkey-only security is desired, disable password auth flows in Cognito.
+1. ~~**Document "disable password fallback"**~~ — **DONE**: See `docs/cognito-setup.md` "Passkey-Only Deployment" section. Covers CDK, CloudFormation, boto3, AWS Console steps + dev workflow + account recovery.
 
 2. ~~**Parse BE/BS flags from authenticatorData**~~ — **DONE (v0.19.0)**: `parseAuthenticatorData()` extracts UP, UV, BE, BS, AT, ED flags + signCount + AAGUID. Integrated into `buildCredentialResponse()` and `buildAssertionResponse()`. Included in OCSF events as `metadata.backup_eligible`, `metadata.backup_state`, `metadata.aaguid`. 38 dedicated tests.
 
