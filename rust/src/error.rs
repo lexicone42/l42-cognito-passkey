@@ -42,6 +42,9 @@ pub enum AppError {
     #[error("Failed to decode token")]
     TokenDecodeFailed,
 
+    #[error("Credential rejected: {0}")]
+    CredentialRejected(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -87,6 +90,10 @@ impl IntoResponse for AppError {
             AppError::AuthorizationError(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 json!({"authorized": false, "error": "Authorization evaluation failed"}),
+            ),
+            AppError::CredentialRejected(msg) => (
+                StatusCode::FORBIDDEN,
+                json!({"allowed": false, "reason": msg}),
             ),
             AppError::TokenExchangeFailed(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -153,6 +160,10 @@ mod tests {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 serde_json::json!({"authorized": false, "error": "Authorization evaluation failed"}),
             ),
+            AppError::CredentialRejected(msg) => (
+                StatusCode::FORBIDDEN,
+                serde_json::json!({"allowed": false, "reason": msg}),
+            ),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({"error": "internal"})),
         };
         (status, body)
@@ -192,6 +203,14 @@ mod tests {
         let (status, body) = error_to_json(AppError::BadRequest("Missing field".into()));
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"], "Missing field");
+    }
+
+    #[test]
+    fn test_credential_rejected() {
+        let (status, body) = error_to_json(AppError::CredentialRejected("AAGUID not in allowlist".into()));
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["allowed"], false);
+        assert_eq!(body["reason"], "AAGUID not in allowlist");
     }
 
     #[test]

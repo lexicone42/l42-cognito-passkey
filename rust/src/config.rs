@@ -22,6 +22,8 @@ pub struct Config {
     pub cookie_domain: Option<String>,
     pub auth_path_prefix: String,
     pub callback_use_origin: bool,
+    pub aaguid_allowlist: Vec<String>,
+    pub require_device_bound: bool,
 }
 
 impl Config {
@@ -64,6 +66,15 @@ impl Config {
                 &env::var("AUTH_PATH_PREFIX").unwrap_or_else(|_| "/auth".into()),
             ),
             callback_use_origin: env::var("CALLBACK_USE_ORIGIN")
+                .map(|v| v == "true" || v == "1" || v == "True")
+                .unwrap_or(false),
+            aaguid_allowlist: env::var("AAGUID_ALLOWLIST")
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            require_device_bound: env::var("REQUIRE_DEVICE_BOUND")
                 .map(|v| v == "true" || v == "1" || v == "True")
                 .unwrap_or(false),
         })
@@ -115,6 +126,8 @@ impl Config {
             cookie_domain: None,
             auth_path_prefix: "/auth".into(),
             callback_use_origin: false,
+            aaguid_allowlist: Vec::new(),
+            require_device_bound: false,
         }
     }
 }

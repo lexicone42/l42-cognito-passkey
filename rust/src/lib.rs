@@ -6,6 +6,7 @@
 pub mod cedar;
 pub mod cognito;
 pub mod config;
+pub mod credential;
 pub mod error;
 pub mod middleware;
 pub mod ocsf;
@@ -77,6 +78,10 @@ pub fn create_app(state: Arc<AppState>) -> Router {
         .route(
             "/authorize",
             axum::routing::post(routes::authorize::authorize),
+        )
+        .route(
+            "/validate-credential",
+            axum::routing::post(routes::validate_credential::validate_credential),
         )
         .layer(from_fn(crate::middleware::csrf::require_csrf));
 

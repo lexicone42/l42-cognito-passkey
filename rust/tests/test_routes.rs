@@ -6,6 +6,9 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use ciborium::Value as CborValue;
 use common::{build_test_app, build_test_app_with_config, expired_claims, test_claims, TestKeys};
 use l42_token_handler::config::Config;
 use l42_token_handler::session::cookie::sign_session_id;
@@ -886,4 +889,283 @@ async fn test_old_prefix_404_with_custom_prefix() {
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+// ───── POST /auth/validate-credential ─────
+
+/// Build a minimal CBOR attestationObject with given flags and optional AAGUID.
+fn build_test_attestation_object(flags: u8, aaguid: Option<[u8; 16]>) -> String {
+    let mut auth_data = vec![0u8; 32]; // rpIdHash
+    auth_data.push(flags);
+    auth_data.extend_from_slice(&[0, 0, 0, 0]); // signCount
+    if let Some(aaguid_bytes) = aaguid {
+        auth_data.extend_from_slice(&aaguid_bytes);
+        auth_data.extend_from_slice(&[0, 0]); // credIdLen
+    }
+
+    let cbor = CborValue::Map(vec![
+        (
+            CborValue::Text("fmt".into()),
+            CborValue::Text("none".into()),
+        ),
+        (
+            CborValue::Text("attStmt".into()),
+            CborValue::Map(vec![]),
+        ),
+        (
+            CborValue::Text("authData".into()),
+            CborValue::Bytes(auth_data),
+        ),
+    ]);
+    let mut buf = Vec::new();
+    ciborium::into_writer(&cbor, &mut buf).unwrap();
+    STANDARD.encode(&buf)
+}
+
+const TEST_AAGUID: [u8; 16] = [
+    0xcb, 0x69, 0x48, 0x1e, 0x8f, 0xf7, 0x40, 0x39, 0x93, 0xec, 0x0a, 0x27, 0x29, 0xa1, 0x54,
+    0xa8,
+];
+
+#[tokio::test]
+async fn test_validate_credential_allowed_empty_allowlist() {
+    let (app, state) = build_test_app(false);
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-vc".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: Some("passkey".into()),
+    };
+    seed_session(&state, "sid-vc1", &tokens).await;
+
+    let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
+    let body = json!({
+        "attestation_object": att_obj,
+        "client_data_json": STANDARD.encode(b"{}")
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc1");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/validate-credential")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["allowed"], true);
+    assert_eq!(
+        body["device"]["aaguid"],
+        "cb69481e-8ff7-4039-93ec-0a2729a154a8"
+    );
+}
+
+#[tokio::test]
+async fn test_validate_credential_aaguid_not_in_allowlist() {
+    let mut config = Config::test_default();
+    config.aaguid_allowlist = vec!["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into()];
+    let (app, state) = build_test_app_with_config(config, false);
+
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-vc2".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: Some("passkey".into()),
+    };
+    seed_session(&state, "sid-vc2", &tokens).await;
+
+    let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
+    let body = json!({
+        "attestation_object": att_obj,
+        "client_data_json": STANDARD.encode(b"{}")
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc2");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/validate-credential")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_json(resp).await;
+    assert_eq!(body["allowed"], false);
+    assert!(body["reason"].as_str().unwrap().contains("not in allowlist"));
+}
+
+#[tokio::test]
+async fn test_validate_credential_aaguid_in_allowlist() {
+    let mut config = Config::test_default();
+    config.aaguid_allowlist = vec!["cb69481e-8ff7-4039-93ec-0a2729a154a8".into()];
+    let (app, state) = build_test_app_with_config(config, false);
+
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-vc3".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: Some("passkey".into()),
+    };
+    seed_session(&state, "sid-vc3", &tokens).await;
+
+    let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
+    let body = json!({
+        "attestation_object": att_obj,
+        "client_data_json": STANDARD.encode(b"{}")
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc3");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/validate-credential")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["allowed"], true);
+}
+
+#[tokio::test]
+async fn test_validate_credential_device_bound_required_but_syncable() {
+    let mut config = Config::test_default();
+    config.require_device_bound = true;
+    let (app, state) = build_test_app_with_config(config, false);
+
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-vc4".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: Some("passkey".into()),
+    };
+    seed_session(&state, "sid-vc4", &tokens).await;
+
+    // UP + UV + BE + AT — backup eligible
+    let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x08 | 0x40, Some(TEST_AAGUID));
+    let body = json!({
+        "attestation_object": att_obj,
+        "client_data_json": STANDARD.encode(b"{}")
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc4");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/validate-credential")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_json(resp).await;
+    assert_eq!(body["allowed"], false);
+    assert!(body["reason"].as_str().unwrap().contains("backup-eligible"));
+}
+
+#[tokio::test]
+async fn test_validate_credential_device_bound_required_and_bound() {
+    let mut config = Config::test_default();
+    config.require_device_bound = true;
+    let (app, state) = build_test_app_with_config(config, false);
+
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-vc5".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: Some("passkey".into()),
+    };
+    seed_session(&state, "sid-vc5", &tokens).await;
+
+    // UP + UV + AT — no BE flag, device-bound
+    let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
+    let body = json!({
+        "attestation_object": att_obj,
+        "client_data_json": STANDARD.encode(b"{}")
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc5");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/validate-credential")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(body_json(resp).await["allowed"], true);
+}
+
+#[tokio::test]
+async fn test_validate_credential_no_session() {
+    let (app, _state) = build_test_app(false);
+
+    let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
+    let body = json!({
+        "attestation_object": att_obj,
+        "client_data_json": STANDARD.encode(b"{}")
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/validate-credential")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        // No session cookie
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_validate_credential_no_csrf() {
+    let (app, state) = build_test_app(false);
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-vc7".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: Some("passkey".into()),
+    };
+    seed_session(&state, "sid-vc7", &tokens).await;
+
+    let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
+    let body = json!({
+        "attestation_object": att_obj,
+        "client_data_json": STANDARD.encode(b"{}")
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc7");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/validate-credential")
+        .header("Content-Type", "application/json")
+        .header("Cookie", format!("l42_session={}", signed))
+        // No X-L42-CSRF header
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }

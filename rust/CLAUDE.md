@@ -5,7 +5,7 @@ Guide for Claude instances working on the Rust Token Handler backend.
 ## Quick Reference
 
 ```bash
-cargo test            # 113 tests (81 unit + 32 integration)
+cargo test            # 141 tests (102 unit + 39 integration)
 cargo clippy -- -D warnings   # Must pass clean
 cargo run             # Local dev server on :3001 (needs .env)
 ```
@@ -38,13 +38,14 @@ This is a **Token Handler** backend — it stores JWT tokens server-side in Http
 | `cedar::engine` | Native Cedar evaluation | `CedarState` (Authorizer + PolicySet + Schema) |
 | `cedar::entities` | Build Cedar entities from JWT claims | `build_entities()` |
 | `cedar::groups` | Cognito group alias resolution | `DEFAULT_GROUP_MAP` (30+ aliases → 8 groups) |
+| `credential` | WebAuthn CBOR parsing + AAGUID/policy checks | `parse_attestation_object`, `check_aaguid_allowed`, `check_device_bound` |
 | `session::cookie` | HMAC-SHA256 session cookie signing | `sign_session_id`, `verify_cookie` |
 | `session::memory` | In-memory session store | `InMemoryBackend` (DashMap) |
 | `session::dynamodb` | DynamoDB session store | `DynamoDbBackend` |
 | `session::middleware` | Axum session middleware | `SessionHandle`, `SessionLayer` |
 | `middleware::csrf` | CSRF header check | `require_csrf` |
 | `ocsf` | OCSF security event logging | `authentication_event`, `authorization_event` |
-| `routes::*` | 8 HTTP handlers | One handler per file |
+| `routes::*` | 9 HTTP handlers | One handler per file |
 | `lib` | App assembly (`Router::nest` for auth prefix) | `AppState`, `create_app()` |
 | `main` | Dual-mode entrypoint | Lambda detection via `AWS_LAMBDA_RUNTIME_API` |
 
@@ -120,6 +121,8 @@ Three env vars handle CDN deployment:
 | `COOKIE_DOMAIN` | (none) | `Domain=` on session cookies for cross-subdomain SSO (e.g. `.example.com`) |
 | `AUTH_PATH_PREFIX` | `/auth` | Route prefix for all auth endpoints. Set to `/_auth` if CloudFront routes `/_auth/*` to Lambda |
 | `CALLBACK_USE_ORIGIN` | `false` | When `true`, OAuth callback redirects to the request's origin (from `X-Forwarded-Host` + `X-Forwarded-Proto`) instead of `FRONTEND_URL`. Enables one Lambda behind multiple CloudFront distributions. |
+| `AAGUID_ALLOWLIST` | (empty) | Comma-separated list of allowed AAGUIDs (UUID format, case-insensitive). Empty = allow all. Used by `POST /auth/validate-credential`. |
+| `REQUIRE_DEVICE_BOUND` | `false` | When `true`, rejects credentials with BE=true (backup-eligible / synced passkeys) at registration time. |
 | (none — uses headers) | — | `X-Forwarded-Host` header preferred over `Host` for callback `redirect_uri` |
 
 Example CloudFront config: CloudFront routes `/_auth/*` to Lambda origin, sets `X-Forwarded-Host: app.example.com`. Lambda env: `AUTH_PATH_PREFIX=/_auth`, `COOKIE_DOMAIN=.example.com`.

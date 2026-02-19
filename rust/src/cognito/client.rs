@@ -143,6 +143,8 @@ mod tests {
             cookie_domain: None,
             auth_path_prefix: "/auth".into(),
             callback_use_origin: false,
+            aaguid_allowlist: Vec::new(),
+            require_device_bound: false,
         }
     }
 

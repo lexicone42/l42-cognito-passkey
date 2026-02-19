@@ -33,6 +33,7 @@ const DEFAULT_CONFIG = /*#__PURE__*/ {
     refreshEndpoint: null,      // e.g., '/auth/refresh' - POST to refresh tokens
     logoutEndpoint: null,       // e.g., '/auth/logout' - POST to logout
     sessionEndpoint: null,      // e.g., '/auth/session' - POST tokens after direct login (passkey/password)
+    validateCredentialEndpoint: null, // e.g., '/auth/validate-credential' - pre-registration AAGUID/policy check
     oauthCallbackUrl: null,     // e.g., '/auth/callback' - Backend OAuth callback
     // Token Handler cache TTL in milliseconds (default: 30 seconds)
     handlerCacheTtl: 30000,
@@ -236,6 +237,50 @@ async function _persistHandlerSession(tokens) {
     }
 
     debugLog('token', 'persistHandlerSession:success');
+}
+
+/**
+ * Validate a credential against server-side policies before completing registration.
+ *
+ * When validateCredentialEndpoint is configured, this sends the attestation object
+ * and client data JSON to the server for AAGUID allowlist and device-bound policy
+ * checks. If the server rejects the credential (403), the error is thrown and
+ * registration is aborted before reaching Cognito.
+ *
+ * @param {Object} credentialResponse - The formatted credential from buildCredentialResponse()
+ * @returns {Promise<void>}
+ * @throws {Error} If the server rejects the credential (reason included in message)
+ * @private
+ */
+async function _validateCredential(credentialResponse) {
+    if (!config.validateCredentialEndpoint) {
+        return;
+    }
+
+    debugLog('passkey', 'validateCredential', { endpoint: config.validateCredentialEndpoint });
+
+    const response = await fetch(config.validateCredentialEndpoint, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-L42-CSRF': '1'
+        },
+        body: JSON.stringify({
+            attestation_object: credentialResponse.response.attestationObject,
+            client_data_json: credentialResponse.response.clientDataJSON
+        })
+    });
+
+    if (!response.ok) {
+        var body = {};
+        try { body = await response.json(); } catch (_) { /* ignore parse errors */ }
+        var reason = body.reason || 'Credential rejected by server';
+        debugLog('passkey', 'validateCredential:rejected', { status: response.status, reason: reason });
+        throw new Error('Credential validation failed: ' + reason);
+    }
+
+    debugLog('passkey', 'validateCredential:accepted');
 }
 
 /**
@@ -2388,7 +2433,10 @@ export async function registerPasskey(options = {}) {
         // Step 4: Format for Cognito
         const credentialResponse = buildCredentialResponse(credential);
 
-        // Step 5: Complete registration
+        // Step 5: Validate credential against server policies (if configured)
+        await _validateCredential(credentialResponse);
+
+        // Step 6: Complete registration
         await cognitoRequest('CompleteWebAuthnRegistration', {
             AccessToken: tokens.access_token,
             Credential: credentialResponse
@@ -2498,8 +2546,9 @@ export async function upgradeToPasskey(options = {}) {
             return false;
         }
 
-        // Complete registration with Cognito
+        // Validate + complete registration with Cognito
         var credentialResponse = buildCredentialResponse(credential);
+        await _validateCredential(credentialResponse);
         await cognitoRequest('CompleteWebAuthnRegistration', {
             AccessToken: tokens.access_token,
             Credential: credentialResponse

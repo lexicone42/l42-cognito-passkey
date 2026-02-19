@@ -80,6 +80,32 @@ pub struct SessionTokens {
     pub auth_method: Option<String>,
 }
 
+/// POST /auth/validate-credential request body.
+#[derive(Debug, Deserialize)]
+pub struct ValidateCredentialRequest {
+    pub attestation_object: String,
+    pub client_data_json: String,
+}
+
+/// POST /auth/validate-credential response body.
+#[derive(Debug, Serialize)]
+pub struct ValidateCredentialResponse {
+    pub allowed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceInfo>,
+}
+
+/// Parsed authenticator device information from attestation data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceInfo {
+    pub aaguid: String,
+    pub backup_eligible: bool,
+    pub backup_state: bool,
+    pub user_verified: bool,
+}
+
 /// Generic success response.
 #[derive(Debug, Serialize)]
 pub struct SuccessResponse {
@@ -188,6 +214,48 @@ mod tests {
         assert_eq!(res.id.as_deref(), Some("doc-1"));
         assert!(res.resource_type.is_none());
         assert!(res.owner.is_none());
+    }
+
+    #[test]
+    fn test_validate_credential_request() {
+        let json = r#"{
+            "attestation_object": "base64data",
+            "client_data_json": "base64json"
+        }"#;
+        let req: ValidateCredentialRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.attestation_object, "base64data");
+        assert_eq!(req.client_data_json, "base64json");
+    }
+
+    #[test]
+    fn test_validate_credential_response_allowed() {
+        let resp = ValidateCredentialResponse {
+            allowed: true,
+            reason: None,
+            device: Some(DeviceInfo {
+                aaguid: "f8a011f3-8c0a-4d15-8006-17111f9edc7d".into(),
+                backup_eligible: true,
+                backup_state: false,
+                user_verified: true,
+            }),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["allowed"], true);
+        assert!(json.get("reason").is_none());
+        assert_eq!(json["device"]["aaguid"], "f8a011f3-8c0a-4d15-8006-17111f9edc7d");
+    }
+
+    #[test]
+    fn test_validate_credential_response_rejected() {
+        let resp = ValidateCredentialResponse {
+            allowed: false,
+            reason: Some("AAGUID not in allowlist".into()),
+            device: None,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["allowed"], false);
+        assert_eq!(json["reason"], "AAGUID not in allowlist");
+        assert!(json.get("device").is_none());
     }
 
     #[test]

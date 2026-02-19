@@ -8,3 +8,4 @@ pub mod me;
 pub mod refresh;
 pub mod session;
 pub mod token;
+pub mod validate_credential;

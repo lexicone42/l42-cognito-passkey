@@ -20,6 +20,7 @@ sha2 = "0.10"
 base64 = "0.22"
 cookie = "0.18"
 cedar-policy = "4"
+ciborium = "0.2"
 aws-config = "1"
 aws-sdk-dynamodb = "1"
 tracing = "0.1"
@@ -37,3 +38,4 @@ wiremock = "0.6"
 rsa = { version = "0.9", features = ["pem"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
+ciborium = "0.2"

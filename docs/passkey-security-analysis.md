@@ -21,11 +21,11 @@
 
 | Gap | Risk | Status |
 |---|---|---|
-| **No attestation enforcement** | Can't distinguish YubiKey from synced iCloud passkey | **Partially mitigated (v0.19.0)**: `attestation: 'direct'` option available; server-side AAGUID validation pending |
+| **No attestation enforcement** | Can't distinguish YubiKey from synced iCloud passkey | **Mitigated (v0.19.0)**: `attestation: 'direct'` option + server-side AAGUID allowlist (`AAGUID_ALLOWLIST`) + device-bound policy (`REQUIRE_DEVICE_BOUND`) in Rust backend |
 | **No BE/BS flag inspection** | Can't policy-gate "device-bound credentials only" | **Mitigated (v0.19.0)**: BE/BS flags parsed and included in OCSF events + credential responses |
 | **Fallback authentication** | AiTM proxy strips passkey UI, shows password form | **Documented**: See `docs/cognito-setup.md` "Passkey-Only Deployment" section |
 | **Browser extension hijacking** | `webAuthenticationProxy` API allows interception | Cannot mitigate client-side; recommend extension allowlists |
-| **Synced passkey cloud compromise** | iCloud/Google account takeover → passkey access | **Partially mitigated**: AAGUID extraction + attestation option available; Cedar AAGUID allowlist pending |
+| **Synced passkey cloud compromise** | iCloud/Google account takeover → passkey access | **Mitigated**: `REQUIRE_DEVICE_BOUND=true` rejects synced passkeys at registration; AAGUID allowlist restricts to hardware keys |
 
 ## Attack Vectors
 
@@ -131,7 +131,7 @@ Download FIDO Alliance Metadata Service blob, map AAGUIDs to authenticator metad
 
 3. ~~**Add `attestation` option to `registerPasskey()`**~~ — **DONE (v0.19.0)**: `options.attestation` parameter on `registerPasskey()` and `upgradeToPasskey()`. Supports `'none'` (default), `'indirect'`, `'direct'`, `'enterprise'`. Attestation level included in OCSF metadata.
 
-4. **AAGUID allowlist in Cedar** — Cedar policy to enforce device-type restrictions at registration time. Requires the Rust backend to extract AAGUID from the attestation object server-side and pass it as a Cedar context attribute.
+4. ~~**AAGUID allowlist + device-bound policy**~~ — **DONE (v0.19.0)**: `POST /auth/validate-credential` in Rust backend parses CBOR attestation object, extracts AAGUID and BE/BS flags, enforces `AAGUID_ALLOWLIST` (comma-separated UUIDs) and `REQUIRE_DEVICE_BOUND` (rejects syncable passkeys) policies. Client-side `_validateCredential()` gate in `registerPasskey()` and `upgradeToPasskey()` calls the endpoint before `CompleteWebAuthnRegistration`. Configure via `validateCredentialEndpoint` in `auth.js`. OCSF audit trail for all validation attempts. Note: Tier 1 only — AAGUID extracted but not cryptographically verified; use `attestation: 'direct'` for defense-in-depth.
 
 5. **FIDO MDS integration** — Full meal. Only needed for enterprise/high-assurance deployments. Post-1.0 work.
 
