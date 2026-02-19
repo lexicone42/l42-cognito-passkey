@@ -5,7 +5,7 @@ Guide for Claude instances working on the Rust Token Handler backend.
 ## Quick Reference
 
 ```bash
-cargo test            # 108 tests (81 unit + 27 integration)
+cargo test            # 113 tests (81 unit + 32 integration)
 cargo clippy -- -D warnings   # Must pass clean
 cargo run             # Local dev server on :3001 (needs .env)
 ```
@@ -119,9 +119,12 @@ Three env vars handle CDN deployment:
 |---------|---------|---------|
 | `COOKIE_DOMAIN` | (none) | `Domain=` on session cookies for cross-subdomain SSO (e.g. `.example.com`) |
 | `AUTH_PATH_PREFIX` | `/auth` | Route prefix for all auth endpoints. Set to `/_auth` if CloudFront routes `/_auth/*` to Lambda |
+| `CALLBACK_USE_ORIGIN` | `false` | When `true`, OAuth callback redirects to the request's origin (from `X-Forwarded-Host` + `X-Forwarded-Proto`) instead of `FRONTEND_URL`. Enables one Lambda behind multiple CloudFront distributions. |
 | (none — uses headers) | — | `X-Forwarded-Host` header preferred over `Host` for callback `redirect_uri` |
 
 Example CloudFront config: CloudFront routes `/_auth/*` to Lambda origin, sets `X-Forwarded-Host: app.example.com`. Lambda env: `AUTH_PATH_PREFIX=/_auth`, `COOKIE_DOMAIN=.example.com`.
+
+For multi-origin deployments (one Lambda behind multiple CloudFront distributions), add `CALLBACK_USE_ORIGIN=true`. The callback handler will redirect to whichever origin the request came from instead of the static `FRONTEND_URL`. Each origin must be registered as a callback URL in the Cognito app client.
 
 Auth routes are mounted via `Router::nest(&auth_prefix, auth_routes)` — `/health` always stays at the root.
 

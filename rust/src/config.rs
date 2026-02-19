@@ -21,6 +21,7 @@ pub struct Config {
     pub session_https_only: bool,
     pub cookie_domain: Option<String>,
     pub auth_path_prefix: String,
+    pub callback_use_origin: bool,
 }
 
 impl Config {
@@ -62,6 +63,9 @@ impl Config {
             auth_path_prefix: normalize_path_prefix(
                 &env::var("AUTH_PATH_PREFIX").unwrap_or_else(|_| "/auth".into()),
             ),
+            callback_use_origin: env::var("CALLBACK_USE_ORIGIN")
+                .map(|v| v == "true" || v == "1" || v == "True")
+                .unwrap_or(false),
         })
     }
 
@@ -110,6 +114,7 @@ impl Config {
             session_https_only: false,
             cookie_domain: None,
             auth_path_prefix: "/auth".into(),
+            callback_use_origin: false,
         }
     }
 }

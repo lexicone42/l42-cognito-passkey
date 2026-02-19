@@ -372,10 +372,47 @@ Key features:
 
 See `docs/cedar-integration.md` for complete documentation.
 
+## WebAuthn Authenticator Metadata (v0.19.0)
+
+Registration and login responses now include `authenticatorMetadata` with parsed flags from `authenticatorData`:
+
+```javascript
+// After registerPasskey() or loginWithPasskey(), the credential response includes:
+// response.authenticatorMetadata = {
+//     userPresent: true,
+//     userVerified: true,
+//     backupEligible: true,   // BE — credential CAN be synced
+//     backupState: true,      // BS — credential IS synced
+//     attestedCredentialData: true,
+//     extensionData: false,
+//     signCount: 0,
+//     aaguid: 'f8a011f3-8c0a-4d15-8006-17111f9edc7d'  // only with AT flag
+// }
+```
+
+### Attestation Option
+
+```javascript
+// Default: no attestation (recommended for most deployments)
+await registerPasskey();
+
+// High-assurance: request manufacturer attestation
+await registerPasskey({ attestation: 'direct' });
+
+// Enterprise: managed device attestation
+await registerPasskey({ attestation: 'enterprise' });
+```
+
+The attestation level is included in OCSF security events. AAGUID and BE/BS flags flow to the backend via credential responses for policy decisions.
+
+See `docs/passkey-security-analysis.md` for the full security analysis.
+
 ## Future Plans
 
 - **Semgrep Rules** - Security scanning (post-1.0)
 - **Persistent Entity Store** - DynamoDB/Redis entity provider for Cedar (post-1.0)
+- **AAGUID Allowlist in Cedar** - Server-side device-type restrictions at registration time
+- **FIDO MDS Integration** - Map AAGUIDs to authenticator metadata from FIDO Metadata Service
 
 ## Submitting Feedback
 

@@ -38,15 +38,33 @@ pub async fn oauth_callback(
     session: SessionHandle,
     Query(params): Query<CallbackParams>,
 ) -> Redirect {
-    let frontend = &state.config.frontend_url;
+    // When callback_use_origin is true, derive the redirect target from the
+    // request's origin (X-Forwarded-Host + X-Forwarded-Proto) instead of the
+    // static frontend_url. This lets a single Lambda serve multiple CloudFront
+    // distributions that redirect back to the correct origin after OAuth.
+    let frontend: std::borrow::Cow<'_, str> = if state.config.callback_use_origin {
+        let host = extract_host(&headers);
+        let scheme = headers
+            .get("x-forwarded-proto")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(if state.config.session_https_only {
+                "https"
+            } else {
+                "http"
+            });
+        format!("{}://{}", scheme, host).into()
+    } else {
+        std::borrow::Cow::Borrowed(&state.config.frontend_url)
+    };
 
     // Build redirect_uri that must match the one used in the authorization request.
-    // Behind CDN/reverse proxy, Host header may be the internal API Gateway hostname,
-    // not the public domain. Use frontend_url when available (it matches Cognito config).
-    let self_callback_url = if !state.config.frontend_url.is_empty() {
+    // When callback_use_origin is true, the origin is already derived from request
+    // headers above, so self_callback_url follows suit. Otherwise, prefer frontend_url
+    // (it matches Cognito config), falling back to request headers.
+    let self_callback_url = if state.config.callback_use_origin || !state.config.frontend_url.is_empty() {
         format!(
             "{}{}/callback",
-            state.config.frontend_url, state.config.auth_path_prefix
+            frontend, state.config.auth_path_prefix
         )
     } else {
         let host = extract_host(&headers);

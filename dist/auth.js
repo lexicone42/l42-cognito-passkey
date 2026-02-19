@@ -1441,6 +1441,54 @@ export async function loginWithPassword(email, password) {
  */
 
 /**
+ * Format a 16-byte AAGUID as a UUID string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
+ * @param {Uint8Array} bytes - 16 bytes of AAGUID
+ * @returns {string} UUID-formatted string
+ * @private
+ */
+function formatAaguid(bytes) {
+    const hex = Array.from(bytes, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20, 32);
+}
+
+/**
+ * Parse authenticatorData from a WebAuthn response to extract flags and optional AAGUID.
+ *
+ * AuthenticatorData layout (per W3C WebAuthn spec §6.1):
+ *   Bytes 0-31:  rpIdHash (SHA-256)
+ *   Byte 32:     flags (UP=0x01, UV=0x04, BE=0x08, BS=0x10, AT=0x40, ED=0x80)
+ *   Bytes 33-36: signCount (big-endian uint32)
+ *   Bytes 37+:   (optional) attestedCredentialData: AAGUID(16) + credIdLen(2) + credId + pubKey
+ *
+ * @param {ArrayBuffer} authData - Raw authenticatorData
+ * @returns {Object|null} Parsed flags, signCount, and optional AAGUID; null if too short
+ * @private
+ */
+function parseAuthenticatorData(authData) {
+    var bytes = new Uint8Array(authData);
+    if (bytes.length < 37) return null;
+
+    var flags = bytes[32];
+    var result = {
+        userPresent: !!(flags & 0x01),
+        userVerified: !!(flags & 0x04),
+        backupEligible: !!(flags & 0x08),
+        backupState: !!(flags & 0x10),
+        attestedCredentialData: !!(flags & 0x40),
+        extensionData: !!(flags & 0x80),
+        signCount: new DataView(authData).getUint32(33, false)
+    };
+
+    // Extract AAGUID if attested credential data present (AT flag) and enough bytes
+    if (result.attestedCredentialData && bytes.length >= 55) {
+        var aaguidBytes = bytes.slice(37, 53);
+        result.aaguid = formatAaguid(aaguidBytes);
+    }
+
+    return result;
+}
+
+/**
  * Build a WebAuthn assertion response for Cognito from a navigator.credentials.get() result.
  * @param {PublicKeyCredential} credential - The credential from navigator.credentials.get()
  * @returns {Object} Assertion response formatted for Cognito
@@ -1464,6 +1512,12 @@ function buildAssertionResponse(credential) {
     }
     if (credential.authenticatorAttachment) {
         response.authenticatorAttachment = credential.authenticatorAttachment;
+    }
+
+    // Parse BE/BS flags and sign count from raw authenticatorData
+    var metadata = parseAuthenticatorData(credential.response.authenticatorData);
+    if (metadata) {
+        response.authenticatorMetadata = metadata;
     }
 
     return response;
@@ -1500,7 +1554,14 @@ function buildCredentialResponse(credential) {
         response.response.publicKeyAlgorithm = credential.response.getPublicKeyAlgorithm();
     }
     if (credential.response.getAuthenticatorData) {
-        response.response.authenticatorData = arrayBufferToB64(credential.response.getAuthenticatorData());
+        var rawAuthData = credential.response.getAuthenticatorData();
+        response.response.authenticatorData = arrayBufferToB64(rawAuthData);
+
+        // Parse BE/BS flags, AAGUID, and sign count from raw authenticatorData
+        var metadata = parseAuthenticatorData(rawAuthData);
+        if (metadata) {
+            response.authenticatorMetadata = metadata;
+        }
     }
 
     return response;
@@ -1582,6 +1643,12 @@ export async function loginWithPasskey(email) {
             await _persistHandlerSession(tokens);
             notifyLogin(tokens, 'passkey');
 
+            var loginMeta = {};
+            if (assertionResponse.authenticatorMetadata) {
+                var lm = assertionResponse.authenticatorMetadata;
+                loginMeta.backup_eligible = lm.backupEligible;
+                loginMeta.backup_state = lm.backupState;
+            }
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,
                 activity_id: OCSF_AUTH_ACTIVITY.LOGON,
@@ -1591,7 +1658,8 @@ export async function loginWithPasskey(email) {
                 user_email: email,
                 auth_protocol_id: OCSF_AUTH_PROTOCOL.FIDO2,
                 auth_protocol: 'WebAuthn/FIDO2',
-                message: 'User logged in with passkey'
+                message: 'User logged in with passkey',
+                metadata: loginMeta
             });
 
             debugLog('auth', 'loginWithPasskey:success', { email });
@@ -2288,7 +2356,7 @@ export async function registerPasskey(options = {}) {
             },
             pubKeyCredParams: credOpts.pubKeyCredParams,
             timeout: credOpts.timeout || 60000,
-            attestation: credOpts.attestation || 'none',
+            attestation: options.attestation || credOpts.attestation || 'none',
             authenticatorSelection: {
                 // Server options as base, then caller overrides, then defaults
                 ...(credOpts.authenticatorSelection || {}),
@@ -2326,6 +2394,14 @@ export async function registerPasskey(options = {}) {
             Credential: credentialResponse
         });
 
+        var regMetadata = { credential_id: credential.id };
+        if (credentialResponse.authenticatorMetadata) {
+            var am = credentialResponse.authenticatorMetadata;
+            regMetadata.backup_eligible = am.backupEligible;
+            regMetadata.backup_state = am.backupState;
+            if (am.aaguid) regMetadata.aaguid = am.aaguid;
+            regMetadata.attestation = publicKeyOptions.attestation;
+        }
         logSecurityEvent({
             class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
             activity_id: OCSF_ACCOUNT_ACTIVITY.CREATE,
@@ -2334,7 +2410,7 @@ export async function registerPasskey(options = {}) {
             severity_id: OCSF_SEVERITY.INFORMATIONAL,
             user_email: email,
             message: 'Passkey registered successfully',
-            metadata: { credential_id: credential.id }
+            metadata: regMetadata
         });
         debugLog('passkey', 'registerPasskey:success');
     } catch (e) {
@@ -2392,7 +2468,7 @@ export async function upgradeToPasskey(options = {}) {
             },
             pubKeyCredParams: credOpts.pubKeyCredParams,
             timeout: credOpts.timeout || 60000,
-            attestation: credOpts.attestation || 'none',
+            attestation: options.attestation || credOpts.attestation || 'none',
             authenticatorSelection: {
                 residentKey: 'required',
                 userVerification: 'preferred'
@@ -2429,6 +2505,14 @@ export async function upgradeToPasskey(options = {}) {
             Credential: credentialResponse
         });
 
+        var upgradeMeta = {};
+        if (credentialResponse.authenticatorMetadata) {
+            var um = credentialResponse.authenticatorMetadata;
+            upgradeMeta.backup_eligible = um.backupEligible;
+            upgradeMeta.backup_state = um.backupState;
+            if (um.aaguid) upgradeMeta.aaguid = um.aaguid;
+            upgradeMeta.attestation = publicKeyOptions.attestation;
+        }
         logSecurityEvent({
             class_uid: OCSF_CLASS.ACCOUNT_CHANGE,
             activity_id: OCSF_ACCOUNT_ACTIVITY.CREATE,
@@ -2436,7 +2520,8 @@ export async function upgradeToPasskey(options = {}) {
             status_id: OCSF_STATUS.SUCCESS,
             severity_id: OCSF_SEVERITY.INFORMATIONAL,
             user_email: getUserEmail(),
-            message: 'Passkey upgrade completed via conditional create'
+            message: 'Passkey upgrade completed via conditional create',
+            metadata: upgradeMeta
         });
 
         debugLog('passkey', 'upgradeToPasskey:success');

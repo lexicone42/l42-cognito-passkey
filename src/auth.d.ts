@@ -127,6 +127,9 @@ export interface PasskeyRegistrationOptions {
   residentKey?: 'required' | 'preferred' | 'discouraged';
   /** User verification requirement (default: 'preferred') */
   userVerification?: 'required' | 'preferred' | 'discouraged';
+  /** Attestation conveyance preference (default: 'none').
+   *  Use 'direct' for high-assurance deployments that need AAGUID/attestation verification. */
+  attestation?: 'none' | 'indirect' | 'direct' | 'enterprise';
 }
 
 /**
@@ -135,6 +138,8 @@ export interface PasskeyRegistrationOptions {
 export interface UpgradeToPasskeyOptions {
   /** AbortController signal for cancellation */
   signal?: AbortSignal;
+  /** Attestation conveyance preference (default: 'none') */
+  attestation?: 'none' | 'indirect' | 'direct' | 'enterprise';
 }
 
 /**
@@ -171,6 +176,29 @@ export interface PasskeyCapabilities {
   isWebView: boolean;
   /** Detection method used: 'getClientCapabilities' or 'fallback' */
   source: 'getClientCapabilities' | 'fallback';
+}
+
+/**
+ * Parsed authenticator metadata from WebAuthn authenticatorData.
+ * Attached to credential responses as `authenticatorMetadata`.
+ */
+export interface AuthenticatorMetadata {
+  /** User Present flag */
+  userPresent: boolean;
+  /** User Verified flag */
+  userVerified: boolean;
+  /** Backup Eligible — credential CAN be synced to another device */
+  backupEligible: boolean;
+  /** Backup State — credential IS currently synced/multi-device */
+  backupState: boolean;
+  /** Attested Credential Data present */
+  attestedCredentialData: boolean;
+  /** Extension Data present */
+  extensionData: boolean;
+  /** Signature counter (anti-replay) */
+  signCount: number;
+  /** AAGUID — authenticator make/model identifier (present only with attestation) */
+  aaguid?: string;
 }
 
 /**

@@ -706,6 +706,128 @@ async fn test_cookie_no_domain_by_default() {
     );
 }
 
+// ───── Callback Multi-Origin Redirect ─────
+
+#[tokio::test]
+async fn test_callback_use_origin_redirects_to_request_origin() {
+    let mut config = Config::test_default();
+    config.callback_use_origin = true;
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    // Missing code → redirect to login with error, using request origin
+    let req = Request::builder()
+        .uri("/auth/callback")
+        .header("x-forwarded-host", "app.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        location.starts_with("https://app.example.com/login"),
+        "should redirect to request origin, got: {location}"
+    );
+}
+
+#[tokio::test]
+async fn test_callback_use_origin_different_hosts() {
+    let mut config = Config::test_default();
+    config.callback_use_origin = true;
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    // First request from staging
+    let req1 = Request::builder()
+        .uri("/auth/callback")
+        .header("x-forwarded-host", "staging.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+    let resp1 = app.clone().oneshot(req1).await.unwrap();
+    let loc1 = resp1.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        loc1.starts_with("https://staging.example.com/"),
+        "staging host: {loc1}"
+    );
+
+    // Second request from production
+    let req2 = Request::builder()
+        .uri("/auth/callback")
+        .header("x-forwarded-host", "app.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+    let resp2 = app.oneshot(req2).await.unwrap();
+    let loc2 = resp2.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        loc2.starts_with("https://app.example.com/"),
+        "prod host: {loc2}"
+    );
+}
+
+#[tokio::test]
+async fn test_callback_default_uses_frontend_url() {
+    // Default: callback_use_origin = false
+    let (app, _state) = build_test_app(false);
+
+    let req = Request::builder()
+        .uri("/auth/callback")
+        .header("x-forwarded-host", "app.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        location.starts_with("http://localhost:3000/"),
+        "should use frontend_url, got: {location}"
+    );
+}
+
+#[tokio::test]
+async fn test_callback_use_origin_with_oauth_error() {
+    let mut config = Config::test_default();
+    config.callback_use_origin = true;
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    let req = Request::builder()
+        .uri("/auth/callback?error=access_denied&error_description=User+cancelled")
+        .header("x-forwarded-host", "app.example.com")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        location.starts_with("https://app.example.com/login?error="),
+        "error redirect should use request origin: {location}"
+    );
+}
+
+#[tokio::test]
+async fn test_callback_use_origin_scheme_fallback() {
+    let mut config = Config::test_default();
+    config.callback_use_origin = true;
+    // No x-forwarded-proto → fallback to http (session_https_only is false)
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    let req = Request::builder()
+        .uri("/auth/callback")
+        .header("host", "app.example.com")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        location.starts_with("http://app.example.com/"),
+        "should fall back to http scheme: {location}"
+    );
+}
+
 // ───── Custom Auth Path Prefix ─────
 
 #[tokio::test]

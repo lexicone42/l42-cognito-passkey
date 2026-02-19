@@ -142,6 +142,7 @@ mod tests {
             session_https_only: false,
             cookie_domain: None,
             auth_path_prefix: "/auth".into(),
+            callback_use_origin: false,
         }
     }
 
