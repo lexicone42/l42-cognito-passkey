@@ -54,7 +54,7 @@ When you run `pnpm release:patch` (or minor/major), npm's version lifecycle runs
 pnpm test && node scripts/check-dist-sync.js && pnpm validate-docs
 ```
 
-All 658+ tests must pass. `dist/auth.js` must match `src/auth.js`. Documentation version and test count references must be current.
+All 696+ tests must pass. `dist/auth.js` must match `src/auth.js`. Documentation version and test count references must be current.
 
 ### 2. `version` — Sync version across all files
 

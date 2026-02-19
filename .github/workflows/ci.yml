@@ -34,36 +34,28 @@ jobs:
       - name: Run tests
         run: pnpm test
 
-      - name: Check version consistency
-        run: pnpm test -- plugin/templates/version-consistency.test.js
-
       - name: Validate documentation
         if: matrix.node-version == 20
         run: pnpm validate-docs
 
-  test-fastapi:
+  test-rust:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.11', '3.12', '3.13']
 
     defaults:
       run:
-        working-directory: examples/backends/fastapi
+        working-directory: rust
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions/setup-python@v5
+      - uses: Swatinem/rust-cache@v2
         with:
-          python-version: ${{ matrix.python-version }}
+          workspaces: rust
 
-      - name: Install dependencies
-        run: uv sync --all-extras
+      - name: Clippy
+        run: cargo clippy -- -D warnings
 
       - name: Run tests
-        run: uv run pytest -v
+        run: cargo test

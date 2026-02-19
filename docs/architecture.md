@@ -2,7 +2,7 @@
 
 A developer-friendly guide to how L42 Cognito Passkey works internally.
 
-**Version**: 0.18.0 | **Tests**: 658 | **License**: Apache-2.0
+**Version**: 0.18.0 | **Tests**: 696 | **License**: Apache-2.0
 
 ## What This Library Does
 
@@ -430,7 +430,7 @@ dist/
 
 plugin/templates/
 ├── rbac-roles.js        ← Role definitions and permission helpers
-├── *.test.js            ← 17 test files (658 tests)
+├── *.test.js            ← 18 test files (696 tests)
 └── *.html               ← Integration template patterns
 
 examples/backends/express/
@@ -492,7 +492,7 @@ configure({
 
 ## Testing
 
-The library has 658 tests across 17 files, organized by feature:
+The library has 696 tests across 18 files, organized by feature:
 
 | Test File | Tests | What It Covers |
 |-----------|-------|----------------|
