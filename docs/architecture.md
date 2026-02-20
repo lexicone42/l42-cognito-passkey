@@ -2,7 +2,7 @@
 
 A developer-friendly guide to how L42 Cognito Passkey works internally.
 
-**Version**: 0.18.0 | **Tests**: 733 vitest + 149 cargo | **License**: Apache-2.0
+**Version**: 0.19.0 | **Tests**: 733 vitest + 149 cargo | **License**: Apache-2.0
 
 ## What This Library Does
 
@@ -506,7 +506,7 @@ The library has 733 vitest tests across 19 files (plus 149 Rust backend tests), 
 | `static-site-pattern.test.js` | 27 | Static site integration |
 | `auto-refresh.test.js` | 35 | Background token refresh |
 | `debug-diagnostics.test.js` | 34 | Debug logging |
-| `auth-properties.test.js` | 41 | Property-based tests (fast-check) |
+| `auth-properties.test.js` | 53 | Property-based tests (fast-check) |
 | `conditional-ui.test.js` | 32 | Passkey autofill |
 | `token-validation.test.js` | 31 | Token claim validation |
 | `conditional-create.test.js` | 23 | Passkey upgrade |
@@ -515,7 +515,7 @@ The library has 733 vitest tests across 19 files (plus 149 Rust backend tests), 
 | `version-consistency.test.js` | 11 | Version sync across files |
 | `handler-token-store.test.js` | 56 | Handler mode token store |
 | `authenticator-metadata.test.js` | 38 | WebAuthn authenticator metadata parsing |
-| `validate-credential.test.js` | 13 | Pre-registration credential validation |
+| `validate-credential.test.js` | 22 | Pre-registration credential validation |
 
 Tests use Vitest with jsdom environment. Property-based tests use fast-check for invariant verification (e.g., "admin is always permitted", "backoff delay never exceeds max").
 

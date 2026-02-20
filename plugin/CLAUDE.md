@@ -3,7 +3,7 @@
 This plugin provides quick setup for AWS Cognito authentication with WebAuthn passkey support.
 
 **Plugin Name**: `l42-cognito-passkey`
-**Current Version**: 0.18.0
+**Current Version**: 0.19.0
 **Tests**: 733 vitest + 149 cargo tests
 
 ## Overview
@@ -196,7 +196,7 @@ Tokens are stored server-side in HttpOnly session cookies via the Token Handler 
 Check library version:
 ```javascript
 import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.18.0"
+console.log(VERSION); // "0.19.0"
 ```
 
 ## Site Architecture Patterns
@@ -305,14 +305,14 @@ Each template has an accompanying test file:
 - `plugin/templates/version-consistency.test.js`
 - `plugin/templates/token-storage.test.js` (15 token storage tests)
 - `plugin/templates/auto-refresh.test.js` (35 auto-refresh, fetchWithAuth, CSRF tests)
-- `plugin/templates/auth-properties.test.js` (41 auth property-based tests)
+- `plugin/templates/auth-properties.test.js` (53 auth property-based tests)
 - `plugin/templates/debug-diagnostics.test.js` (34 debug logging & diagnostics tests)
 - `plugin/templates/conditional-ui.test.js` (32 conditional UI / passkey autofill tests)
 - `plugin/templates/conditional-create.test.js` (23 conditional create / passkey upgrade tests)
 - `plugin/templates/token-validation.test.js` (31 token validation on load tests)
 - `plugin/templates/webauthn-capabilities.test.js` (22 WebAuthn Level 3 capabilities tests)
 - `plugin/templates/login-rate-limiting.test.js` (40 login rate limiting tests)
-- `plugin/templates/cedar-authorization.test.js` (132 Cedar policy authorization tests)
+- `plugin/templates/cedar-authorization.test.js` (135 Cedar policy authorization tests)
 
 **Total: 733 vitest tests** (+ 149 Rust backend tests via `cargo test`)
 
