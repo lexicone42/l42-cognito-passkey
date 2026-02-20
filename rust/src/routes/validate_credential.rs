@@ -7,6 +7,7 @@ use axum::extract::State;
 use axum::Json;
 use std::sync::Arc;
 
+use crate::cognito::jwt::is_token_expired;
 use crate::credential;
 use crate::error::AppError;
 use crate::ocsf;
@@ -33,7 +34,28 @@ pub async fn validate_credential(
         .ok_or(AppError::NotAuthenticated)?;
     drop(data);
 
+    if is_token_expired(&tokens.id_token) {
+        return Err(AppError::TokenExpired);
+    }
+
     let user_email = ocsf::email_from_session(Some(&tokens));
+
+    // Validate clientDataJSON origin
+    let expected_origins = [state.config.frontend_url.trim_end_matches('/').to_string()];
+    let expected_refs: Vec<&str> = expected_origins.iter().map(|s| s.as_str()).collect();
+    if let Err(e) = credential::validate_client_data_origin(&body.client_data_json, &expected_refs) {
+        ocsf::authentication_event(
+            ocsf::ACTIVITY_OTHER,
+            "Other",
+            ocsf::STATUS_FAILURE,
+            ocsf::SEVERITY_HIGH,
+            user_email.as_deref(),
+            ocsf::AUTH_PROTOCOL_FIDO2,
+            "FIDO2/Passkey",
+            &format!("Credential validation failed: {e}"),
+        );
+        return Err(AppError::BadRequest(e));
+    }
 
     // Parse attestation object
     let device = match credential::parse_attestation_object(&body.attestation_object) {

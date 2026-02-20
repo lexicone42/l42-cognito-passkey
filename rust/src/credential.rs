@@ -6,6 +6,7 @@
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use ciborium::Value as CborValue;
+use subtle::ConstantTimeEq;
 
 use crate::types::DeviceInfo;
 
@@ -109,12 +110,27 @@ pub fn format_aaguid(bytes: &[u8]) -> String {
 }
 
 /// Check if the AAGUID is in the allowlist. Empty allowlist permits all.
+///
+/// Uses constant-time comparison to prevent timing side-channels that could
+/// leak which AAGUIDs are in the allowlist.
 pub fn check_aaguid_allowed(aaguid: &str, allowlist: &[String]) -> Result<(), String> {
     if allowlist.is_empty() {
         return Ok(());
     }
     let lower = aaguid.to_lowercase();
-    if allowlist.iter().any(|a| a == &lower) {
+    let lower_bytes = lower.as_bytes();
+
+    // Always iterate all entries — no short-circuit.
+    let mut found = 0u8;
+    for allowed in allowlist {
+        let allowed_bytes = allowed.as_bytes();
+        if lower_bytes.len() == allowed_bytes.len() {
+            // ct_eq returns Choice; bitwise-OR accumulates matches
+            found |= lower_bytes.ct_eq(allowed_bytes).unwrap_u8();
+        }
+    }
+
+    if found != 0 {
         Ok(())
     } else {
         Err(format!(
@@ -122,6 +138,45 @@ pub fn check_aaguid_allowed(aaguid: &str, allowlist: &[String]) -> Result<(), St
             allowlist.len()
         ))
     }
+}
+
+/// Parse base64-encoded clientDataJSON and validate the origin.
+///
+/// clientDataJSON (W3C WebAuthn §5.8.1) is a JSON object with:
+/// ```json
+/// { "type": "webauthn.create", "challenge": "...", "origin": "https://example.com" }
+/// ```
+///
+/// The `expected_origins` list contains allowed origins (e.g., FRONTEND_URL,
+/// or all CDN origins in multi-origin mode). An empty list skips origin validation.
+pub fn validate_client_data_origin(
+    b64: &str,
+    expected_origins: &[&str],
+) -> Result<String, String> {
+    let bytes = STANDARD
+        .decode(b64)
+        .or_else(|_| URL_SAFE_NO_PAD.decode(b64))
+        .map_err(|e| format!("Invalid clientDataJSON base64: {e}"))?;
+
+    let json_str =
+        std::str::from_utf8(&bytes).map_err(|e| format!("clientDataJSON not UTF-8: {e}"))?;
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(json_str).map_err(|e| format!("clientDataJSON not valid JSON: {e}"))?;
+
+    let origin = parsed
+        .get("origin")
+        .and_then(|v| v.as_str())
+        .ok_or("clientDataJSON missing 'origin' field")?;
+
+    if !expected_origins.is_empty() && !expected_origins.contains(&origin) {
+        return Err(format!(
+            "clientDataJSON origin mismatch: got '{}', expected one of {:?}",
+            origin, expected_origins
+        ));
+    }
+
+    Ok(origin.to_string())
 }
 
 /// Check if the credential satisfies the device-bound requirement.
@@ -327,5 +382,83 @@ mod tests {
         let result = check_device_bound(&device, true);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("backup-eligible"));
+    }
+
+    /// Helper: create base64-encoded clientDataJSON
+    fn encode_client_data(json: &str) -> String {
+        STANDARD.encode(json.as_bytes())
+    }
+
+    #[test]
+    fn test_validate_origin_matching() {
+        let b64 = encode_client_data(
+            r#"{"type":"webauthn.create","challenge":"abc","origin":"https://example.com"}"#,
+        );
+        let result = validate_client_data_origin(&b64, &["https://example.com"]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "https://example.com");
+    }
+
+    #[test]
+    fn test_validate_origin_mismatch() {
+        let b64 = encode_client_data(
+            r#"{"type":"webauthn.create","challenge":"abc","origin":"https://evil.com"}"#,
+        );
+        let result = validate_client_data_origin(&b64, &["https://example.com"]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("origin mismatch"));
+    }
+
+    #[test]
+    fn test_validate_origin_empty_allowlist_skips() {
+        let b64 = encode_client_data(
+            r#"{"type":"webauthn.create","challenge":"abc","origin":"https://anything.com"}"#,
+        );
+        let result = validate_client_data_origin(&b64, &[]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "https://anything.com");
+    }
+
+    #[test]
+    fn test_validate_origin_multiple_allowed() {
+        let b64 = encode_client_data(
+            r#"{"type":"webauthn.create","challenge":"abc","origin":"https://app2.example.com"}"#,
+        );
+        let result = validate_client_data_origin(
+            &b64,
+            &["https://app1.example.com", "https://app2.example.com"],
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_origin_missing_field() {
+        let b64 = encode_client_data(r#"{"type":"webauthn.create","challenge":"abc"}"#);
+        let result = validate_client_data_origin(&b64, &["https://example.com"]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing 'origin'"));
+    }
+
+    #[test]
+    fn test_validate_origin_invalid_base64() {
+        let result = validate_client_data_origin("not-valid!!!", &["https://example.com"]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("base64"));
+    }
+
+    #[test]
+    fn test_validate_origin_invalid_json() {
+        let b64 = STANDARD.encode(b"not json at all");
+        let result = validate_client_data_origin(&b64, &["https://example.com"]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not valid JSON"));
+    }
+
+    #[test]
+    fn test_validate_origin_url_safe_base64() {
+        let json = r#"{"type":"webauthn.create","challenge":"abc","origin":"https://example.com"}"#;
+        let b64 = URL_SAFE_NO_PAD.encode(json.as_bytes());
+        let result = validate_client_data_origin(&b64, &["https://example.com"]);
+        assert!(result.is_ok());
     }
 }

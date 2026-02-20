@@ -2,7 +2,7 @@
 
 A developer-friendly guide to how L42 Cognito Passkey works internally.
 
-**Version**: 0.18.0 | **Tests**: 696 | **License**: Apache-2.0
+**Version**: 0.18.0 | **Tests**: 733 vitest + 149 cargo | **License**: Apache-2.0
 
 ## What This Library Does
 
@@ -25,9 +25,9 @@ It handles:
 │  │  Login    │  │    Token     │  │    Event     │              │
 │  │  Methods  │  │   Storage    │  │   System     │              │
 │  │          │  │              │  │              │              │
-│  │ password  │  │ localStorage │  │ onLogin()    │              │
-│  │ passkey   │  │ memory       │  │ onLogout()   │              │
-│  │ hosted UI │  │ handler      │  │ onAuthState  │              │
+│  │ password  │  │ handler mode │  │ onLogin()    │              │
+│  │ passkey   │  │ (HttpOnly    │  │ onLogout()   │              │
+│  │ hosted UI │  │  cookies)    │  │ onAuthState  │              │
 │  │ cond. UI  │  │              │  │ onExpired()  │              │
 │  └─────┬─────┘  └──────┬───────┘  └──────────────┘              │
 │        │               │                                        │
@@ -42,7 +42,7 @@ It handles:
 └──────────────────────────────────────────────────────────│───────┘
                                                            │
                    ┌───────────────────────────────────────▼───┐
-                   │  Your Backend (Express example)           │
+                   │  Your Backend (Rust or Express)            │
                    │                                           │
                    │  /auth/token     → session token store    │
                    │  /auth/refresh   → Cognito token refresh  │
@@ -414,7 +414,7 @@ These are documented, tested, and by-design:
 
 1. **`resource.owner` is caller-controlled (S1)**: The client sends `resource.owner` in the request body. A malicious client can lie about ownership. The fix (post-1.0) is the `EntityProvider` interface that loads ownership from a trusted database.
 
-2. **`validateTokenClaims()` skips missing fields (S2)**: If a JWT lacks an `iss` claim, the issuer check is skipped (not failed). This is intentional for backwards compatibility but means tokens from misconfigured pools may pass validation.
+2. **`validateTokenClaims()` requires `aud`/`client_id` and `exp` (S2, fixed)**: As of v0.18.0, missing `aud`/`client_id` or `exp` claims cause validation to fail. Tokens from misconfigured pools are now rejected.
 
 3. **Rate limiting is client-side only (S3)**: The `checkLoginRateLimit()` delays are enforced in JavaScript. A determined attacker can bypass them. Cognito's server-side lockout is the real protection.
 
@@ -430,24 +430,26 @@ dist/
 
 plugin/templates/
 ├── rbac-roles.js        ← Role definitions and permission helpers
-├── *.test.js            ← 18 test files (696 tests)
+├── *.test.js            ← 19 test files (733 tests)
 └── *.html               ← Integration template patterns
 
-examples/backends/express/
-├── server.js            ← Token Handler Express backend
-├── cedar-engine.js      ← Cedar WASM wrapper (~300 lines)
+rust/                            ← Rust Token Handler backend (recommended)
+├── src/
+│   ├── main.rs                  ← Dual-mode: Lambda or local Axum server
+│   ├── lib.rs                   ← create_app(), AppState
+│   ├── cedar/engine.rs          ← Native Cedar evaluation
+│   ├── cognito/jwt.rs           ← JWT decode, JWKS verification
+│   ├── session/middleware.rs    ← HMAC-SHA256 session cookies
+│   └── routes/*.rs              ← 9 HTTP handlers
+├── cedar/                       ← Cedar schema + 9 policy files
+└── tests/test_routes.rs         ← Integration tests
+
+examples/backends/express/       ← Express Token Handler backend (alternative)
+├── server.js                    ← Token Handler Express backend
+├── cedar-engine.js              ← Cedar WASM wrapper (~300 lines)
 └── cedar/
     ├── schema.cedarschema.json  ← Entity types and actions
-    └── policies/
-        ├── admin.cedar          ← Admin wildcard permit
-        ├── editor.cedar         ← Content editing
-        ├── reviewer.cedar       ← Content review
-        ├── publisher.cedar      ← Content publishing
-        ├── readonly.cedar       ← Read-only access
-        ├── user.cedar           ← Own-resource access
-        ├── moderator.cedar      ← Community moderation
-        ├── developer.cedar      ← Dev tools and APIs
-        └── owner-only.cedar     ← Ownership enforcement (forbid)
+    └── policies/*.cedar         ← 9 policy files (identical to rust/cedar/)
 
 docs/
 ├── architecture.md      ← This file
@@ -468,8 +470,7 @@ configure({
     clientId: 'your-cognito-client-id',
     cognitoDomain: 'yourapp.auth.us-west-2.amazoncognito.com',
 
-    // Token storage — handler mode recommended for production
-    tokenStorage: 'handler',  // 'localStorage' and 'memory' are deprecated
+    // Token storage — handler mode (only supported mode since v0.15.0)
 
     // Handler mode endpoints (required)
     tokenEndpoint: '/auth/token',
@@ -492,11 +493,11 @@ configure({
 
 ## Testing
 
-The library has 696 tests across 18 files, organized by feature:
+The library has 733 vitest tests across 19 files (plus 149 Rust backend tests), organized by feature:
 
 | Test File | Tests | What It Covers |
 |-----------|-------|----------------|
-| `cedar-authorization.test.js` | 132 | Policy evaluation, ownership, group aliases, property tests |
+| `cedar-authorization.test.js` | 135 | Policy evaluation, ownership, group aliases, property tests |
 | `handler-sync-api.test.js` | 52 | Handler mode token operations |
 | `oauth-security.test.js` | 44 | PKCE, CSRF, OAuth state validation |
 | `token-storage.test.js` | 15 | localStorage/memory/handler storage |
@@ -513,6 +514,8 @@ The library has 696 tests across 18 files, organized by feature:
 | `webauthn-capabilities.test.js` | 22 | WebAuthn feature detection |
 | `version-consistency.test.js` | 11 | Version sync across files |
 | `handler-token-store.test.js` | 56 | Handler mode token store |
+| `authenticator-metadata.test.js` | 38 | WebAuthn authenticator metadata parsing |
+| `validate-credential.test.js` | 13 | Pre-registration credential validation |
 
 Tests use Vitest with jsdom environment. Property-based tests use fast-check for invariant verification (e.g., "admin is always permitted", "backoff delay never exceeds max").
 

@@ -44,10 +44,17 @@ pub async fn refresh_tokens(
 
             match (new_access, new_id) {
                 (Some(at), Some(it)) => {
+                    // Use rotated refresh token if Cognito returned one, else keep existing
+                    let new_refresh = auth_result
+                        .and_then(|r| r.get("RefreshToken"))
+                        .and_then(|v| v.as_str())
+                        .map(|rt| Some(rt.to_string()))
+                        .unwrap_or_else(|| tokens.refresh_token.clone());
+
                     let new_tokens = SessionTokens {
                         access_token: at.to_string(),
                         id_token: it.to_string(),
-                        refresh_token: tokens.refresh_token.clone(),
+                        refresh_token: new_refresh,
                         auth_method: tokens.auth_method.clone(),
                     };
 
@@ -80,7 +87,7 @@ pub async fn refresh_tokens(
             }
         }
         Err(e) => {
-            // Refresh failed — destroy session (same as FastAPI)
+            // Refresh failed — destroy session (Token Handler protocol invariant #6)
             ocsf::authentication_event(
                 ocsf::ACTIVITY_SERVICE_TICKET,
                 "Service Ticket",

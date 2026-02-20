@@ -131,7 +131,13 @@ function validateTokenClaims(tokens) {
 
         // Verify audience/client_id matches configured clientId
         const tokenClientId = claims.aud || claims.client_id;
-        if (tokenClientId && tokenClientId !== config.clientId) {
+        if (!tokenClientId) {
+            debugLog('token', 'validateTokenClaims:failed', {
+                reason: 'missing audience claim (aud or client_id)'
+            });
+            return false;
+        }
+        if (tokenClientId !== config.clientId) {
             debugLog('token', 'validateTokenClaims:failed', {
                 reason: 'client_id mismatch',
                 expected: config.clientId,
@@ -140,16 +146,20 @@ function validateTokenClaims(tokens) {
             return false;
         }
 
-        // Reject unreasonable exp (> 30 days in future)
-        if (claims.exp) {
-            var maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
-            if (claims.exp > maxReasonableExp) {
-                debugLog('token', 'validateTokenClaims:failed', {
-                    reason: 'unreasonable expiry',
-                    exp: claims.exp
-                });
-                return false;
-            }
+        // Reject tokens without expiry or with unreasonable exp (> 30 days in future)
+        if (!claims.exp || typeof claims.exp !== 'number') {
+            debugLog('token', 'validateTokenClaims:failed', {
+                reason: 'missing or invalid expiry claim'
+            });
+            return false;
+        }
+        var maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
+        if (claims.exp > maxReasonableExp) {
+            debugLog('token', 'validateTokenClaims:failed', {
+                reason: 'unreasonable expiry',
+                exp: claims.exp
+            });
+            return false;
         }
 
         return true;
@@ -244,7 +254,8 @@ describe('Token Validation on Load', () => {
             expect(_debugHistory[0].data.reason).toBe('client_id mismatch');
         });
 
-        it('accepts tokens without aud or client_id (no verification possible)', () => {
+        it('rejects tokens without aud or client_id', () => {
+            config.debug = true;
             const exp = Math.floor(Date.now() / 1000) + 3600;
             const tokens = {
                 id_token: createTestJwt({
@@ -256,7 +267,8 @@ describe('Token Validation on Load', () => {
                 access_token: createTestJwt({ sub: 'user1', exp }),
                 refresh_token: 'refresh-123'
             };
-            expect(validateTokenClaims(tokens)).toBe(true);
+            expect(validateTokenClaims(tokens)).toBe(false);
+            expect(_debugHistory[0].data.reason).toBe('missing audience claim (aud or client_id)');
         });
 
         it('checks client_id fallback when aud is missing', () => {

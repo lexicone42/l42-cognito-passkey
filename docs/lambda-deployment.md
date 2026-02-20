@@ -1,106 +1,162 @@
 # Lambda Deployment Guide
 
-Deploy the FastAPI Token Handler backend to AWS Lambda behind an HTTP API (API Gateway v2).
+Deploy the Rust Token Handler backend to AWS Lambda.
 
 ## Architecture
 
 ```
-Browser → API Gateway (HTTP API) → Lambda (Mangum + FastAPI) → DynamoDB (sessions)
-                                                             → Cognito (token exchange)
+Browser → CloudFront → API Gateway (HTTP API) → Lambda (Rust binary) → DynamoDB (sessions)
+                                                                      → Cognito (token exchange)
 ```
 
 ## Prerequisites
 
-- AWS CLI configured with credentials (`aws sts get-caller-identity`)
-- AWS CDK v2 installed (`npm install -g aws-cdk`)
-- Python 3.13+
+- AWS CLI configured (`aws sts get-caller-identity`)
+- [cargo-lambda](https://www.cargo-lambda.info/) installed
+- Rust 1.85+ (edition 2024)
 - A Cognito User Pool with an app client
 
 ## Quick Deploy
 
+### 1. Build the Lambda binary
+
 ```bash
-cd examples/backends/fastapi/deploy
+cd rust/
 
-# Install CDK dependencies
-pip install -r requirements.txt
+# Build for ARM64 (Graviton2 — recommended for cost/perf)
+cargo lambda build --release --arm64
 
-# Deploy (replace values)
-cdk deploy \
-  -c cognito_client_id=YOUR_CLIENT_ID \
-  -c cognito_user_pool_id=us-west-2_abc123 \
-  -c cognito_domain=myapp.auth.us-west-2.amazoncognito.com \
-  -c session_secret=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))") \
-  -c frontend_url=https://myapp.example.com
+# Binary is at target/lambda/l42-token-handler/bootstrap
 ```
 
-CDK outputs:
-- **ApiUrl** — the HTTP API endpoint (e.g., `https://abc123.execute-api.us-west-2.amazonaws.com/`)
-- **TableName** — the DynamoDB sessions table
-- **FunctionName** — the Lambda function name
+### 2. Deploy with CDK
 
-## What Gets Deployed
+```typescript
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
-| Resource | Details |
-|----------|---------|
-| DynamoDB table | `l42_sessions`, partition key `session_id` (S), TTL on `ttl`, PAY_PER_REQUEST |
-| Lambda function | Python 3.13, 512 MB, 30s timeout, `handler.handler` entry point |
-| HTTP API | API Gateway v2, `ANY /{proxy+}` → Lambda, CORS configured |
-| IAM | Lambda gets `dynamodb:GetItem/PutItem/DeleteItem` on sessions table + CloudWatch Logs |
+// Session table
+const table = new dynamodb.Table(this, 'Sessions', {
+  tableName: 'l42_sessions',
+  partitionKey: { name: 'session_id', type: dynamodb.AttributeType.STRING },
+  billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+  timeToLiveAttribute: 'ttl',
+});
+
+// Lambda function
+const handler = new lambda.Function(this, 'TokenHandler', {
+  runtime: lambda.Runtime.PROVIDED_AL2023,
+  handler: 'bootstrap',
+  code: lambda.Code.fromAsset('rust/target/lambda/l42-token-handler'),
+  architecture: lambda.Architecture.ARM_64,
+  memorySize: 256,
+  timeout: Duration.seconds(5),
+  environment: {
+    COGNITO_CLIENT_ID: 'your-client-id',
+    COGNITO_USER_POOL_ID: 'us-west-2_abc123',
+    COGNITO_DOMAIN: 'myapp.auth.us-west-2.amazoncognito.com',
+    SESSION_SECRET: 'generate-a-random-32-char-string',
+    SESSION_BACKEND: 'dynamodb',
+    DYNAMODB_TABLE: table.tableName,
+    SESSION_HTTPS_ONLY: 'true',
+    FRONTEND_URL: 'https://your-site.com',
+  },
+});
+
+table.grantReadWriteData(handler);
+```
+
+### 3. Add API Gateway
+
+```typescript
+import * as apigateway from 'aws-cdk-lib/aws-apigatewayv2';
+
+const api = new apigateway.HttpApi(this, 'Api', {
+  defaultIntegration: new apigateway.HttpLambdaIntegration('Handler', handler),
+  corsPreflight: {
+    allowOrigins: ['https://your-site.com'],
+    allowMethods: [apigateway.CorsHttpMethod.ANY],
+    allowHeaders: ['Content-Type', 'X-L42-CSRF'],
+    allowCredentials: true,
+  },
+});
+```
 
 ## Environment Variables
 
-The CDK stack sets these automatically:
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `COGNITO_CLIENT_ID` | Yes | Cognito app client ID |
+| `COGNITO_CLIENT_SECRET` | No | For confidential clients |
+| `COGNITO_USER_POOL_ID` | Yes | User pool ID (e.g., `us-west-2_abc123`) |
+| `COGNITO_DOMAIN` | Yes | Cognito domain |
+| `SESSION_SECRET` | Yes | Random 32+ char string for HMAC cookie signing |
+| `SESSION_BACKEND` | Yes | `dynamodb` for production |
+| `DYNAMODB_TABLE` | Yes | DynamoDB table name |
+| `SESSION_HTTPS_ONLY` | Yes | `true` for production |
+| `FRONTEND_URL` | Yes | Frontend origin for CORS + redirects |
+| `COOKIE_DOMAIN` | No | `Domain=` on cookies (e.g., `.example.com` for cross-subdomain SSO) |
+| `AUTH_PATH_PREFIX` | No | Route prefix (default: `/auth`). Set to `/_auth` if CloudFront routes `/_auth/*` to Lambda |
+| `CALLBACK_USE_ORIGIN` | No | `true` to redirect OAuth callback to request origin (multi-CloudFront) |
+| `CALLBACK_ALLOWED_ORIGINS` | No | Comma-separated allowed origins (required when `CALLBACK_USE_ORIGIN=true`) |
+| `AAGUID_ALLOWLIST` | No | Comma-separated allowed authenticator AAGUIDs (empty = allow all) |
+| `REQUIRE_DEVICE_BOUND` | No | `true` to reject synced passkeys at registration |
 
-| Variable | Source | Description |
-|----------|--------|-------------|
-| `COGNITO_CLIENT_ID` | CDK context | Cognito app client ID |
-| `COGNITO_USER_POOL_ID` | CDK context | User pool ID |
-| `COGNITO_DOMAIN` | CDK context | Cognito domain |
-| `SESSION_SECRET` | CDK context | Session signing key |
-| `FRONTEND_URL` | CDK context | Frontend origin (CORS + redirects) |
-| `SESSION_BACKEND` | `dynamodb` (hardcoded) | Session storage backend |
-| `DYNAMODB_TABLE` | From CDK table ref | DynamoDB table name |
-| `SESSION_HTTPS_ONLY` | `true` (hardcoded) | Secure cookie flag |
-
-## handler.py
-
-The Lambda entry point at `examples/backends/fastapi/handler.py`:
-
-```python
-from mangum import Mangum
-from app.config import get_settings
-from app.main import create_app
-from app.session import DynamoDBSessionBackend
-
-s = get_settings()
-session_backend = DynamoDBSessionBackend(...)  # from env vars
-app = create_app(session_backend=session_backend)
-handler = Mangum(app, lifespan="auto")
-```
-
-- **Module-level init**: `create_app()` runs once per Lambda container (reused across warm invocations)
-- **`lifespan="auto"`**: Mangum runs FastAPI's lifespan events (Cedar init) on first invocation
-- **DynamoDB backend**: Configured from `SESSION_BACKEND` env var
-
-## Cold Start Considerations
+## Cold Start Performance
 
 | Phase | Time | Notes |
 |-------|------|-------|
-| Python import | ~200-400ms | FastAPI + dependencies |
-| Cedar init | <10ms | File reads + policy validation (no network) |
-| JWKS fetch | ~100-200ms | First `/auth/session` call fetches from Cognito, cached 1hr |
+| Binary load | ~5-10 ms | Single static binary, no runtime |
+| Cedar init | <5 ms | File reads + policy parsing (bundled in binary) |
+| JWKS fetch | ~100-200 ms | First `/auth/session` call; cached 1 hour |
 
-Total cold start: **~300-600ms** (dominated by Python imports).
+Total cold start: **10–50 ms** (dramatically better than Python/Node.js backends).
 
-### Mitigation
+## DynamoDB Session Table
 
-- **Provisioned concurrency**: Set to 1+ if cold starts are unacceptable for your use case
-- **JWKS cache**: Lost on container recycle; first request after recycle adds ~150ms
-- Cedar policies are bundled in the deployment package — no S3 or network fetch needed
+Same schema works for both Rust and Express backends:
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| `session_id` | S (PK) | Partition key |
+| `data` | S | JSON-encoded session payload |
+| `created_at` | N | Unix timestamp |
+| `ttl` | N | DynamoDB TTL (auto-cleanup) |
+
+Enable TTL on the `ttl` attribute in DynamoDB console or CDK.
+
+## CloudFront Configuration
+
+For CDN deployment with CloudFront:
+
+```
+CloudFront (app.example.com)
+  └── Default behavior → S3 (static frontend)
+  └── /_auth/* → API Gateway → Lambda
+      Headers: X-Forwarded-Host, X-Forwarded-Proto
+```
+
+Lambda env:
+```bash
+AUTH_PATH_PREFIX=/_auth
+COOKIE_DOMAIN=.example.com
+FRONTEND_URL=https://app.example.com
+```
+
+### Multi-Origin Deployment
+
+For one Lambda behind multiple CloudFront distributions:
+
+```bash
+CALLBACK_USE_ORIGIN=true
+CALLBACK_ALLOWED_ORIGINS=https://app1.example.com,https://app2.example.com
+```
+
+Each origin must be registered as a callback URL in the Cognito app client.
 
 ## Session Cookie Configuration
 
-API Gateway v2 HTTP APIs terminate HTTPS, so the Lambda function sees the request as HTTP internally. The session middleware uses `SESSION_HTTPS_ONLY=true` to set the `Secure` flag on cookies regardless.
+API Gateway v2 HTTP APIs terminate HTTPS, so Lambda sees HTTP internally. Set `SESSION_HTTPS_ONLY=true` to force the `Secure` flag on cookies regardless.
 
 | Setting | Value | Why |
 |---------|-------|-----|
@@ -108,33 +164,22 @@ API Gateway v2 HTTP APIs terminate HTTPS, so the Lambda function sees the reques
 | `HttpOnly` | `true` | Always set (no JS access) |
 | `SameSite` | `Lax` | Default; set to `None` if frontend and API are on different domains |
 
-### Cross-domain deployments
-
-If your frontend (`app.example.com`) and API (`api.example.com`) are on different origins, you need `SameSite=None` + `Secure`. The session middleware's `same_site` parameter can be made configurable the same way as `https_only` (add `SESSION_SAME_SITE` to `config.py`).
-
 ## Security Notes
 
 ### SESSION_SECRET
 
-The CDK stack passes `session_secret` as a Lambda environment variable. For production:
+For production, store the secret in AWS Secrets Manager and read at startup:
 
-1. Store the secret in AWS Secrets Manager
-2. Grant the Lambda function `secretsmanager:GetSecretValue`
-3. Read it at startup in `handler.py` instead of from env
-
-### CORS
-
-`allow_credentials=True` requires an explicit origin — never `*`. The CDK stack sets this from the `frontend_url` context value. The FastAPI CORS middleware and API Gateway CORS config must agree.
-
-### CSRF Header
-
-API Gateway v2 HTTP APIs pass through all headers by default. Verify that `X-L42-CSRF` reaches the Lambda by checking the `/health` endpoint response or CloudWatch logs.
+```rust
+// In your deployment: set SESSION_SECRET from Secrets Manager
+// via CDK's Secret.fromSecretsManager() → Lambda environment
+```
 
 ### IAM Permissions
 
-The Lambda function only gets:
+The Lambda function only needs:
 - `dynamodb:GetItem`, `dynamodb:PutItem`, `dynamodb:DeleteItem` on the sessions table
-- CloudWatch Logs (`logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`)
+- CloudWatch Logs (auto-granted by CDK)
 
 No `dynamodb:Scan` or `dynamodb:Query` — the session backend only does point lookups.
 
@@ -146,13 +191,12 @@ API_URL=https://abc123.execute-api.us-west-2.amazonaws.com
 
 # Health check
 curl $API_URL/health
+# → {"status":"ok","mode":"token-handler","cedar":"ready"}
 
-# Smoke test (from the FastAPI project)
-python scripts/smoke_test.py --base-url $API_URL
-
-# Full flow (requires valid tokens from Cognito)
-python scripts/smoke_test.py --base-url $API_URL \
-  --access-token <TOKEN> --id-token <TOKEN>
+# Verify CORS headers
+curl -I -X OPTIONS $API_URL/auth/token \
+  -H "Origin: https://your-site.com" \
+  -H "Access-Control-Request-Method: GET"
 ```
 
 ## Updating
@@ -160,31 +204,15 @@ python scripts/smoke_test.py --base-url $API_URL \
 After code changes:
 
 ```bash
-cd deploy
-cdk deploy   # Re-bundles and deploys the Lambda
+cd rust/
+cargo lambda build --release --arm64
+cd ../deploy  # or wherever your CDK stack is
+cdk deploy
 ```
 
-To update only environment variables (no code change), use the AWS Console or:
+## Further Reading
 
-```bash
-aws lambda update-function-configuration \
-  --function-name L42TokenHandler-Handler... \
-  --environment '{"Variables": {...}}'
-```
-
-## Cleanup
-
-```bash
-cd deploy
-cdk destroy
-```
-
-This removes the Lambda, API Gateway, and DynamoDB table. If you set `removal_policy=RETAIN` on the table in `stack.py`, the table persists after stack deletion.
-
-## Native Dependencies
-
-`cedarpy` and `aioboto3` include native extensions. The CDK `Code.from_asset` approach works if your build machine matches the Lambda runtime (Linux x86_64). For cross-platform builds, consider:
-
-1. **Docker-based bundling** (CDK `BundlingOptions` with a Python image)
-2. **Lambda layers** for `cedarpy` and other native deps
-3. **Container image** deployment (`aws_lambda.DockerImageFunction`)
+- [rust/README.md](../rust/README.md) — Full Rust backend documentation
+- [rust/CLAUDE.md](../rust/CLAUDE.md) — Guide for Claude instances working on the Rust backend
+- [Handler Mode](handler-mode.md) — Token Handler architecture
+- [Cedar Authorization](cedar-integration.md) — Cedar policy setup

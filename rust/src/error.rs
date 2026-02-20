@@ -1,7 +1,7 @@
 //! Application error types with Axum response mapping.
 //!
 //! Each variant maps to a specific HTTP status + JSON body, matching the
-//! exact responses from the FastAPI backend.
+//! exact responses matching the Token Handler protocol spec.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

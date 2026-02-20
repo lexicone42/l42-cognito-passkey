@@ -496,6 +496,6 @@ After upgrading:
 
 ---
 
-## Upgrade Prompt for Claude Code Instances
+## Upgrade Help for Claude Code Instances
 
-For a quick upgrade prompt to paste into another Claude Code instance, see [upgrade-prompt.md](./upgrade-prompt.md).
+See [CLAUDE.md](../CLAUDE.md) for the "Upgrade Notes" section covering each version's breaking changes.

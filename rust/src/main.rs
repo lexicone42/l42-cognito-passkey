@@ -38,6 +38,22 @@ async fn main() {
     }
 
     let config = Config::from_env().expect("Failed to load configuration");
+
+    // Security configuration warnings
+    if !config.session_https_only && config.frontend_url.starts_with("https://") {
+        tracing::warn!(
+            "SESSION_HTTPS_ONLY is false but FRONTEND_URL uses HTTPS — \
+             session cookies will be sent over HTTP. Set SESSION_HTTPS_ONLY=true for production."
+        );
+    }
+    if config.callback_use_origin && config.callback_allowed_origins.is_empty() {
+        tracing::warn!(
+            "CALLBACK_USE_ORIGIN is true but CALLBACK_ALLOWED_ORIGINS is empty — \
+             any X-Forwarded-Host will be accepted. Set CALLBACK_ALLOWED_ORIGINS to restrict \
+             allowed origins (comma-separated, e.g. 'https://app1.example.com,https://app2.example.com')."
+        );
+    }
+
     let http_client = reqwest::Client::new();
     let jwks_cache = Arc::new(JwksCache::new(http_client.clone()));
 

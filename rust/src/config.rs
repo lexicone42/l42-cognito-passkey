@@ -1,6 +1,6 @@
 //! Application configuration via environment variables.
 //!
-//! Mirrors the FastAPI Settings class in `app/config.py`.
+//! Application configuration from environment variables.
 
 use std::env;
 
@@ -22,6 +22,7 @@ pub struct Config {
     pub cookie_domain: Option<String>,
     pub auth_path_prefix: String,
     pub callback_use_origin: bool,
+    pub callback_allowed_origins: Vec<String>,
     pub aaguid_allowlist: Vec<String>,
     pub require_device_bound: bool,
 }
@@ -29,8 +30,8 @@ pub struct Config {
 impl Config {
     /// Load configuration from environment variables.
     ///
-    /// Required: `COGNITO_CLIENT_ID`, `COGNITO_USER_POOL_ID`, `COGNITO_DOMAIN`.
-    /// All others have sensible defaults matching the FastAPI backend.
+    /// Required: `COGNITO_CLIENT_ID`, `COGNITO_USER_POOL_ID`, `COGNITO_DOMAIN`, `SESSION_SECRET`.
+    /// All others have sensible defaults.
     pub fn from_env() -> Result<Self, ConfigError> {
         Ok(Self {
             cognito_client_id: required_env("COGNITO_CLIENT_ID")?,
@@ -38,13 +39,7 @@ impl Config {
             cognito_user_pool_id: required_env("COGNITO_USER_POOL_ID")?,
             cognito_domain: required_env("COGNITO_DOMAIN")?,
             cognito_region: env::var("COGNITO_REGION").unwrap_or_else(|_| "us-west-2".into()),
-            session_secret: env::var("SESSION_SECRET").unwrap_or_else(|_| {
-                tracing::warn!(
-                    "SESSION_SECRET not set — using insecure default. \
-                     Set SESSION_SECRET to a random 32+ byte value in production!"
-                );
-                "change-me-in-production".into()
-            }),
+            session_secret: required_env("SESSION_SECRET")?,
             frontend_url: env::var("FRONTEND_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".into()),
             port: env::var("PORT")
@@ -68,6 +63,12 @@ impl Config {
             callback_use_origin: env::var("CALLBACK_USE_ORIGIN")
                 .map(|v| v == "true" || v == "1" || v == "True")
                 .unwrap_or(false),
+            callback_allowed_origins: env::var("CALLBACK_ALLOWED_ORIGINS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect(),
             aaguid_allowlist: env::var("AAGUID_ALLOWLIST")
                 .unwrap_or_default()
                 .split(',')
@@ -126,6 +127,7 @@ impl Config {
             cookie_domain: None,
             auth_path_prefix: "/auth".into(),
             callback_use_origin: false,
+            callback_allowed_origins: Vec::new(),
             aaguid_allowlist: Vec::new(),
             require_device_bound: false,
         }

@@ -1,14 +1,14 @@
 # Cedar Policy Authorization
 
 **Status**: Implemented (v0.13.0)
-**Dependencies**: `@cedar-policy/cedar-wasm` (v4.8.2, Apache-2.0, ~4.3 MB runtime)
+**Dependencies**: `cedar-policy` crate (Rust backend) or `@cedar-policy/cedar-wasm` v4.8.2 (Express backend). Apache-2.0.
 **Tests**: 101 (including 5 property-based tests)
 
 ## Overview
 
 Cedar replaces hardcoded RBAC checks with declarative policy evaluation. Authorization decisions are `(principal, action, resource, context)` tuples evaluated against `.cedar` policy files by the Cedar WASM engine.
 
-This is a **server-side feature** that pairs with handler mode. The WASM bundle rules out client-side use. Existing client-side helpers (`isAdmin()`, `isReadonly()`) remain unchanged for UI hints.
+This is a **server-side feature** that pairs with handler mode. The Rust backend uses the native `cedar-policy` crate; the Express backend uses `@cedar-policy/cedar-wasm`. Existing client-side helpers (`isAdmin()`, `isReadonly()`) remain unchanged for UI hints.
 
 ## Architecture
 
@@ -25,15 +25,29 @@ The client-side API (`requireServerAuthorization()`) doesn't change. Cedar repla
 
 ## Getting Started
 
+### Option A: Rust Backend (Recommended)
+
+Cedar is built into the Rust backend — no extra installation needed. The `cedar-policy` crate is a direct dependency, so Cedar policies are evaluated natively without WASM overhead.
+
+```bash
+cd rust/
+cp .env.example .env  # fill in Cognito values
+cargo run             # Cedar initializes automatically at startup
+```
+
+Cedar schema and policies are in `rust/cedar/`. The `/auth/authorize` endpoint is already implemented. See [rust/README.md](../rust/README.md) for full details.
+
+### Option B: Express Backend
+
 Prerequisites: you have the Token Handler Express backend running (`examples/backends/express/server.js`).
 
-### 1. Install Cedar WASM
+**1. Install Cedar WASM:**
 
 ```bash
 pnpm add @cedar-policy/cedar-wasm
 ```
 
-### 2. Copy the Cedar engine, schema, and policies
+**2. Copy the Cedar engine, schema, and policies.**
 
 The reference implementation is already in `examples/backends/express/`. If you're building your own backend, copy these files:
 
@@ -43,7 +57,7 @@ cedar/schema.cedarschema.json → your backend cedar/
 cedar/policies/*.cedar        → your backend cedar/policies/
 ```
 
-### 3. Initialize Cedar in your server startup
+**3. Initialize Cedar in your server startup:**
 
 ```javascript
 import { initCedarEngine, authorize, isInitialized as isCedarReady } from './cedar-engine.js';
@@ -55,7 +69,7 @@ await initCedarEngine({
 });
 ```
 
-### 4. Add the authorization endpoint
+**4. Add the authorization endpoint:**
 
 ```javascript
 app.post('/auth/authorize', requireCsrfHeader, async (req, res) => {
@@ -78,7 +92,7 @@ app.post('/auth/authorize', requireCsrfHeader, async (req, res) => {
 });
 ```
 
-### 5. Call from the frontend
+### Calling from the Frontend (Both Backends)
 
 ```javascript
 import { requireServerAuthorization } from './auth.js';
@@ -96,7 +110,7 @@ if (!result.authorized) {
 }
 ```
 
-In handler mode, `requireServerAuthorization()` automatically sends session cookies and the `X-L42-CSRF` header. In localStorage/memory mode, it sends a Bearer token.
+`requireServerAuthorization()` automatically sends session cookies and the `X-L42-CSRF` header.
 
 ### 6. Test locally
 
@@ -264,12 +278,31 @@ forbid(
 
 The `when { resource has owner && ... }` pattern is required for Cedar's validator to prove safe access to the optional `owner` attribute. If the caller omits `resource.owner`, the `has` check fails and the forbid does not fire — permit policies still apply.
 
-## Entity Provider Interface (Post-1.0)
+> **SECURITY WARNING: `resource.owner` is caller-controlled.** The client sends `resource.owner` in the request body to `requireServerAuthorization()`. A malicious client can set `resource.owner` to their own `sub`, bypassing the forbid policy entirely. This is a known limitation (S1 finding).
+>
+> **For UI-gated workflows** (e.g., a content management system where the UI already fetched the document and knows the owner), passing `resource.owner` from the client is acceptable as a defense-in-depth layer. The primary access control should be at the data layer.
+>
+> **For production ownership enforcement**, the server must look up the true owner from a trusted source (database, DynamoDB, etc.) rather than trusting the client's claim. Use the EntityProvider interface (below) to load resource ownership from your data store.
 
-The `authorize()` function accepts an optional `entityProvider` parameter for loading entities from external stores:
+### `:own` vs `:all` Actions and Admin Override
+
+Actions like `write:own`, `delete:own` are subject to the ownership forbid policy — even for admins. This is by design: the forbid policy fires unconditionally when `resource.owner != principal`.
+
+Admins who need to modify any user's resources should use the `:all` variants (`write:all`, `delete:all`), which are permitted by the admin wildcard policy and are NOT subject to the ownership forbid.
 
 ```javascript
-// Future: load entities from DynamoDB, Redis, etc.
+// Admin deleting another user's document — use :all, not :own
+const result = await requireServerAuthorization('delete:all', {
+    resource: { id: 'doc-123', type: 'document' }
+});
+```
+
+## Entity Provider Interface (Required for Production Ownership)
+
+To close the S1 gap, use the `entityProvider` parameter on `authorize()` to load the true resource owner from your data store instead of trusting the client's `resource.owner`:
+
+```javascript
+// Production: load resource ownership from your database
 const provider = {
     async getEntities(claims, resource, context) {
         // Return Cedar EntityJson[]

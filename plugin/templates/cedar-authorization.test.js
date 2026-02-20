@@ -1029,6 +1029,90 @@ describe('Admin vs. Forbid Override — Delete Actions', () => {
     });
 });
 
+// ── Forbid-Overrides-Permit Composition Invariant ────────────────────────
+//
+// Cedar's core safety guarantee: forbid policies ALWAYS override permit
+// policies, regardless of how many permit policies exist. This is the
+// invariant we rely on for ownership enforcement — no accumulation of
+// group memberships can bypass a forbid rule.
+
+describe('PROPERTY: Forbid-Overrides-Permit Composition', () => {
+    const ALL_GROUPS = [
+        'admin', 'readonly', 'users', 'editors', 'reviewers',
+        'publishers', 'moderators', 'developers'
+    ];
+
+    const OWN_ACTIONS = ['write:own', 'delete:own'];
+
+    it('no subset of groups (including all) can bypass ownership forbid', () => {
+        fc.assert(fc.property(
+            // Generate every possible non-empty subset size
+            fc.integer({ min: 1, max: ALL_GROUPS.length }),
+            fc.constantFrom(...OWN_ACTIONS),
+            fc.stringMatching(/^[a-z]{3,10}$/),
+            fc.stringMatching(/^[a-z]{3,10}$/),
+            (subsetSize, action, principal, owner) => {
+                // Only test when principal != owner (forbid should fire)
+                fc.pre(principal !== owner);
+
+                // Use deterministic subset: first N groups
+                const groups = ALL_GROUPS.slice(0, subsetSize);
+                const result = cedarCheck({
+                    principal,
+                    groups,
+                    action,
+                    resourceId: 'doc-forbid-test',
+                    resourceOwner: owner
+                });
+                return isDenied(result);
+            }
+        ), { numRuns: 300 });
+    });
+
+    it('all 8 groups combined still cannot bypass ownership forbid', () => {
+        // Explicit worst-case: every single group at once
+        for (const action of OWN_ACTIONS) {
+            const result = cedarCheck({
+                principal: 'attacker',
+                groups: ALL_GROUPS,
+                action,
+                resourceId: 'doc-1',
+                resourceOwner: 'victim'
+            });
+            expect(isDenied(result)).toBe(true);
+        }
+    });
+
+    it('forbid applies to :own actions but not :all actions (admin escape hatch)', () => {
+        fc.assert(fc.property(
+            fc.constantFrom('write', 'delete'),
+            fc.stringMatching(/^[a-z]{3,10}$/),
+            fc.stringMatching(/^[a-z]{3,10}$/),
+            (verb, principal, owner) => {
+                fc.pre(principal !== owner);
+
+                const ownResult = cedarCheck({
+                    principal,
+                    groups: ['admin'],
+                    action: `${verb}:own`,
+                    resourceId: 'doc-1',
+                    resourceOwner: owner
+                });
+                const allResult = cedarCheck({
+                    principal,
+                    groups: ['admin'],
+                    action: `${verb}:all`,
+                    resourceId: 'doc-1',
+                    resourceOwner: owner
+                });
+
+                // :own is denied (forbid fires), :all is allowed (admin has it, no forbid)
+                return isDenied(ownResult) && isAllowed(allResult);
+            }
+        ), { numRuns: 100 });
+    });
+});
+
 // ── Unknown/Invalid Action Handling ──────────────────────────────────────
 //
 // What happens when a non-existent action is evaluated? Cedar validates

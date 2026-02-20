@@ -696,6 +696,14 @@ export function configure(options = {}) {
         );
     }
 
+    // Warn if sessionEndpoint is not configured — passkey/password sessions won't persist
+    if (!newConfig.sessionEndpoint) {
+        console.warn(
+            '[l42-auth] sessionEndpoint not configured. Passkey and password logins will not ' +
+            'persist across page reloads. Add sessionEndpoint: "/auth/session" to your configure() call.'
+        );
+    }
+
     // Validate redirectUri if provided
     if (newConfig.redirectUri) {
         try {
@@ -869,7 +877,13 @@ function validateTokenClaims(tokens) {
         // Verify audience/client_id matches configured clientId
         // ID tokens use 'aud', access tokens use 'client_id'
         const tokenClientId = claims.aud || claims.client_id;
-        if (tokenClientId && tokenClientId !== config.clientId) {
+        if (!tokenClientId) {
+            debugLog('token', 'validateTokenClaims:failed', {
+                reason: 'missing audience claim (aud or client_id)'
+            });
+            return false;
+        }
+        if (tokenClientId !== config.clientId) {
             debugLog('token', 'validateTokenClaims:failed', {
                 reason: 'client_id mismatch',
                 expected: config.clientId,
@@ -878,16 +892,20 @@ function validateTokenClaims(tokens) {
             return false;
         }
 
-        // Reject unreasonable exp (> 30 days in future)
-        if (claims.exp) {
-            var maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
-            if (claims.exp > maxReasonableExp) {
-                debugLog('token', 'validateTokenClaims:failed', {
-                    reason: 'unreasonable expiry',
-                    exp: claims.exp
-                });
-                return false;
-            }
+        // Reject tokens without expiry or with unreasonable exp (> 30 days in future)
+        if (!claims.exp || typeof claims.exp !== 'number') {
+            debugLog('token', 'validateTokenClaims:failed', {
+                reason: 'missing or invalid expiry claim'
+            });
+            return false;
+        }
+        var maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
+        if (claims.exp > maxReasonableExp) {
+            debugLog('token', 'validateTokenClaims:failed', {
+                reason: 'unreasonable expiry',
+                exp: claims.exp
+            });
+            return false;
         }
 
         return true;

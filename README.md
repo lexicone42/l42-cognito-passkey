@@ -5,26 +5,34 @@
 [![Version](https://img.shields.io/badge/version-0.18.0-blue)](https://github.com/lexicone42/l42-cognito-passkey/blob/main/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-649-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
+[![Tests](https://img.shields.io/badge/tests-882-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
 [![TypeScript](https://img.shields.io/badge/types-included-blue?logo=typescript&logoColor=white)](src/auth.d.ts)
 
 AWS Cognito authentication with WebAuthn/Passkey support. Self-hosted, configurable, no build step required.
 
 ## What You Need
 
-The library has two tiers. Pick what fits your project:
+Two components: `auth.js` (client-side) and a Token Handler backend (server-side).
 
-| | Client + Server (Recommended) | Client-Only |
-|--|-------------------------------|-------------|
-| **What to copy** | `auth.js` + Express backend + Cedar policies | `auth.js` (one file) |
-| **Features** | Password/passkey login, OAuth, token refresh, HttpOnly token storage, Cedar policy authorization, ownership enforcement | Password/passkey login, OAuth, token refresh, UI role hints |
-| **Security** | Tokens server-side in HttpOnly cookies (XSS-immune), real authorization via Cedar policies | Tokens in localStorage (XSS-accessible), client-side role checks only |
-| **Setup** | Deploy a backend server | Copy one file, add config |
-| **Guide** | [Handler Mode](docs/handler-mode.md) + [Cedar](docs/cedar-integration.md) | Quick Start below |
+| Component | What to copy | Purpose |
+|-----------|-------------|---------|
+| **Client** | `src/auth.js` | Password/passkey login, OAuth, token refresh, UI role hints |
+| **Backend** | Rust backend (recommended) or Express backend | HttpOnly token storage, Cedar authorization, ownership enforcement |
 
-**Client + Server is strongly recommended.** HttpOnly cookies make tokens invisible to JavaScript entirely — an XSS vulnerability can't steal them. Cedar policies provide real, server-verified authorization instead of trusting client-side JWT claims.
+**Backend options:**
 
-Client-only mode is available for prototyping or simple apps where XSS risk is acceptable.
+| | Rust (Recommended) | Express (Node.js) |
+|--|---------------------|-------------------|
+| **Location** | `rust/` | `examples/backends/express/` |
+| **Cedar engine** | Native `cedar-policy` crate (direct calls) | `@cedar-policy/cedar-wasm` (WASM marshalling) |
+| **Lambda cold start** | 10–50 ms | 2–5 s |
+| **Lambda memory** | 128–256 MB | 512 MB |
+| **Deployment** | Single static binary | Node.js runtime + deps |
+| **Guide** | [Rust README](rust/README.md) | [Express server.js](examples/backends/express/server.js) |
+
+The same `auth.js` client works with either backend — no changes needed.
+
+See [Handler Mode](docs/handler-mode.md) for the full architecture and [Cedar Authorization](docs/cedar-integration.md) for policy setup.
 
 ## Features
 
@@ -45,18 +53,23 @@ Client-only mode is available for prototyping or simple apps where XSS risk is a
 - Cedar policy authorization — declarative `(principal, action, resource)` evaluation
 - Ownership enforcement — Cedar `forbid` policies prevent users from accessing others' resources
 
-## Quick Start (Recommended: Client + Server)
+## Quick Start
 
-### 1. Copy auth.js and the backend to your project
+### 1. Copy auth.js and set up the backend
 
 ```bash
 # Frontend: copy auth.js
 cp src/auth.js /path/to/your/project/public/auth/auth.js
 cp src/auth.d.ts /path/to/your/project/public/auth/auth.d.ts  # TypeScript
 
-# Backend: copy the Express server, Cedar engine, and policies
+# Backend (Rust — recommended):
+cp -r rust/ /path/to/your/backend/
+cd /path/to/your/backend && cp .env.example .env  # fill in Cognito values
+cargo run  # local dev server on :3001
+
+# Alternative backend (Express):
 cp -r examples/backends/express/ /path/to/your/backend/
-cd /path/to/your/backend && npm install @cedar-policy/cedar-wasm
+cd /path/to/your/backend && npm install
 ```
 
 ### 2. Configure handler mode
@@ -69,10 +82,10 @@ window.L42_AUTH_CONFIG = {
     region: 'us-west-2',
     redirectUri: window.location.origin + '/callback',
     scopes: ['openid', 'email', 'aws.cognito.signin.user.admin'],
-    tokenStorage: 'handler',
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
-    logoutEndpoint: '/auth/logout'
+    logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session'
 };
 </script>
 
@@ -98,37 +111,7 @@ if (isAuthenticated()) {
 
 Copy `plugin/templates/callback.html` to your project and update the configuration.
 
-See [Handler Mode](docs/handler-mode.md) and [Cedar Authorization](docs/cedar-integration.md) for complete backend setup.
-
-## Quick Start (Client-Only)
-
-If you don't have a backend server, you can use client-only mode. Tokens are stored in localStorage (XSS-accessible — not recommended for production).
-
-```bash
-cp src/auth.js /path/to/your/project/public/auth/auth.js
-```
-
-```html
-<script>
-window.L42_AUTH_CONFIG = {
-    clientId: 'your-cognito-client-id',
-    domain: 'your-app.auth.us-west-2.amazoncognito.com',
-    region: 'us-west-2',
-    redirectUri: window.location.origin + '/callback',
-    scopes: ['openid', 'email', 'aws.cognito.signin.user.admin']
-};
-</script>
-
-<script type="module">
-import { isAuthenticated, getUserEmail, loginWithHostedUI, logout } from '/auth/auth.js';
-
-if (isAuthenticated()) {
-    console.log('Logged in as:', getUserEmail());
-} else {
-    loginWithHostedUI();
-}
-</script>
-```
+See [Handler Mode](docs/handler-mode.md) and [Cedar Authorization](docs/cedar-integration.md) for complete backend setup. See [Lambda Deployment](docs/lambda-deployment.md) for production deployment.
 
 ## API Reference
 
@@ -206,6 +189,7 @@ declare module '/auth/auth.js' {
 | [API Reference](docs/api-reference.md) | Complete function documentation |
 | [Migration Guide](docs/migration.md) | Upgrading between versions |
 | [Handler Mode](docs/handler-mode.md) | Server-side token storage setup |
+| [Lambda Deployment](docs/lambda-deployment.md) | Deploying Rust backend to AWS Lambda |
 | [Cedar Authorization](docs/cedar-integration.md) | Server-side Cedar policy authorization |
 | [Integration Guide](docs/integration-guide.md) | Integration advice for Claude Code |
 | [Accessibility](docs/accessibility.md) | ARIA patterns, keyboard navigation, screen readers |
@@ -235,7 +219,7 @@ console.log(VERSION); // "0.18.0"
 This project was built with [Claude Code](https://claude.ai/code). See [`CLAUDE.md`](CLAUDE.md) for integration guidelines, security patterns, and RBAC documentation.
 
 ```bash
-pnpm test            # Run all 649 tests
+pnpm test            # Run all 733 JS tests (+ 149 Rust tests via cargo test)
 pnpm release:patch   # Bump version (0.10.0 -> 0.10.1)
 ```
 

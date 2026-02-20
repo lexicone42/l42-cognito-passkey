@@ -74,7 +74,7 @@ pub async fn cognito_request(
         .await
         .map_err(|e| CognitoError::RequestFailed(e.to_string()))?;
 
-    // Check HTTP status AND Cognito error marker (matches FastAPI behavior)
+    // Check HTTP status AND Cognito error marker
     if !status.is_success() || data.get("__type").is_some() {
         let msg = data
             .get("message")
@@ -143,6 +143,7 @@ mod tests {
             cookie_domain: None,
             auth_path_prefix: "/auth".into(),
             callback_use_origin: false,
+            callback_allowed_origins: Vec::new(),
             aaguid_allowlist: Vec::new(),
             require_device_bound: false,
         }

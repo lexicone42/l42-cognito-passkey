@@ -4,6 +4,7 @@ use axum::Json;
 
 use crate::cognito::jwt::decode_jwt_unverified;
 use crate::error::AppError;
+use crate::ocsf;
 use crate::session::middleware::SessionHandle;
 use crate::types::{SessionTokens, UserInfoResponse};
 
@@ -15,7 +16,19 @@ pub async fn me(session: SessionHandle) -> Result<Json<UserInfoResponse>, AppErr
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .ok_or(AppError::NotAuthenticated)?;
 
-    let claims = decode_jwt_unverified(&tokens.id_token).map_err(|_| AppError::TokenDecodeFailed)?;
+    let claims = decode_jwt_unverified(&tokens.id_token).map_err(|e| {
+        ocsf::authentication_event(
+            ocsf::ACTIVITY_OTHER,
+            "Other",
+            ocsf::STATUS_FAILURE,
+            ocsf::SEVERITY_MEDIUM,
+            None,
+            ocsf::AUTH_PROTOCOL_OAUTH2,
+            "OAuth 2.0/OIDC",
+            &format!("User info retrieval failed: {e}"),
+        );
+        AppError::TokenDecodeFailed
+    })?;
 
     Ok(Json(UserInfoResponse {
         email: claims.email,

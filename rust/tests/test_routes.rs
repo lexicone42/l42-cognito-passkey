@@ -927,6 +927,13 @@ const TEST_AAGUID: [u8; 16] = [
     0xa8,
 ];
 
+/// Build base64-encoded clientDataJSON with the test frontend origin.
+fn test_client_data_json() -> String {
+    STANDARD.encode(
+        br#"{"type":"webauthn.create","challenge":"test","origin":"http://localhost:3000"}"#,
+    )
+}
+
 #[tokio::test]
 async fn test_validate_credential_allowed_empty_allowlist() {
     let (app, state) = build_test_app(false);
@@ -943,7 +950,7 @@ async fn test_validate_credential_allowed_empty_allowlist() {
     let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
     let body = json!({
         "attestation_object": att_obj,
-        "client_data_json": STANDARD.encode(b"{}")
+        "client_data_json": test_client_data_json()
     });
     let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc1");
     let req = Request::builder()
@@ -984,7 +991,7 @@ async fn test_validate_credential_aaguid_not_in_allowlist() {
     let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
     let body = json!({
         "attestation_object": att_obj,
-        "client_data_json": STANDARD.encode(b"{}")
+        "client_data_json": test_client_data_json()
     });
     let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc2");
     let req = Request::builder()
@@ -1022,7 +1029,7 @@ async fn test_validate_credential_aaguid_in_allowlist() {
     let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
     let body = json!({
         "attestation_object": att_obj,
-        "client_data_json": STANDARD.encode(b"{}")
+        "client_data_json": test_client_data_json()
     });
     let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc3");
     let req = Request::builder()
@@ -1060,7 +1067,7 @@ async fn test_validate_credential_device_bound_required_but_syncable() {
     let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x08 | 0x40, Some(TEST_AAGUID));
     let body = json!({
         "attestation_object": att_obj,
-        "client_data_json": STANDARD.encode(b"{}")
+        "client_data_json": test_client_data_json()
     });
     let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc4");
     let req = Request::builder()
@@ -1099,7 +1106,7 @@ async fn test_validate_credential_device_bound_required_and_bound() {
     let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
     let body = json!({
         "attestation_object": att_obj,
-        "client_data_json": STANDARD.encode(b"{}")
+        "client_data_json": test_client_data_json()
     });
     let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc5");
     let req = Request::builder()
@@ -1123,7 +1130,7 @@ async fn test_validate_credential_no_session() {
     let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
     let body = json!({
         "attestation_object": att_obj,
-        "client_data_json": STANDARD.encode(b"{}")
+        "client_data_json": test_client_data_json()
     });
     let req = Request::builder()
         .method("POST")
@@ -1154,7 +1161,7 @@ async fn test_validate_credential_no_csrf() {
     let att_obj = build_test_attestation_object(0x01 | 0x04 | 0x40, Some(TEST_AAGUID));
     let body = json!({
         "attestation_object": att_obj,
-        "client_data_json": STANDARD.encode(b"{}")
+        "client_data_json": test_client_data_json()
     });
     let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-vc7");
     let req = Request::builder()

@@ -121,7 +121,7 @@ impl JwksCache {
 /// Decode a JWT payload without signature verification.
 ///
 /// Used for server-trusted tokens already stored in the session.
-/// Equivalent to FastAPI's `decode_jwt_payload()`.
+/// Decode a JWT payload without signature verification (for reading claims).
 pub fn decode_jwt_unverified(token: &str) -> Result<Claims, JwtError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {

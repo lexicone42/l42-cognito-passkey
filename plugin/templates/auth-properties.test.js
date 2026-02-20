@@ -717,12 +717,12 @@ function validateTokenClaims(tokens, testConfig) {
         }
 
         const tokenClientId = claims.aud || claims.client_id;
-        if (tokenClientId && tokenClientId !== testConfig.clientId) return false;
+        if (!tokenClientId) return false;
+        if (tokenClientId !== testConfig.clientId) return false;
 
-        if (claims.exp) {
-            const maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
-            if (claims.exp > maxReasonableExp) return false;
-        }
+        if (!claims.exp || typeof claims.exp !== 'number') return false;
+        const maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
+        if (claims.exp > maxReasonableExp) return false;
 
         return true;
     } catch {
@@ -736,14 +736,26 @@ describe('SHARP-EDGE: Token Validation Missing Claims (S2)', () => {
         cognitoRegion: 'us-west-2'
     };
 
-    it('token with only sub (no iss, aud, exp) passes validation — known gap', () => {
-        // This documents the current behavior (finding S2):
-        // Tokens missing iss, aud, and exp PASS validation because each check
-        // is guarded by `if (field)` — absence means "skip check."
+    it('token with only sub (no aud, exp) is rejected — S2 fixed', () => {
+        // S2 fix: tokens missing aud/client_id or exp are now rejected.
+        // Cognito tokens always include these claims; their absence indicates
+        // a crafted or malformed token.
         const minimalToken = createTestJwt({ sub: 'user-123' });
         const result = validateTokenClaims({ id_token: minimalToken }, testConfig);
-        // Current behavior: true (skip all checks)
-        expect(result).toBe(true);
+        expect(result).toBe(false);
+    });
+
+    it('token with aud but no exp is rejected', () => {
+        const token = createTestJwt({ sub: 'user-123', aud: testConfig.clientId });
+        expect(validateTokenClaims({ id_token: token }, testConfig)).toBe(false);
+    });
+
+    it('token with exp but no aud is rejected', () => {
+        const token = createTestJwt({
+            sub: 'user-123',
+            exp: Math.floor(Date.now() / 1000) + 3600
+        });
+        expect(validateTokenClaims({ id_token: token }, testConfig)).toBe(false);
     });
 
     it('token with wrong issuer is always rejected', () => {
@@ -878,5 +890,146 @@ describe('SHARP-EDGE: Rate Limiting Config Boundaries (S3)', () => {
     it('threshold=0 throttles from first failure', () => {
         const delay = computeBackoffDelay(0, 0, 1000, 30000);
         expect(delay).toBe(1000); // 1000 * 2^0 = 1000
+    });
+});
+
+// ============================================================================
+// PROPERTY: PKCE (Proof Key for Code Exchange) Invariants
+// ============================================================================
+
+/**
+ * Mirrors auth.js generateCodeVerifier — 48 random bytes → base64url (no padding).
+ * RFC 7636 §4.1: code_verifier = high-entropy cryptographic random string
+ * using unreserved characters [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~",
+ * with length between 43 and 128 characters.
+ */
+function generateCodeVerifier() {
+    const array = new Uint8Array(48);
+    crypto.getRandomValues(array);
+    return btoa(String.fromCharCode(...array))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+
+/**
+ * Mirrors auth.js generateCodeChallenge — SHA-256(verifier) → base64url (no padding).
+ * RFC 7636 §4.2: code_challenge = BASE64URL(SHA256(code_verifier))
+ */
+async function generateCodeChallenge(verifier) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+
+/** Base64url alphabet regex — no +, /, or = characters */
+const BASE64URL_RE = /^[A-Za-z0-9\-_]+$/;
+
+describe('PROPERTY: PKCE Code Verifier Invariants', () => {
+    it('verifier is always exactly 64 characters (48 bytes → base64url)', () => {
+        fc.assert(
+            fc.property(fc.constant(null), () => {
+                const verifier = generateCodeVerifier();
+                expect(verifier).toHaveLength(64);
+                return true;
+            }),
+            { numRuns: 200 }
+        );
+    });
+
+    it('verifier uses only base64url-safe characters (no +, /, =)', () => {
+        fc.assert(
+            fc.property(fc.constant(null), () => {
+                const verifier = generateCodeVerifier();
+                expect(verifier).toMatch(BASE64URL_RE);
+                return true;
+            }),
+            { numRuns: 200 }
+        );
+    });
+
+    it('verifier satisfies RFC 7636 length bounds (43-128 chars)', () => {
+        fc.assert(
+            fc.property(fc.constant(null), () => {
+                const verifier = generateCodeVerifier();
+                expect(verifier.length).toBeGreaterThanOrEqual(43);
+                expect(verifier.length).toBeLessThanOrEqual(128);
+                return true;
+            }),
+            { numRuns: 100 }
+        );
+    });
+
+    it('no verifier collisions in batch generation (entropy)', () => {
+        const verifiers = new Set();
+        const batchSize = 1000;
+
+        for (let i = 0; i < batchSize; i++) {
+            verifiers.add(generateCodeVerifier());
+        }
+
+        // 48 bytes of randomness → collision probability is negligible
+        expect(verifiers.size).toBe(batchSize);
+    });
+});
+
+describe('PROPERTY: PKCE Code Challenge Invariants', () => {
+    it('challenge is always exactly 43 characters (SHA-256 = 32 bytes → base64url)', async () => {
+        // SHA-256 outputs 32 bytes; base64url(32 bytes) = 43 chars (no padding)
+        for (let i = 0; i < 100; i++) {
+            const verifier = generateCodeVerifier();
+            const challenge = await generateCodeChallenge(verifier);
+            expect(challenge).toHaveLength(43);
+        }
+    });
+
+    it('challenge uses only base64url-safe characters', async () => {
+        for (let i = 0; i < 100; i++) {
+            const verifier = generateCodeVerifier();
+            const challenge = await generateCodeChallenge(verifier);
+            expect(challenge).toMatch(BASE64URL_RE);
+        }
+    });
+
+    it('challenge is deterministic — same verifier always produces same challenge', async () => {
+        // Use a fixed verifier (not random) to test determinism
+        const fixedVerifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+        const challenge1 = await generateCodeChallenge(fixedVerifier);
+        const challenge2 = await generateCodeChallenge(fixedVerifier);
+        expect(challenge1).toBe(challenge2);
+    });
+
+    it('challenge differs from verifier (SHA-256 is not identity)', async () => {
+        for (let i = 0; i < 100; i++) {
+            const verifier = generateCodeVerifier();
+            const challenge = await generateCodeChallenge(verifier);
+            // Different lengths alone prove this (64 vs 43), but also check content
+            expect(challenge).not.toBe(verifier);
+        }
+    });
+
+    it('different verifiers produce different challenges (collision resistance)', async () => {
+        const challenges = new Set();
+        const batchSize = 200;
+
+        for (let i = 0; i < batchSize; i++) {
+            const verifier = generateCodeVerifier();
+            const challenge = await generateCodeChallenge(verifier);
+            challenges.add(challenge);
+        }
+
+        expect(challenges.size).toBe(batchSize);
+    });
+
+    it('challenge is not reversible to verifier (pre-image resistance, structural)', async () => {
+        // Structural test: challenge is shorter than verifier (43 < 64),
+        // so information is provably lost — you can't reconstruct 48 bytes from 32.
+        const verifier = generateCodeVerifier();
+        const challenge = await generateCodeChallenge(verifier);
+        expect(challenge.length).toBeLessThan(verifier.length);
     });
 });

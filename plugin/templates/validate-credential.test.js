@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fc from 'fast-check';
 
 // ============================================================================
 // Simulated internals (mirrored from auth.js for testing)
@@ -357,5 +358,158 @@ describe('upgradeToPasskey validation gate', () => {
         const result = await simulateUpgradeToPasskey();
         expect(result).toBe(true);
         expect(fetchSpy).not.toHaveBeenCalled();
+    });
+});
+
+// ============================================================================
+// PROPERTY: Server-side credential validation invariants
+// Replicates Rust credential.rs logic (AAGUID + device-bound checks)
+// ============================================================================
+
+/**
+ * Mirrors rust/src/credential.rs check_aaguid_allowed — case-insensitive.
+ * Empty allowlist permits all.
+ */
+function checkAaguidAllowed(aaguid, allowlist) {
+    if (allowlist.length === 0) return { ok: true };
+    const lower = aaguid.toLowerCase();
+    const found = allowlist.some(a => a.toLowerCase() === lower);
+    return found
+        ? { ok: true }
+        : { ok: false, reason: `AAGUID ${aaguid} not in allowlist (${allowlist.length} allowed)` };
+}
+
+/**
+ * Mirrors rust/src/credential.rs check_device_bound.
+ * When require=true, backup-eligible credentials are rejected.
+ */
+function checkDeviceBound(backupEligible, require) {
+    if (require && backupEligible) {
+        return { ok: false, reason: 'Device-bound credential required, but this credential is backup-eligible' };
+    }
+    return { ok: true };
+}
+
+/** Arbitrary for UUID-format AAGUIDs */
+const aaguidArb = fc.stringMatching(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+);
+
+describe('PROPERTY: AAGUID Allowlist Invariants', () => {
+    it('empty allowlist always permits', () => {
+        fc.assert(
+            fc.property(aaguidArb, (aaguid) => {
+                return checkAaguidAllowed(aaguid, []).ok === true;
+            }),
+            { numRuns: 200 }
+        );
+    });
+
+    it('AAGUID in list is always permitted', () => {
+        fc.assert(
+            fc.property(
+                aaguidArb,
+                fc.array(aaguidArb, { minLength: 0, maxLength: 5 }),
+                (aaguid, extras) => {
+                    const allowlist = [aaguid, ...extras];
+                    return checkAaguidAllowed(aaguid, allowlist).ok === true;
+                }
+            ),
+            { numRuns: 200 }
+        );
+    });
+
+    it('AAGUID matching is case-insensitive', () => {
+        fc.assert(
+            fc.property(aaguidArb, (aaguid) => {
+                const allowlist = [aaguid.toLowerCase()];
+                const resultUpper = checkAaguidAllowed(aaguid.toUpperCase(), allowlist);
+                const resultLower = checkAaguidAllowed(aaguid.toLowerCase(), allowlist);
+                const resultMixed = checkAaguidAllowed(
+                    aaguid.charAt(0).toUpperCase() + aaguid.slice(1).toLowerCase(),
+                    allowlist
+                );
+                return resultUpper.ok && resultLower.ok && resultMixed.ok;
+            }),
+            { numRuns: 100 }
+        );
+    });
+
+    it('AAGUID not in non-empty list is always rejected', () => {
+        fc.assert(
+            fc.property(
+                aaguidArb,
+                fc.array(aaguidArb, { minLength: 1, maxLength: 5 }),
+                (aaguid, allowlist) => {
+                    // Pre-condition: aaguid is not in the allowlist
+                    fc.pre(!allowlist.some(a => a.toLowerCase() === aaguid.toLowerCase()));
+                    const result = checkAaguidAllowed(aaguid, allowlist);
+                    return result.ok === false && result.reason.includes('not in allowlist');
+                }
+            ),
+            { numRuns: 200 }
+        );
+    });
+
+    it('rejection message includes AAGUID and allowlist size', () => {
+        fc.assert(
+            fc.property(
+                aaguidArb,
+                fc.array(aaguidArb, { minLength: 1, maxLength: 5 }),
+                (aaguid, allowlist) => {
+                    fc.pre(!allowlist.some(a => a.toLowerCase() === aaguid.toLowerCase()));
+                    const result = checkAaguidAllowed(aaguid, allowlist);
+                    return result.reason.includes(aaguid) &&
+                           result.reason.includes(`${allowlist.length} allowed`);
+                }
+            ),
+            { numRuns: 100 }
+        );
+    });
+});
+
+describe('PROPERTY: Device-Bound Policy Invariants', () => {
+    it('when not required, always permits regardless of backup status', () => {
+        fc.assert(
+            fc.property(fc.boolean(), (backupEligible) => {
+                return checkDeviceBound(backupEligible, false).ok === true;
+            }),
+            { numRuns: 50 }
+        );
+    });
+
+    it('when required, device-bound (BE=false) always passes', () => {
+        expect(checkDeviceBound(false, true).ok).toBe(true);
+    });
+
+    it('when required, backup-eligible (BE=true) always fails', () => {
+        const result = checkDeviceBound(true, true);
+        expect(result.ok).toBe(false);
+        expect(result.reason).toContain('backup-eligible');
+    });
+
+    it('combined: device-bound + any allowlist policy is consistent', () => {
+        fc.assert(
+            fc.property(
+                aaguidArb,
+                fc.boolean(),  // backupEligible
+                fc.boolean(),  // requireDeviceBound
+                fc.array(aaguidArb, { minLength: 0, maxLength: 3 }),  // allowlist
+                (aaguid, backupEligible, requireDeviceBound, allowlist) => {
+                    const aaguidResult = checkAaguidAllowed(aaguid, allowlist);
+                    const deviceResult = checkDeviceBound(backupEligible, requireDeviceBound);
+
+                    // Both checks must pass for overall acceptance
+                    const overallAllowed = aaguidResult.ok && deviceResult.ok;
+
+                    // If either rejects, the overall result rejects
+                    if (!aaguidResult.ok || !deviceResult.ok) {
+                        return overallAllowed === false;
+                    }
+                    return overallAllowed === true;
+                }
+            ),
+            { numRuns: 200 }
+        );
     });
 });

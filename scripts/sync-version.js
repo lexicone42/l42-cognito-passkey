@@ -192,6 +192,5 @@ console.log(`
 ║                                                                  ║
 ║  1. CHANGELOG.md      - Add version entry with changes           ║
 ║  2. CLAUDE.md         - Add to "Upgrade Notes" section           ║
-║  3. docs/upgrade-prompt.md - Update if major breaking changes    ║
 ╚══════════════════════════════════════════════════════════════════╝
 `);

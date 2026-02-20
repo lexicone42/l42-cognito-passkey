@@ -31,6 +31,7 @@ dotenvy = "0.15"
 thiserror = "2"
 dashmap = "6"
 urlencoding = "2"
+subtle = "2"
 
 [dev-dependencies]
 proptest = "1"

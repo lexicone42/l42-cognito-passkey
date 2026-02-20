@@ -103,7 +103,7 @@ For apps with extremely high security requirements (healthcare, finance), you ca
 
 The `/auth/session` endpoint receives tokens from the browser after passkey/password login. Unlike `/auth/callback` (which gets tokens directly from Cognito over TLS), `/auth/session` is an untrusted channel — a same-origin XSS attacker could forge a JWT with arbitrary claims (e.g., admin groups).
 
-To prevent this, the reference Express backend verifies the `id_token` signature against Cognito's JWKS (JSON Web Key Set) before storing it in the session. This requires the `COGNITO_USER_POOL_ID` environment variable:
+To prevent this, both reference backends (Rust and Express) verify the `id_token` signature against Cognito's JWKS (JSON Web Key Set) before storing it in the session. This requires the `COGNITO_USER_POOL_ID` environment variable:
 
 ```bash
 export COGNITO_USER_POOL_ID=us-west-2_abc123
@@ -156,7 +156,7 @@ Your backend must implement these endpoints:
 | `/auth/callback` | GET | (Optional) OAuth callback handler |
 | `/auth/authorize` | POST | (Optional) Cedar policy authorization (v0.13.0+) |
 
-See `examples/backends/express/` for a complete implementation.
+See `rust/` for the Rust backend (recommended) or `examples/backends/express/` for the Express backend.
 
 ## API Changes
 
@@ -243,12 +243,24 @@ const tokens = await getTokens();
 
 ## Backend Implementations
 
+### Rust (Recommended)
+
+See `rust/` for a complete implementation. Key features:
+- Native `cedar-policy` crate — no WASM marshalling
+- Dual-mode: runs in AWS Lambda or locally (`cargo run`)
+- InMemory (dev) and DynamoDB (prod) session backends
+- 10–50 ms Lambda cold start (vs 2–5 s for Node.js/Python)
+- Single static binary deployment
+
+See [rust/README.md](../rust/README.md) for setup and [Lambda Deployment](lambda-deployment.md) for production.
+
 ### Express (Node.js)
 
 See `examples/backends/express/` for a complete example.
 
 Key features:
 - `express-session` for session management
+- Cedar WASM engine (`@cedar-policy/cedar-wasm`)
 - HttpOnly cookies
 - Refresh token stored server-side
 

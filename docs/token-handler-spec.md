@@ -55,7 +55,7 @@ The session ID cookie **must** have these properties:
 | `SameSite` | `Lax` | CSRF protection for cross-origin form posts |
 | `Max-Age` | Configurable (default: 30 days) | Session lifetime |
 
-The cookie name is implementation-defined (Express uses `connect.sid`, FastAPI/Starlette might use `session_id`, etc.). `auth.js` sends cookies via `credentials: 'include'` and does not read the cookie name.
+The cookie name is implementation-defined (Express uses `connect.sid`, the Rust backend uses HMAC-signed session IDs). `auth.js` sends cookies via `credentials: 'include'` and does not read the cookie name.
 
 ### Session Storage
 
@@ -341,7 +341,7 @@ Evaluates a Cedar authorization policy server-side. This is a core part of the a
 
 **Security Invariant**: If the authorization engine is unavailable or errors, the response **must** deny access (fail-closed). Never default to `authorized: true`.
 
-**Policy Engine**: The reference implementation uses Cedar (`@cedar-policy/cedar-wasm` for Node.js, `cedarpy` for Python). The request/response contract is engine-agnostic, so backends could substitute OPA or Casbin, but Cedar is the tested and documented path. See `docs/cedar-integration.md` for schema and policy details.
+**Policy Engine**: The reference implementations use Cedar (`cedar-policy` crate for Rust, `@cedar-policy/cedar-wasm` for Node.js). The request/response contract is engine-agnostic, so backends could substitute OPA or Casbin, but Cedar is the tested and documented path. See `docs/cedar-integration.md` for schema and policy details.
 
 ---
 
@@ -406,5 +406,5 @@ These invariants **must** hold in any conforming implementation:
 
 ## Reference Implementations
 
-- **Express/Node.js**: `examples/backends/express/server.js` in this repository
-- **Python/FastAPI**: [`examples/backends/fastapi/`](../examples/backends/fastapi/) in this repository
+- **Rust** (Recommended): [`rust/`](../rust/) — native Cedar evaluation, 10–50 ms Lambda cold start
+- **Express/Node.js**: `examples/backends/express/server.js` — Cedar via WASM

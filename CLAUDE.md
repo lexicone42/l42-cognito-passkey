@@ -6,7 +6,7 @@ L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for A
 
 **Current Version**: 0.18.0
 **License**: Apache-2.0
-**Tests**: ~696 (including 53 property-based tests + 15 token storage tests + 56 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 132 Cedar authorization tests)
+**Tests**: 733 vitest + 149 cargo (including 53 property-based tests + 15 token storage tests + 56 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 132 Cedar authorization tests)
 
 ## Quick Start for Claude Instances
 
@@ -23,8 +23,11 @@ cp /path/to/l42cognitopasskey/src/auth.js ./public/auth/auth.js
 ### Key Commands
 
 ```bash
-# Run all tests
+# Run all JS tests (733 tests)
 pnpm test
+
+# Run Rust backend tests (149 tests)
+cd rust && cargo test
 
 # Run tests in watch mode
 pnpm test:watch
@@ -53,7 +56,8 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 | `plugin/templates/static-site-pattern.html` | Static site integration template |
 | `plugin/templates/admin-panel-pattern.html` | Admin panel template |
 | `plugin/templates/handler-token-store.test.js` | Token Handler mode tests |
-| `examples/backends/express/` | Token Handler Express backend |
+| `rust/` | Rust Token Handler backend (recommended) |
+| `examples/backends/express/` | Express Token Handler backend (alternative) |
 | `docs/handler-mode.md` | Token Handler mode documentation |
 | `scripts/sync-version.js` | Syncs version across all files |
 | `docs/RELEASING.md` | Release process documentation |
@@ -260,14 +264,14 @@ The RBAC system has 22 property-based tests using fast-check:
 
 ### v0.17.0 (Rust Token Handler Backend)
 
-**New: Rust backend alternative** in `rust/` — a native Axum + Cedar implementation that can replace the Express or FastAPI backends. The same `auth.js` client works without changes.
+**New: Rust backend** in `rust/` — the preferred Token Handler backend. Native Axum + Cedar implementation.
 
 Key features:
 - Native `cedar-policy` crate — no WASM marshalling (the core motivation)
 - Dual-mode binary: Lambda (`lambda_http`) + local dev (`axum::serve`)
-- InMemory + DynamoDB session backends (compatible with FastAPI's DynamoDB table schema)
-- HMAC-SHA256 session cookies (note: **not** compatible with FastAPI's itsdangerous format — users will re-login on backend switch)
-- 97 tests, Rust edition 2024, clippy clean
+- InMemory + DynamoDB session backends
+- HMAC-SHA256 session cookies
+- 149 tests (110 unit + 39 integration), Rust edition 2024, clippy clean
 
 No changes to `auth.js` or client-side code.
 
@@ -367,8 +371,12 @@ Key features:
 - 9 policy files mapping all RBAC roles to Cedar policies
 - Ownership enforcement via `forbid` policies
 - Cognito group alias resolution (mirrors `rbac-roles.js`)
-- EntityProvider interface for future persistent entity stores
+- EntityProvider interface for trusted ownership (see below)
 - Fail-closed: returns 503 if Cedar unavailable
+
+**Known Limitation (S1):** `resource.owner` is sent by the client in `requireServerAuthorization()`. A malicious client can lie about ownership, bypassing the forbid policy. For production, use the EntityProvider interface to load the true owner from a trusted data store (DynamoDB, database). For UI-gated workflows where the app already knows the owner, passing it from the client is acceptable as defense-in-depth.
+
+**Admin Override Note:** `:own` actions (`write:own`, `delete:own`) are subject to the ownership forbid policy even for admins. Admins must use `:all` variants (`write:all`, `delete:all`) to modify other users' resources.
 
 See `docs/cedar-integration.md` for complete documentation.
 

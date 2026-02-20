@@ -1,12 +1,12 @@
 # L42 Token Handler — Rust Backend
 
-Native Rust implementation of the Token Handler backend for [l42-cognito-passkey](https://github.com/lexicone42/l42-cognito-passkey). Replaces the Express (Node.js) and FastAPI (Python) reference backends with a single static binary that runs in both AWS Lambda and local development.
+Native Rust implementation of the Token Handler backend for [l42-cognito-passkey](https://github.com/lexicone42/l42-cognito-passkey). The preferred backend — runs as a single static binary in both AWS Lambda and local development. Express (Node.js) is available as an alternative in `examples/backends/express/`.
 
 ## Why Rust?
 
-The Express and FastAPI backends call the Cedar policy engine through WASM (JS) or FFI (Python cedarpy) — both wrapping the same Rust library underneath. This backend calls `cedar-policy` directly:
+The Express backend calls the Cedar policy engine through WASM (`@cedar-policy/cedar-wasm`) — wrapping the same Rust library underneath. This backend calls `cedar-policy` directly:
 
-| Metric | WASM/FFI backends | Rust backend |
+| Metric | Express (WASM) | Rust backend |
 |--------|-------------------|--------------|
 | Lambda cold start | 2–5 s (WASM init) | 10–50 ms |
 | Lambda memory | 512 MB | 128–256 MB |
@@ -75,7 +75,7 @@ rust/
 
 ## Endpoints
 
-All endpoints match the FastAPI/Express backends exactly — the same `auth.js` client works without changes.
+All endpoints match the Express backend exactly — the same `auth.js` client works without changes.
 
 | Endpoint | Method | Auth | CSRF | Purpose |
 |----------|--------|------|------|---------|
@@ -105,7 +105,7 @@ For production (Lambda), also set:
 
 ## DynamoDB Session Table
 
-Same schema as the FastAPI backend — both can share the same table:
+DynamoDB session table schema:
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
@@ -161,7 +161,7 @@ Admin bypasses ownership via `write:all` (separate action not covered by the for
 ## Tests
 
 ```bash
-# All tests (97 total: 75 unit + 22 integration)
+# All tests (149 total: 110 unit + 39 integration)
 cargo test
 
 # Just integration tests
@@ -171,4 +171,4 @@ cargo test --test test_routes
 cargo test cedar::engine
 ```
 
-Integration tests cover: health, token retrieval, expired token rejection, CSRF enforcement, session CRUD, Cedar authorization (admin/user/ownership), session isolation.
+Integration tests cover: health, token retrieval, expired token rejection, CSRF enforcement, session CRUD, Cedar authorization (admin/user/ownership), callback redirects, credential validation, OCSF logging, session isolation.

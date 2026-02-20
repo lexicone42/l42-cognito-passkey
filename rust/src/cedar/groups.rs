@@ -1,8 +1,7 @@
 //! Cognito group alias resolution for Cedar entity mapping.
 //!
-//! Mirrors the `DEFAULT_GROUP_MAP` from both:
+//! Mirrors the `DEFAULT_GROUP_MAP` from:
 //! - `examples/backends/express/cedar-engine.js`
-//! - `examples/backends/fastapi/app/cedar_engine.py`
 //!
 //! Each Cognito group name (case-insensitive) maps to a canonical Cedar
 //! UserGroup entity ID. Unknown groups pass through unchanged.

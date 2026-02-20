@@ -1,6 +1,6 @@
 //! Shared request/response DTOs.
 //!
-//! These match the Pydantic models from the FastAPI routes exactly.
+//! Request and response DTOs matching the Token Handler protocol spec.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

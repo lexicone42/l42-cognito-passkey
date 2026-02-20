@@ -1,12 +1,12 @@
 //! DynamoDB session backend for production/Lambda deployments.
 //!
-//! Same table schema as the FastAPI backend:
+//! DynamoDB session table schema:
 //! - `session_id` (S) — partition key
 //! - `data` (S) — JSON-encoded session payload
 //! - `created_at` (N) — Unix timestamp when session was created
 //! - `ttl` (N) — Unix timestamp for DynamoDB automatic cleanup
 //!
-//! Compatible with existing FastAPI DynamoDB sessions table.
+//! Compatible with any Token Handler backend using this table schema.
 
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::Client;

@@ -47,12 +47,36 @@ pub async fn oauth_callback(
         let scheme = headers
             .get("x-forwarded-proto")
             .and_then(|v| v.to_str().ok())
+            .filter(|s| *s == "http" || *s == "https")
             .unwrap_or(if state.config.session_https_only {
                 "https"
             } else {
                 "http"
             });
-        format!("{}://{}", scheme, host).into()
+        let origin = format!("{}://{}", scheme, host);
+
+        // Validate origin against allowed list (prevents open redirect via header injection)
+        if !state.config.callback_allowed_origins.is_empty()
+            && !state.config.callback_allowed_origins.iter().any(|o| o == &origin.to_lowercase())
+        {
+            ocsf::authentication_event(
+                ocsf::ACTIVITY_AUTH_TICKET,
+                "Authentication Ticket",
+                ocsf::STATUS_FAILURE,
+                ocsf::SEVERITY_HIGH,
+                None,
+                ocsf::AUTH_PROTOCOL_OAUTH2,
+                "OAuth 2.0/OIDC",
+                &format!("Callback origin rejected: {origin}"),
+            );
+            *session.destroyed.lock().await = true;
+            return Redirect::temporary(&format!(
+                "{}/login?error=Invalid+callback+origin",
+                state.config.frontend_url
+            ));
+        }
+
+        origin.into()
     } else {
         std::borrow::Cow::Borrowed(&state.config.frontend_url)
     };
@@ -97,6 +121,9 @@ pub async fn oauth_callback(
             &format!("OAuth error: {}", error),
         );
 
+        // Destroy session — no valid tokens, prevent stale empty session
+        *session.destroyed.lock().await = true;
+
         return Redirect::temporary(&format!(
             "{}/login?error={}",
             frontend,
@@ -108,10 +135,11 @@ pub async fn oauth_callback(
     let code = match params.code {
         Some(ref c) if !c.is_empty() => c.as_str(),
         _ => {
+            *session.destroyed.lock().await = true;
             return Redirect::temporary(&format!(
                 "{}/login?error=Missing+authorization+code",
                 frontend
-            ))
+            ));
         }
     };
 
@@ -186,6 +214,9 @@ pub async fn oauth_callback(
                 "OAuth 2.0/OIDC",
                 &format!("OAuth token exchange failed: {}", e),
             );
+
+            // Destroy session — exchange failed, no valid tokens
+            *session.destroyed.lock().await = true;
 
             Redirect::temporary(&format!(
                 "{}/login?error=Authentication+failed",

@@ -2,9 +2,9 @@
  * L42 Cognito Passkey - TypeScript Type Declarations
  *
  * Type declarations for the l42-cognito-passkey authentication library.
- * These types match the exports of src/auth.js (v0.12.2).
+ * These types match the exports of src/auth.js (v0.18.0).
  *
- * @version 0.12.2
+ * @version 0.18.0
  * @license Apache-2.0
  */
 
@@ -68,15 +68,17 @@ export interface AuthConfigOptions {
   stateKey?: string;
   /** WebAuthn Relying Party ID */
   relyingPartyId?: string;
-  /** Token storage mode */
-  tokenStorage?: 'localStorage' | 'memory' | 'handler';
-  /** Token Handler GET endpoint (required for handler mode) */
+  /** Token Handler GET endpoint (required) */
   tokenEndpoint?: string;
-  /** Token Handler refresh POST endpoint (required for handler mode) */
+  /** Token Handler refresh POST endpoint (required) */
   refreshEndpoint?: string;
-  /** Token Handler logout POST endpoint (required for handler mode) */
+  /** Token Handler logout POST endpoint (required) */
   logoutEndpoint?: string;
-  /** Backend OAuth callback URL (optional, for handler mode) */
+  /** Token Handler session POST endpoint — persists tokens after passkey/password login */
+  sessionEndpoint?: string;
+  /** Pre-registration credential validation endpoint (AAGUID allowlist + device-bound policy) */
+  validateCredentialEndpoint?: string;
+  /** Backend OAuth callback URL (optional) */
   oauthCallbackUrl?: string;
   /** Token Handler cache TTL in milliseconds (default: 30000) */
   handlerCacheTtl?: number;
@@ -215,8 +217,10 @@ export interface AuthorizationResult {
  * Options for requireServerAuthorization().
  */
 export interface ServerAuthorizationOptions {
-  /** Server endpoint to check authorization (default: '/api/authorize') */
+  /** Server endpoint to check authorization (default: '/auth/authorize') */
   endpoint?: string;
+  /** Resource descriptor for ownership-scoped actions */
+  resource?: { id?: string; type?: string; owner?: string };
   /** Additional context to send to the authorization endpoint */
   context?: Record<string, unknown>;
 }
@@ -300,11 +304,10 @@ export function isConfigured(): boolean;
 /**
  * Get stored authentication tokens.
  *
- * In handler mode, returns a Promise that fetches tokens from the server.
- * In localStorage/memory modes, returns tokens synchronously.
- * For cross-mode compatibility, use `await getTokens()`.
+ * Fetches tokens from the server (or returns cached if TTL not expired).
+ * Always returns a Promise — use `await getTokens()`.
  */
-export function getTokens(): TokenSet | null | Promise<TokenSet | null>;
+export function getTokens(): Promise<TokenSet | null>;
 
 /**
  * Store tokens and set cookie for server-side validation.
