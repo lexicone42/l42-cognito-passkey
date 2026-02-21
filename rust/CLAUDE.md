@@ -5,7 +5,7 @@ Guide for Claude instances working on the Rust Token Handler backend.
 ## Quick Reference
 
 ```bash
-cargo test            # 149 tests (110 unit + 39 integration)
+cargo test            # 157 tests (113 unit + 44 integration)
 cargo clippy -- -D warnings   # Must pass clean
 cargo run             # Local dev server on :3001 (needs .env)
 ```
@@ -42,7 +42,7 @@ This is the **preferred Token Handler** backend — it stores JWT tokens server-
 | `session::cookie` | HMAC-SHA256 session cookie signing | `sign_session_id`, `verify_cookie` |
 | `session::memory` | In-memory session store | `InMemoryBackend` (DashMap) |
 | `session::dynamodb` | DynamoDB session store | `DynamoDbBackend` |
-| `session::middleware` | Axum session middleware | `SessionHandle`, `SessionLayer` |
+| `session::middleware` | Axum session middleware | `SessionHandle`, `SessionLayer`, `ServiceTokenAuth` |
 | `middleware::csrf` | CSRF header check | `require_csrf` |
 | `ocsf` | OCSF security event logging | `authentication_event`, `authorization_event` |
 | `routes::*` | 9 HTTP handlers | One handler per file |
@@ -124,6 +124,7 @@ Three env vars handle CDN deployment:
 | `CALLBACK_ALLOWED_ORIGINS` | (empty) | Comma-separated list of allowed origins for multi-origin callback (e.g. `https://app1.example.com,https://app2.example.com`). **Required when `CALLBACK_USE_ORIGIN=true`** — empty list logs a startup warning. Prevents open redirect via header injection. |
 | `AAGUID_ALLOWLIST` | (empty) | Comma-separated list of allowed AAGUIDs (UUID format, case-insensitive). Empty = allow all. Used by `POST /auth/validate-credential`. |
 | `REQUIRE_DEVICE_BOUND` | `false` | When `true`, rejects credentials with BE=true (backup-eligible / synced passkeys) at registration time. |
+| `SERVICE_TOKEN` | (none) | Pre-shared token for headless/programmatic API access. When set, requests with a matching `X-Service-Token` header bypass session cookie auth and CSRF. Use a strong random value (32+ chars). Empty/missing = disabled. |
 | (none — uses headers) | — | `X-Forwarded-Host` header preferred over `Host` for callback `redirect_uri` |
 
 Example CloudFront config: CloudFront routes `/_auth/*` to Lambda origin, sets `X-Forwarded-Host: app.example.com`. Lambda env: `AUTH_PATH_PREFIX=/_auth`, `COOKIE_DOMAIN=.example.com`.

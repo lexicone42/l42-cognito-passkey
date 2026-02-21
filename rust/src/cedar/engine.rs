@@ -6,8 +6,8 @@
 //! shared via `Arc<CedarState>` across all requests.
 
 use cedar_policy::{
-    Authorizer, Context, Decision, Entities, EntityId, EntityTypeName, EntityUid,
-    PolicySet, Schema, Validator, ValidationMode,
+    Authorizer, Context, Decision, Entities, EntityId, EntityTypeName, EntityUid, PolicySet,
+    Schema, ValidationMode, Validator,
 };
 use std::fs;
 use std::path::Path;
@@ -53,12 +53,7 @@ impl CedarState {
         let mut policy_files: Vec<_> = fs::read_dir(policy_dir)
             .map_err(|e| CedarError::Init(format!("Failed to read policy directory: {e}")))?
             .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext == "cedar")
-            })
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "cedar"))
             .collect();
         policy_files.sort_by_key(|e| e.file_name());
 
@@ -73,8 +68,9 @@ impl CedarState {
         // The @id("...") annotations in each .cedar file give unique IDs.
         let mut all_policies = String::new();
         for entry in &policy_files {
-            let content = fs::read_to_string(entry.path())
-                .map_err(|e| CedarError::Init(format!("Failed to read {}: {e}", entry.path().display())))?;
+            let content = fs::read_to_string(entry.path()).map_err(|e| {
+                CedarError::Init(format!("Failed to read {}: {e}", entry.path().display()))
+            })?;
             all_policies.push_str(&content);
             all_policies.push_str("\n\n");
         }
@@ -86,10 +82,7 @@ impl CedarState {
         let validator = Validator::new(schema.clone());
         let result = validator.validate(&policy_set, ValidationMode::default());
         if !result.validation_passed() {
-            let errors: Vec<String> = result
-                .validation_errors()
-                .map(|e| e.to_string())
-                .collect();
+            let errors: Vec<String> = result.validation_errors().map(|e| e.to_string()).collect();
             return Err(CedarError::Init(format!(
                 "Cedar validation failed: {}",
                 errors.join("; ")
@@ -114,10 +107,7 @@ impl CedarState {
         let validator = Validator::new(schema.clone());
         let result = validator.validate(&policy_set, ValidationMode::default());
         if !result.validation_passed() {
-            let errors: Vec<String> = result
-                .validation_errors()
-                .map(|e| e.to_string())
-                .collect();
+            let errors: Vec<String> = result.validation_errors().map(|e| e.to_string()).collect();
             return Err(CedarError::Init(format!(
                 "Validation failed: {}",
                 errors.join("; ")
@@ -151,8 +141,8 @@ impl CedarState {
         _context: Option<&serde_json::Value>,
     ) -> Result<AuthorizeResult, CedarError> {
         // Build entities
-        let entity_list = build_entities(claims, resource)
-            .map_err(|e| CedarError::Evaluation(e.to_string()))?;
+        let entity_list =
+            build_entities(claims, resource).map_err(|e| CedarError::Evaluation(e.to_string()))?;
 
         let entities = Entities::from_entities(entity_list, Some(&self.schema))
             .map_err(|e| CedarError::Evaluation(format!("Failed to build entity set: {e}")))?;
@@ -254,9 +244,7 @@ mod tests {
         let state = init_real_cedar();
         let admin = claims("admin-user", &["admin"]);
 
-        let result = state
-            .authorize(&admin, "read:content", None, None)
-            .unwrap();
+        let result = state.authorize(&admin, "read:content", None, None).unwrap();
         assert!(result.authorized);
 
         let result = state
@@ -264,9 +252,7 @@ mod tests {
             .unwrap();
         assert!(result.authorized);
 
-        let result = state
-            .authorize(&admin, "write:all", None, None)
-            .unwrap();
+        let result = state.authorize(&admin, "write:all", None, None).unwrap();
         assert!(result.authorized);
     }
 
@@ -276,14 +262,10 @@ mod tests {
         let user = claims("user-sub", &["users"]);
 
         // Users can read:own and write:own
-        let result = state
-            .authorize(&user, "read:own", None, None)
-            .unwrap();
+        let result = state.authorize(&user, "read:own", None, None).unwrap();
         assert!(result.authorized);
 
-        let result = state
-            .authorize(&user, "write:own", None, None)
-            .unwrap();
+        let result = state.authorize(&user, "write:own", None, None).unwrap();
         assert!(result.authorized);
 
         // Users cannot admin:delete-user
@@ -307,7 +289,10 @@ mod tests {
         let result = state
             .authorize(&user, "write:own", Some(&own_resource), None)
             .unwrap();
-        assert!(result.authorized, "User should be able to write own resource");
+        assert!(
+            result.authorized,
+            "User should be able to write own resource"
+        );
 
         // Write someone else's resource → denied by forbid policy
         let other_resource = ResourceDescriptor {
@@ -391,25 +376,17 @@ mod tests {
         let state = init_real_cedar();
         let dev = claims("dev-sub", &["developers"]);
 
-        let result = state
-            .authorize(&dev, "api:read", None, None)
-            .unwrap();
+        let result = state.authorize(&dev, "api:read", None, None).unwrap();
         assert!(result.authorized);
 
-        let result = state
-            .authorize(&dev, "read:logs", None, None)
-            .unwrap();
+        let result = state.authorize(&dev, "read:logs", None, None).unwrap();
         assert!(result.authorized);
 
-        let result = state
-            .authorize(&dev, "debug:view", None, None)
-            .unwrap();
+        let result = state.authorize(&dev, "debug:view", None, None).unwrap();
         assert!(result.authorized);
 
         // Developers cannot admin
-        let result = state
-            .authorize(&dev, "admin:manage", None, None)
-            .unwrap();
+        let result = state.authorize(&dev, "admin:manage", None, None).unwrap();
         assert!(!result.authorized);
     }
 

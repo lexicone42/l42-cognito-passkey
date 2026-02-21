@@ -170,11 +170,21 @@ mod tests {
         backend.save("session-b", &data_b).await;
 
         assert_eq!(
-            backend.load("session-a").await.unwrap().get("user").unwrap(),
+            backend
+                .load("session-a")
+                .await
+                .unwrap()
+                .get("user")
+                .unwrap(),
             "alice"
         );
         assert_eq!(
-            backend.load("session-b").await.unwrap().get("user").unwrap(),
+            backend
+                .load("session-b")
+                .await
+                .unwrap()
+                .get("user")
+                .unwrap(),
             "bob"
         );
 

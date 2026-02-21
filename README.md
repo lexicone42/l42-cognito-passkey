@@ -3,7 +3,9 @@
 [![CI](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml/badge.svg)](https://github.com/lexicone42/l42-cognito-passkey/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.19.0-blue)](https://github.com/lexicone42/l42-cognito-passkey/blob/main/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests](https://img.shields.io/badge/tests-882-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
+[![Tests](https://img.shields.io/badge/tests-890-success)](https://github.com/lexicone42/l42-cognito-passkey/actions)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024_edition-orange)](https://doc.rust-lang.org/edition-guide/rust-2024/)
+[![Built with Claude Code](https://img.shields.io/badge/Built_with-Claude_Code-blue)](https://claude.ai/claude-code)
 
 Self-hosted authentication for AWS Cognito with passkey support. Copy `auth.js` into your project — no build step, no CDN dependency.
 
@@ -99,7 +101,7 @@ Copy `plugin/templates/callback.html` to your project and update the config valu
 
 ```bash
 pnpm test           # 733 JS tests
-cd rust && cargo test  # 149 Rust tests
+cd rust && cargo test  # 157 Rust tests
 ```
 
 See [CLAUDE.md](CLAUDE.md) for contributor guidelines and [release.md](docs/release.md) for the release process.

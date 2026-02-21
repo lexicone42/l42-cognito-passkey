@@ -15,6 +15,7 @@ use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::Response;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 
 use super::cookie::{sign_session_id, verify_cookie};
@@ -59,12 +60,18 @@ impl SessionHandle {
     }
 }
 
+/// Marker extension inserted when a request is authenticated via service token.
+/// Downstream middleware (e.g. CSRF) checks for this to skip validation.
+#[derive(Clone)]
+pub struct ServiceTokenAuth;
+
 /// Session middleware configuration.
 pub struct SessionLayer<B: SessionBackend> {
     pub backend: Arc<B>,
     pub secret: String,
     pub https_only: bool,
     pub cookie_domain: Option<String>,
+    pub service_token: Option<String>,
 }
 
 /// Axum middleware function for session handling.
@@ -73,6 +80,33 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
     mut req: Request,
     next: Next,
 ) -> Response {
+    // Service token bypass: check X-Service-Token header before cookie parsing.
+    // If valid, insert synthetic session + marker and skip all cookie logic.
+    if let Some(expected) = &layer.service_token
+        && let Some(provided) = req
+            .headers()
+            .get("x-service-token")
+            .and_then(|v| v.to_str().ok())
+        && expected.as_bytes().ct_eq(provided.as_bytes()).into()
+    {
+        let handle = SessionHandle::new("__service__".into(), SessionData::new());
+        req.extensions_mut().insert(handle);
+        req.extensions_mut().insert(ServiceTokenAuth);
+
+        crate::ocsf::authentication_event(
+            crate::ocsf::ACTIVITY_LOGON,
+            "Service Token Auth",
+            crate::ocsf::STATUS_SUCCESS,
+            crate::ocsf::SEVERITY_INFORMATIONAL,
+            None,
+            crate::ocsf::AUTH_PROTOCOL_SERVICE_TOKEN,
+            "Service Token",
+            "Service token authentication successful",
+        );
+
+        return next.run(req).await;
+    }
+
     // Extract session ID from cookie
     let cookie_header = req
         .headers()
@@ -81,8 +115,7 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
         .unwrap_or("");
 
     let session_cookie = parse_cookie(cookie_header, COOKIE_NAME);
-    let session_id = session_cookie
-        .and_then(|v| verify_cookie(layer.secret.as_bytes(), v));
+    let session_id = session_cookie.and_then(|v| verify_cookie(layer.secret.as_bytes(), v));
 
     let (handle, initial_data) = match session_id {
         Some(id) => {
@@ -125,20 +158,18 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
     if destroyed {
         layer.backend.delete(&session_id).await;
         let cookie = make_delete_cookie(&layer.secret, &session_id, layer.https_only, domain);
-        response.headers_mut().append(
-            header::SET_COOKIE,
-            cookie.parse().unwrap(),
-        );
+        response
+            .headers_mut()
+            .append(header::SET_COOKIE, cookie.parse().unwrap());
     } else if current_data != initial_data {
         // Only persist when the handler actually modified session data.
         // Without this check, every unauthenticated request (including GET /health)
         // would create an empty session in the backend + set a cookie.
         layer.backend.save(&session_id, &current_data).await;
         let cookie = make_set_cookie(&layer.secret, &session_id, layer.https_only, domain);
-        response.headers_mut().append(
-            header::SET_COOKIE,
-            cookie.parse().unwrap(),
-        );
+        response
+            .headers_mut()
+            .append(header::SET_COOKIE, cookie.parse().unwrap());
     }
 
     response
@@ -267,5 +298,29 @@ mod tests {
         let cookie = make_delete_cookie("secret", "sid", false, Some(".example.com"));
         assert!(cookie.contains("Max-Age=0"));
         assert!(cookie.contains("Domain=.example.com"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_matches() {
+        let a = "my-secret-token-value";
+        let b = "my-secret-token-value";
+        let result: bool = a.as_bytes().ct_eq(b.as_bytes()).into();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_constant_time_eq_rejects_different() {
+        let a = "my-secret-token-value";
+        let b = "wrong-token";
+        let result: bool = a.as_bytes().ct_eq(b.as_bytes()).into();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_constant_time_eq_rejects_different_length() {
+        let a = "short";
+        let b = "a-much-longer-token-value";
+        let result: bool = a.as_bytes().ct_eq(b.as_bytes()).into();
+        assert!(!result);
     }
 }

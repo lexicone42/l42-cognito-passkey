@@ -84,9 +84,12 @@ pub fn build_entities(
         resource_attrs.push(("owner".into(), owner_expr));
     }
 
-    let resource_entity =
-        Entity::new(resource_uid, resource_attrs.into_iter().collect(), HashSet::new())
-            .map_err(|e| EntityBuildError(format!("Failed to build Resource entity: {e}")))?;
+    let resource_entity = Entity::new(
+        resource_uid,
+        resource_attrs.into_iter().collect(),
+        HashSet::new(),
+    )
+    .map_err(|e| EntityBuildError(format!("Failed to build Resource entity: {e}")))?;
     entities.push(resource_entity);
 
     Ok(entities)
@@ -140,7 +143,10 @@ mod tests {
 
         // Check resource entity
         let resource = &entities[2];
-        assert_eq!(resource.uid().to_string(), "App::Resource::\"_application\"");
+        assert_eq!(
+            resource.uid().to_string(),
+            "App::Resource::\"_application\""
+        );
     }
 
     #[test]
@@ -157,7 +163,10 @@ mod tests {
         assert_eq!(entities.len(), 3);
 
         let resource_entity = &entities[2];
-        assert_eq!(resource_entity.uid().to_string(), "App::Resource::\"doc-1\"");
+        assert_eq!(
+            resource_entity.uid().to_string(),
+            "App::Resource::\"doc-1\""
+        );
     }
 
     #[test]

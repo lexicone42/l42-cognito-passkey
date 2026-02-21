@@ -6,15 +6,18 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use ciborium::Value as CborValue;
-use common::{build_test_app, build_test_app_with_config, expired_claims, test_claims, TestKeys};
+use common::{
+    TestKeys, build_test_app, build_test_app_with_config, expired_claims,
+    post_with_service_token, request_with_service_token, test_claims,
+};
 use l42_token_handler::config::Config;
 use l42_token_handler::session::cookie::sign_session_id;
 use l42_token_handler::session::{SessionBackend, SessionData};
 use l42_token_handler::types::SessionTokens;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 /// Helper to read response body as JSON.
@@ -662,12 +665,7 @@ async fn test_cookie_includes_domain_when_configured() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let cookie = resp
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let cookie = resp.headers().get("set-cookie").unwrap().to_str().unwrap();
     assert!(
         cookie.contains("Domain=.example.com"),
         "cookie should include Domain: {cookie}"
@@ -697,12 +695,7 @@ async fn test_cookie_no_domain_by_default() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let cookie = resp
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let cookie = resp.headers().get("set-cookie").unwrap().to_str().unwrap();
     assert!(
         !cookie.contains("Domain="),
         "cookie should not include Domain by default: {cookie}"
@@ -908,10 +901,7 @@ fn build_test_attestation_object(flags: u8, aaguid: Option<[u8; 16]>) -> String 
             CborValue::Text("fmt".into()),
             CborValue::Text("none".into()),
         ),
-        (
-            CborValue::Text("attStmt".into()),
-            CborValue::Map(vec![]),
-        ),
+        (CborValue::Text("attStmt".into()), CborValue::Map(vec![])),
         (
             CborValue::Text("authData".into()),
             CborValue::Bytes(auth_data),
@@ -923,8 +913,7 @@ fn build_test_attestation_object(flags: u8, aaguid: Option<[u8; 16]>) -> String 
 }
 
 const TEST_AAGUID: [u8; 16] = [
-    0xcb, 0x69, 0x48, 0x1e, 0x8f, 0xf7, 0x40, 0x39, 0x93, 0xec, 0x0a, 0x27, 0x29, 0xa1, 0x54,
-    0xa8,
+    0xcb, 0x69, 0x48, 0x1e, 0x8f, 0xf7, 0x40, 0x39, 0x93, 0xec, 0x0a, 0x27, 0x29, 0xa1, 0x54, 0xa8,
 ];
 
 /// Build base64-encoded clientDataJSON with the test frontend origin.
@@ -1007,7 +996,12 @@ async fn test_validate_credential_aaguid_not_in_allowlist() {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     let body = body_json(resp).await;
     assert_eq!(body["allowed"], false);
-    assert!(body["reason"].as_str().unwrap().contains("not in allowlist"));
+    assert!(
+        body["reason"]
+            .as_str()
+            .unwrap()
+            .contains("not in allowlist")
+    );
 }
 
 #[tokio::test]
@@ -1175,4 +1169,75 @@ async fn test_validate_credential_no_csrf() {
 
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+// ───── Service Token Bypass ─────
+
+#[tokio::test]
+async fn test_service_token_bypasses_session_auth() {
+    let mut config = Config::test_default();
+    config.service_token = Some("test-service-token-32chars-long!!".into());
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    // No session cookie, but valid service token → should reach route handler.
+    // GET /auth/token with no session tokens → 401 NotAuthenticated (not 500).
+    let req = request_with_service_token("GET", "/auth/token", "test-service-token-32chars-long!!");
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = body_json(resp).await;
+    assert_eq!(body["error"], "Not authenticated");
+}
+
+#[tokio::test]
+async fn test_service_token_bypasses_csrf() {
+    let mut config = Config::test_default();
+    config.service_token = Some("test-service-token-32chars-long!!".into());
+    let (app, _state) = build_test_app_with_config(config, true);
+
+    // POST /auth/authorize without CSRF header but with valid service token.
+    // Should get 401 (no session tokens) instead of 403 (CSRF failed).
+    let body = json!({"action": "read:content"});
+    let req = post_with_service_token("/auth/authorize", "test-service-token-32chars-long!!", &body);
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = body_json(resp).await;
+    assert_eq!(body["error"], "Not authenticated");
+}
+
+#[tokio::test]
+async fn test_service_token_invalid_falls_through() {
+    let mut config = Config::test_default();
+    config.service_token = Some("correct-token-value-32characters!".into());
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    // Wrong token → falls through to normal session flow (no cookie → 401)
+    let req = request_with_service_token("GET", "/auth/token", "wrong-token");
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_service_token_disabled_ignores_header() {
+    // Default config: service_token = None
+    let (app, _state) = build_test_app(false);
+
+    // Even with a header, feature is disabled → normal session flow
+    let req = request_with_service_token("GET", "/auth/token", "any-token");
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_service_token_no_set_cookie() {
+    let mut config = Config::test_default();
+    config.service_token = Some("test-service-token-32chars-long!!".into());
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    // Service token requests should never set cookies
+    let req = request_with_service_token("GET", "/auth/token", "test-service-token-32chars-long!!");
+    let resp = app.oneshot(req).await.unwrap();
+    assert!(
+        resp.headers().get("set-cookie").is_none(),
+        "service token responses must not set cookies"
+    );
 }

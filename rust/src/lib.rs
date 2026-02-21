@@ -14,8 +14,8 @@ pub mod routes;
 pub mod session;
 pub mod types;
 
-use axum::middleware::from_fn;
 use axum::Router;
+use axum::middleware::from_fn;
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -56,6 +56,7 @@ pub fn create_app(state: Arc<AppState>) -> Router {
             axum::http::header::CONTENT_TYPE,
             axum::http::header::AUTHORIZATION,
             axum::http::HeaderName::from_static("x-l42-csrf"),
+            axum::http::HeaderName::from_static("x-service-token"),
         ])
         .allow_credentials(true);
 
@@ -71,10 +72,7 @@ pub fn create_app(state: Arc<AppState>) -> Router {
             "/refresh",
             axum::routing::post(routes::refresh::refresh_tokens),
         )
-        .route(
-            "/logout",
-            axum::routing::post(routes::logout::logout),
-        )
+        .route("/logout", axum::routing::post(routes::logout::logout))
         .route(
             "/authorize",
             axum::routing::post(routes::authorize::authorize),
@@ -87,10 +85,7 @@ pub fn create_app(state: Arc<AppState>) -> Router {
 
     // Auth routes without CSRF
     let open_auth_routes = Router::new()
-        .route(
-            "/token",
-            axum::routing::get(routes::token::get_token),
-        )
+        .route("/token", axum::routing::get(routes::token::get_token))
         .route(
             "/callback",
             axum::routing::get(routes::callback::oauth_callback),
@@ -98,9 +93,7 @@ pub fn create_app(state: Arc<AppState>) -> Router {
         .route("/me", axum::routing::get(routes::me::me));
 
     // All auth routes nested under configurable prefix
-    let auth_routes = Router::new()
-        .merge(csrf_routes)
-        .merge(open_auth_routes);
+    let auth_routes = Router::new().merge(csrf_routes).merge(open_auth_routes);
 
     Router::new()
         .route("/health", axum::routing::get(routes::health::health))

@@ -3,8 +3,8 @@
 //! Parses CBOR attestation objects to extract AAGUID and backup flags,
 //! then checks them against configurable policies (allowlist, device-bound).
 
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use ciborium::Value as CborValue;
 use subtle::ConstantTimeEq;
 
@@ -26,9 +26,7 @@ pub fn parse_attestation_object(b64: &str) -> Result<DeviceInfo, String> {
     let cbor: CborValue =
         ciborium::from_reader(&bytes[..]).map_err(|e| format!("Invalid CBOR: {e}"))?;
 
-    let map = cbor
-        .as_map()
-        .ok_or("attestationObject is not a CBOR map")?;
+    let map = cbor.as_map().ok_or("attestationObject is not a CBOR map")?;
 
     // Find authData field
     let auth_data_bytes = map
@@ -101,11 +99,22 @@ pub fn format_aaguid(bytes: &[u8]) -> String {
     assert!(bytes.len() >= 16, "AAGUID must be at least 16 bytes");
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3],
-        bytes[4], bytes[5],
-        bytes[6], bytes[7],
-        bytes[8], bytes[9],
-        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15]
     )
 }
 
@@ -149,10 +158,7 @@ pub fn check_aaguid_allowed(aaguid: &str, allowlist: &[String]) -> Result<(), St
 ///
 /// The `expected_origins` list contains allowed origins (e.g., FRONTEND_URL,
 /// or all CDN origins in multi-origin mode). An empty list skips origin validation.
-pub fn validate_client_data_origin(
-    b64: &str,
-    expected_origins: &[&str],
-) -> Result<String, String> {
+pub fn validate_client_data_origin(b64: &str, expected_origins: &[&str]) -> Result<String, String> {
     let bytes = STANDARD
         .decode(b64)
         .or_else(|_| URL_SAFE_NO_PAD.decode(b64))
@@ -161,8 +167,8 @@ pub fn validate_client_data_origin(
     let json_str =
         std::str::from_utf8(&bytes).map_err(|e| format!("clientDataJSON not UTF-8: {e}"))?;
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("clientDataJSON not valid JSON: {e}"))?;
+    let parsed: serde_json::Value = serde_json::from_str(json_str)
+        .map_err(|e| format!("clientDataJSON not valid JSON: {e}"))?;
 
     let origin = parsed
         .get("origin")
@@ -192,8 +198,8 @@ pub fn check_device_bound(device: &DeviceInfo, require: bool) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
 
     /// Build minimal authenticator data with given flags and optional AAGUID.
     fn build_auth_data(flags: u8, aaguid: Option<[u8; 16]>) -> Vec<u8> {
@@ -215,10 +221,7 @@ mod tests {
                 CborValue::Text("fmt".into()),
                 CborValue::Text("none".into()),
             ),
-            (
-                CborValue::Text("attStmt".into()),
-                CborValue::Map(vec![]),
-            ),
+            (CborValue::Text("attStmt".into()), CborValue::Map(vec![])),
             (
                 CborValue::Text("authData".into()),
                 CborValue::Bytes(auth_data.to_vec()),
@@ -231,8 +234,8 @@ mod tests {
 
     // YubiKey 5 series AAGUID
     const YUBIKEY_5_AAGUID: [u8; 16] = [
-        0xcb, 0x69, 0x48, 0x1e, 0x8f, 0xf7, 0x40, 0x39, 0x93, 0xec, 0x0a, 0x27, 0x29, 0xa1,
-        0x54, 0xa8,
+        0xcb, 0x69, 0x48, 0x1e, 0x8f, 0xf7, 0x40, 0x39, 0x93, 0xec, 0x0a, 0x27, 0x29, 0xa1, 0x54,
+        0xa8,
     ];
 
     #[test]

@@ -4,8 +4,8 @@
 //! the session) and full RS256 verification via JWKS (for tokens received
 //! from the browser in POST /auth/session).
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -64,10 +64,7 @@ impl JwksCache {
     }
 
     /// Fetch or return cached JWKS keys.
-    pub async fn get_keys(
-        &self,
-        jwks_url: &str,
-    ) -> Result<HashMap<String, DecodingKey>, JwtError> {
+    pub async fn get_keys(&self, jwks_url: &str) -> Result<HashMap<String, DecodingKey>, JwtError> {
         // Try read lock first
         {
             let guard = self.keys.read().await;
@@ -87,10 +84,7 @@ impl JwksCache {
             .map_err(|e| JwtError::JwksFetchFailed(e.to_string()))?;
 
         if !resp.status().is_success() {
-            return Err(JwtError::JwksFetchFailed(format!(
-                "HTTP {}",
-                resp.status()
-            )));
+            return Err(JwtError::JwksFetchFailed(format!("HTTP {}", resp.status())));
         }
 
         let jwks: JwksResponse = resp
@@ -181,8 +175,8 @@ pub async fn verify_id_token(
     validation.set_audience(&[&config.cognito_client_id]);
     validation.set_required_spec_claims(&["exp", "iss", "aud"]);
 
-    let token_data =
-        decode::<Claims>(token, decoding_key, &validation).map_err(|e| JwtError::Validation(e.to_string()))?;
+    let token_data = decode::<Claims>(token, decoding_key, &validation)
+        .map_err(|e| JwtError::Validation(e.to_string()))?;
 
     Ok(token_data.claims)
 }

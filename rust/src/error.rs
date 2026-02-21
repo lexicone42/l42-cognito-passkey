@@ -56,10 +56,7 @@ impl IntoResponse for AppError {
                 StatusCode::UNAUTHORIZED,
                 json!({"error": "Not authenticated"}),
             ),
-            AppError::TokenExpired => (
-                StatusCode::UNAUTHORIZED,
-                json!({"error": "Token expired"}),
-            ),
+            AppError::TokenExpired => (StatusCode::UNAUTHORIZED, json!({"error": "Token expired"})),
             AppError::CsrfFailed => (
                 StatusCode::FORBIDDEN,
                 json!({
@@ -67,10 +64,7 @@ impl IntoResponse for AppError {
                     "message": "Missing X-L42-CSRF header"
                 }),
             ),
-            AppError::BadRequest(msg) => (
-                StatusCode::BAD_REQUEST,
-                json!({"error": msg}),
-            ),
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, json!({"error": msg})),
             AppError::TokenVerificationFailed => (
                 StatusCode::FORBIDDEN,
                 json!({"error": "Token verification failed"}),
@@ -103,10 +97,7 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 json!({"error": "Failed to decode token"}),
             ),
-            AppError::Internal(msg) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({"error": msg}),
-            ),
+            AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, json!({"error": msg})),
         };
 
         (status, axum::Json(body)).into_response()
@@ -136,10 +127,9 @@ mod tests {
                     "message": "Missing X-L42-CSRF header"
                 }),
             ),
-            AppError::BadRequest(msg) => (
-                StatusCode::BAD_REQUEST,
-                serde_json::json!({"error": msg}),
-            ),
+            AppError::BadRequest(msg) => {
+                (StatusCode::BAD_REQUEST, serde_json::json!({"error": msg}))
+            }
             AppError::TokenVerificationFailed => (
                 StatusCode::FORBIDDEN,
                 serde_json::json!({"error": "Token verification failed"}),
@@ -164,7 +154,10 @@ mod tests {
                 StatusCode::FORBIDDEN,
                 serde_json::json!({"allowed": false, "reason": msg}),
             ),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({"error": "internal"})),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({"error": "internal"}),
+            ),
         };
         (status, body)
     }
@@ -207,7 +200,9 @@ mod tests {
 
     #[test]
     fn test_credential_rejected() {
-        let (status, body) = error_to_json(AppError::CredentialRejected("AAGUID not in allowlist".into()));
+        let (status, body) = error_to_json(AppError::CredentialRejected(
+            "AAGUID not in allowlist".into(),
+        ));
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(body["allowed"], false);
         assert_eq!(body["reason"], "AAGUID not in allowlist");

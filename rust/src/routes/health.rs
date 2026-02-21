@@ -1,7 +1,7 @@
 //! GET /health
 
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use std::sync::Arc;
 
 use crate::types::HealthResponse;

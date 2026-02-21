@@ -25,6 +25,7 @@ pub struct Config {
     pub callback_allowed_origins: Vec<String>,
     pub aaguid_allowlist: Vec<String>,
     pub require_device_bound: bool,
+    pub service_token: Option<String>,
 }
 
 impl Config {
@@ -46,17 +47,13 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(3001),
-            session_backend: env::var("SESSION_BACKEND")
-                .unwrap_or_else(|_| "memory".into()),
-            dynamodb_table: env::var("DYNAMODB_TABLE")
-                .unwrap_or_else(|_| "l42_sessions".into()),
+            session_backend: env::var("SESSION_BACKEND").unwrap_or_else(|_| "memory".into()),
+            dynamodb_table: env::var("DYNAMODB_TABLE").unwrap_or_else(|_| "l42_sessions".into()),
             dynamodb_endpoint: env::var("DYNAMODB_ENDPOINT").unwrap_or_default(),
             session_https_only: env::var("SESSION_HTTPS_ONLY")
                 .map(|v| v == "true" || v == "1" || v == "True")
                 .unwrap_or(false),
-            cookie_domain: env::var("COOKIE_DOMAIN")
-                .ok()
-                .filter(|s| !s.is_empty()),
+            cookie_domain: env::var("COOKIE_DOMAIN").ok().filter(|s| !s.is_empty()),
             auth_path_prefix: normalize_path_prefix(
                 &env::var("AUTH_PATH_PREFIX").unwrap_or_else(|_| "/auth".into()),
             ),
@@ -78,6 +75,7 @@ impl Config {
             require_device_bound: env::var("REQUIRE_DEVICE_BOUND")
                 .map(|v| v == "true" || v == "1" || v == "True")
                 .unwrap_or(false),
+            service_token: env::var("SERVICE_TOKEN").ok().filter(|s| !s.is_empty()),
         })
     }
 
@@ -96,10 +94,7 @@ impl Config {
 
     /// Cognito IDP endpoint for InitiateAuth etc.
     pub fn cognito_idp_url(&self) -> String {
-        format!(
-            "https://cognito-idp.{}.amazonaws.com/",
-            self.cognito_region
-        )
+        format!("https://cognito-idp.{}.amazonaws.com/", self.cognito_region)
     }
 
     /// Cognito OAuth2 token endpoint.
@@ -130,6 +125,7 @@ impl Config {
             callback_allowed_origins: Vec::new(),
             aaguid_allowlist: Vec::new(),
             require_device_bound: false,
+            service_token: None,
         }
     }
 }

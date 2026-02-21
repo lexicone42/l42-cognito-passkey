@@ -6,7 +6,7 @@ L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for A
 
 **Current Version**: 0.19.0
 **License**: Apache-2.0
-**Tests**: 733 vitest + 149 cargo (including 53 property-based tests + 15 token storage tests + 56 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 132 Cedar authorization tests)
+**Tests**: 733 vitest + 157 cargo (including 53 property-based tests + 15 token storage tests + 56 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 132 Cedar authorization tests)
 
 ## Quick Start for Claude Instances
 
@@ -26,7 +26,7 @@ cp /path/to/l42cognitopasskey/src/auth.js ./public/auth/auth.js
 # Run all JS tests (733 tests)
 pnpm test
 
-# Run Rust backend tests (149 tests)
+# Run Rust backend tests (157 tests)
 cd rust && cargo test
 
 # Run tests in watch mode
@@ -271,7 +271,8 @@ Key features:
 - Dual-mode binary: Lambda (`lambda_http`) + local dev (`axum::serve`)
 - InMemory + DynamoDB session backends
 - HMAC-SHA256 session cookies
-- 149 tests (110 unit + 39 integration), Rust edition 2024, clippy clean
+- Service token bypass (`SERVICE_TOKEN` env var) for headless/programmatic API access
+- 157 tests (113 unit + 44 integration), Rust edition 2024, clippy clean
 
 No changes to `auth.js` or client-side code.
 

@@ -1,7 +1,7 @@
 //! POST /auth/refresh
 
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use std::sync::Arc;
 
 use crate::cognito::client;
@@ -75,9 +75,7 @@ pub async fn refresh_tokens(
                     Ok(Json(TokenResponse {
                         access_token: new_tokens.access_token,
                         id_token: new_tokens.id_token,
-                        auth_method: new_tokens
-                            .auth_method
-                            .unwrap_or_else(|| "handler".into()),
+                        auth_method: new_tokens.auth_method.unwrap_or_else(|| "handler".into()),
                     }))
                 }
                 _ => {

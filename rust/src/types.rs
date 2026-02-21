@@ -242,7 +242,10 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["allowed"], true);
         assert!(json.get("reason").is_none());
-        assert_eq!(json["device"]["aaguid"], "f8a011f3-8c0a-4d15-8006-17111f9edc7d");
+        assert_eq!(
+            json["device"]["aaguid"],
+            "f8a011f3-8c0a-4d15-8006-17111f9edc7d"
+        );
     }
 
     #[test]

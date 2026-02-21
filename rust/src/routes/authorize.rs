@@ -1,8 +1,8 @@
 //! POST /auth/authorize
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 use std::sync::Arc;
 
 use crate::cognito::jwt::{decode_jwt_unverified, is_token_expired};
@@ -57,7 +57,8 @@ pub async fn authorize(
     };
 
     // Decode claims for Cedar evaluation
-    let claims = decode_jwt_unverified(&tokens.id_token).map_err(|_| AppError::TokenDecodeFailed)?;
+    let claims =
+        decode_jwt_unverified(&tokens.id_token).map_err(|_| AppError::TokenDecodeFailed)?;
 
     // Convert resource for OCSF
     let resource_json = body

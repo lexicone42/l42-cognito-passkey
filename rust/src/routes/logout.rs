@@ -15,13 +15,11 @@ pub async fn logout(session: SessionHandle) -> Json<SuccessResponse> {
             .get("tokens")
             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-        let email = tokens
-            .as_ref()
-            .and_then(|t| {
-                crate::cognito::jwt::decode_jwt_unverified(&t.id_token)
-                    .ok()
-                    .and_then(|c| c.email)
-            });
+        let email = tokens.as_ref().and_then(|t| {
+            crate::cognito::jwt::decode_jwt_unverified(&t.id_token)
+                .ok()
+                .and_then(|c| c.email)
+        });
 
         let (proto, proto_name) = match tokens.and_then(|t| t.auth_method) {
             Some(ref m) if m == "passkey" => (ocsf::AUTH_PROTOCOL_FIDO2, "FIDO2/Passkey"),

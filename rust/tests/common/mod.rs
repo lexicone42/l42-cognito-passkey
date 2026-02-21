@@ -2,18 +2,18 @@
 
 #![allow(dead_code)]
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use l42_token_handler::cedar::engine::CedarState;
 use l42_token_handler::cognito::jwt::JwksCache;
 use l42_token_handler::config::Config;
+use l42_token_handler::session::AnyBackend;
 use l42_token_handler::session::memory::InMemoryBackend;
 use l42_token_handler::session::middleware::SessionLayer;
-use l42_token_handler::session::AnyBackend;
-use l42_token_handler::{create_app, AppState};
+use l42_token_handler::{AppState, create_app};
+use rsa::RsaPrivateKey;
 use rsa::pkcs1::EncodeRsaPublicKey;
 use rsa::pkcs8::EncodePrivateKey;
-use rsa::RsaPrivateKey;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,8 +40,7 @@ impl TestKeys {
             .private_key
             .to_pkcs8_der()
             .expect("failed to encode private key");
-        let encoding_key =
-            jsonwebtoken::EncodingKey::from_rsa_der(der.as_bytes());
+        let encoding_key = jsonwebtoken::EncodingKey::from_rsa_der(der.as_bytes());
 
         let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
         header.kid = Some(self.kid.clone());
@@ -184,6 +183,7 @@ pub fn build_test_app(with_cedar: bool) -> (axum::Router, Arc<AppState>) {
         secret: config.session_secret.clone(),
         https_only: config.session_https_only,
         cookie_domain: config.cookie_domain.clone(),
+        service_token: config.service_token.clone(),
     });
 
     let state = Arc::new(AppState {
@@ -199,7 +199,10 @@ pub fn build_test_app(with_cedar: bool) -> (axum::Router, Arc<AppState>) {
 }
 
 /// Build a test app with a custom Config and optional Cedar.
-pub fn build_test_app_with_config(config: Config, with_cedar: bool) -> (axum::Router, Arc<AppState>) {
+pub fn build_test_app_with_config(
+    config: Config,
+    with_cedar: bool,
+) -> (axum::Router, Arc<AppState>) {
     let http_client = reqwest::Client::new();
     let jwks_cache = Arc::new(JwksCache::new(http_client.clone()));
 
@@ -220,6 +223,7 @@ pub fn build_test_app_with_config(config: Config, with_cedar: bool) -> (axum::Ro
         secret: config.session_secret.clone(),
         https_only: config.session_https_only,
         cookie_domain: config.cookie_domain.clone(),
+        service_token: config.service_token.clone(),
     });
 
     let state = Arc::new(AppState {
@@ -232,6 +236,27 @@ pub fn build_test_app_with_config(config: Config, with_cedar: bool) -> (axum::Ro
 
     let app = create_app(state.clone());
     (app, state)
+}
+
+/// Build a request with X-Service-Token header.
+pub fn request_with_service_token(method: &str, uri: &str, token: &str) -> axum::http::Request<axum::body::Body> {
+    axum::http::Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("x-service-token", token)
+        .body(axum::body::Body::empty())
+        .unwrap()
+}
+
+/// Build a POST request with X-Service-Token header and JSON body.
+pub fn post_with_service_token(uri: &str, token: &str, body: &serde_json::Value) -> axum::http::Request<axum::body::Body> {
+    axum::http::Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("Content-Type", "application/json")
+        .header("x-service-token", token)
+        .body(axum::body::Body::from(serde_json::to_string(body).unwrap()))
+        .unwrap()
 }
 
 /// Helper to create a session cookie by calling POST /auth/session.

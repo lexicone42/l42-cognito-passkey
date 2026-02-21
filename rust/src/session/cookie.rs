@@ -6,7 +6,7 @@
 //! scheme with no cross-language format dependency. The HMAC covers
 //! only the session ID — the session data lives server-side.
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -120,7 +120,13 @@ mod tests {
     #[test]
     fn test_special_characters_in_session_id() {
         let secret = b"secret";
-        for id in &["session/slashes", "session+plus", "spaces here", "long-id-aaaa", "\u{1F600}"] {
+        for id in &[
+            "session/slashes",
+            "session+plus",
+            "spaces here",
+            "long-id-aaaa",
+            "\u{1F600}",
+        ] {
             let cookie = sign_session_id(secret, id);
             assert_eq!(verify_cookie(secret, &cookie), Some(id.to_string()));
         }

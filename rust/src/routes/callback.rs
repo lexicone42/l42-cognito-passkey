@@ -57,7 +57,11 @@ pub async fn oauth_callback(
 
         // Validate origin against allowed list (prevents open redirect via header injection)
         if !state.config.callback_allowed_origins.is_empty()
-            && !state.config.callback_allowed_origins.iter().any(|o| o == &origin.to_lowercase())
+            && !state
+                .config
+                .callback_allowed_origins
+                .iter()
+                .any(|o| o == &origin.to_lowercase())
         {
             ocsf::authentication_event(
                 ocsf::ACTIVITY_AUTH_TICKET,
@@ -85,26 +89,24 @@ pub async fn oauth_callback(
     // When callback_use_origin is true, the origin is already derived from request
     // headers above, so self_callback_url follows suit. Otherwise, prefer frontend_url
     // (it matches Cognito config), falling back to request headers.
-    let self_callback_url = if state.config.callback_use_origin || !state.config.frontend_url.is_empty() {
-        format!(
-            "{}{}/callback",
-            frontend, state.config.auth_path_prefix
-        )
-    } else {
-        let host = extract_host(&headers);
-        let scheme = headers
-            .get("x-forwarded-proto")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or(if state.config.session_https_only {
-                "https"
-            } else {
-                "http"
-            });
-        format!(
-            "{}://{}{}/callback",
-            scheme, host, state.config.auth_path_prefix
-        )
-    };
+    let self_callback_url =
+        if state.config.callback_use_origin || !state.config.frontend_url.is_empty() {
+            format!("{}{}/callback", frontend, state.config.auth_path_prefix)
+        } else {
+            let host = extract_host(&headers);
+            let scheme = headers
+                .get("x-forwarded-proto")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or(if state.config.session_https_only {
+                    "https"
+                } else {
+                    "http"
+                });
+            format!(
+                "{}://{}{}/callback",
+                scheme, host, state.config.auth_path_prefix
+            )
+        };
 
     // Handle OAuth error from Cognito
     if let Some(ref error) = params.error {
@@ -164,9 +166,7 @@ pub async fn oauth_callback(
                 .map(String::from);
 
             // Extract email for OCSF (best-effort)
-            let email = decode_jwt_unverified(id_token)
-                .ok()
-                .and_then(|c| c.email);
+            let email = decode_jwt_unverified(id_token).ok().and_then(|c| c.email);
 
             // Store in session
             let tokens = SessionTokens {
@@ -193,11 +193,7 @@ pub async fn oauth_callback(
 
             let redirect_target = match params.state {
                 Some(ref s) if !s.is_empty() => {
-                    format!(
-                        "{}/auth/success?state={}",
-                        frontend,
-                        urlencoding::encode(s)
-                    )
+                    format!("{}/auth/success?state={}", frontend, urlencoding::encode(s))
                 }
                 _ => format!("{}/auth/success", frontend),
             };
@@ -218,10 +214,7 @@ pub async fn oauth_callback(
             // Destroy session — exchange failed, no valid tokens
             *session.destroyed.lock().await = true;
 
-            Redirect::temporary(&format!(
-                "{}/login?error=Authentication+failed",
-                frontend
-            ))
+            Redirect::temporary(&format!("{}/login?error=Authentication+failed", frontend))
         }
     }
 }

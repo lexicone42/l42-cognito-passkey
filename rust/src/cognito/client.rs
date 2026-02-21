@@ -146,6 +146,7 @@ mod tests {
             callback_allowed_origins: Vec::new(),
             aaguid_allowlist: Vec::new(),
             require_device_bound: false,
+            service_token: None,
         }
     }
 

@@ -31,6 +31,7 @@ pub const AUTH_PROTOCOL_UNKNOWN: u32 = 0;
 pub const AUTH_PROTOCOL_PASSWORD: u32 = 2;
 pub const AUTH_PROTOCOL_OAUTH2: u32 = 10;
 pub const AUTH_PROTOCOL_FIDO2: u32 = 99;
+pub const AUTH_PROTOCOL_SERVICE_TOKEN: u32 = 100;
 
 fn now_millis() -> u64 {
     SystemTime::now()

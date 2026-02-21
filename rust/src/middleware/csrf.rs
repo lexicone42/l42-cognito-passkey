@@ -7,10 +7,24 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use crate::error::AppError;
+use crate::session::middleware::ServiceTokenAuth;
 
 /// Axum middleware that requires the `X-L42-CSRF: 1` header.
+///
+/// Bypasses validation for requests authenticated via service token
+/// (identified by the `ServiceTokenAuth` extension).
 pub async fn require_csrf(req: Request, next: Next) -> Result<Response, impl IntoResponse> {
-    if req.headers().get("x-l42-csrf").and_then(|v| v.to_str().ok()) != Some("1") {
+    // Service token requests don't originate from browsers — skip CSRF.
+    if req.extensions().get::<ServiceTokenAuth>().is_some() {
+        return Ok(next.run(req).await);
+    }
+
+    if req
+        .headers()
+        .get("x-l42-csrf")
+        .and_then(|v| v.to_str().ok())
+        != Some("1")
+    {
         return Err(AppError::CsrfFailed);
     }
     Ok(next.run(req).await)

@@ -8,8 +8,8 @@
 //!
 //! Compatible with any Token Handler backend using this table schema.
 
-use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::Client;
+use aws_sdk_dynamodb::types::AttributeValue;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{SessionBackend, SessionData};

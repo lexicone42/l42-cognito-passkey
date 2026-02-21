@@ -7,15 +7,15 @@
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 use l42_token_handler::cedar::engine::CedarState;
 use l42_token_handler::cognito::jwt::JwksCache;
 use l42_token_handler::config::Config;
+use l42_token_handler::session::AnyBackend;
 use l42_token_handler::session::memory::InMemoryBackend;
 use l42_token_handler::session::middleware::SessionLayer;
-use l42_token_handler::session::AnyBackend;
-use l42_token_handler::{create_app, AppState};
+use l42_token_handler::{AppState, create_app};
 
 #[tokio::main]
 async fn main() {
@@ -108,11 +108,21 @@ async fn main() {
         AnyBackend::Memory(InMemoryBackend::new())
     };
 
+    if let Some(ref token) = config.service_token
+        && token.len() < 32
+    {
+        tracing::warn!(
+            "SERVICE_TOKEN is set but shorter than 32 characters — \
+             use a strong random value in production."
+        );
+    }
+
     let session_layer = Arc::new(SessionLayer {
         backend: Arc::new(session_backend),
         secret: config.session_secret.clone(),
         https_only: config.session_https_only,
         cookie_domain: config.cookie_domain.clone(),
+        service_token: config.service_token.clone(),
     });
 
     let state = Arc::new(AppState {

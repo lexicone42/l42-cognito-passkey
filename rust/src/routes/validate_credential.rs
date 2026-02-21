@@ -3,8 +3,8 @@
 //! Pre-registration validation gate: parses the WebAuthn attestation object,
 //! extracts AAGUID and backup flags, and checks against configurable policies.
 
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use std::sync::Arc;
 
 use crate::cognito::jwt::is_token_expired;
@@ -43,7 +43,8 @@ pub async fn validate_credential(
     // Validate clientDataJSON origin
     let expected_origins = [state.config.frontend_url.trim_end_matches('/').to_string()];
     let expected_refs: Vec<&str> = expected_origins.iter().map(|s| s.as_str()).collect();
-    if let Err(e) = credential::validate_client_data_origin(&body.client_data_json, &expected_refs) {
+    if let Err(e) = credential::validate_client_data_origin(&body.client_data_json, &expected_refs)
+    {
         ocsf::authentication_event(
             ocsf::ACTIVITY_OTHER,
             "Other",
@@ -78,17 +79,15 @@ pub async fn validate_credential(
     };
 
     // Check AAGUID allowlist
-    if let Err(reason) = credential::check_aaguid_allowed(
-        &device.aaguid,
-        &state.config.aaguid_allowlist,
-    ) {
+    if let Err(reason) =
+        credential::check_aaguid_allowed(&device.aaguid, &state.config.aaguid_allowlist)
+    {
         log_validation_result(&device, user_email.as_deref(), false, &reason);
         return Err(AppError::CredentialRejected(reason));
     }
 
     // Check device-bound requirement
-    if let Err(reason) =
-        credential::check_device_bound(&device, state.config.require_device_bound)
+    if let Err(reason) = credential::check_device_bound(&device, state.config.require_device_bound)
     {
         log_validation_result(&device, user_email.as_deref(), false, &reason);
         return Err(AppError::CredentialRejected(reason));
