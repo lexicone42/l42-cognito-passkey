@@ -172,7 +172,7 @@ client.set_user_pool_mfa_config(
 )
 ```
 
-See `docs/cognito-setup.md` for complete instructions.
+See `docs/integration.md` for complete instructions.
 
 ## Content Security Policy
 
@@ -185,7 +185,7 @@ connect-src: 'self' https://cognito-idp.{region}.amazonaws.com https://*.amazonc
 form-action: 'self' https://{cognitoDomain}
 ```
 
-> **Note:** Use nonce-based CSP (requires server-side nonce generation). For static files without a server, `script-src 'self'` is acceptable. Avoid `'unsafe-inline'` in production. See `docs/security-hardening.md`.
+> **Note:** Use nonce-based CSP (requires server-side nonce generation). For static files without a server, `script-src 'self'` is acceptable. Avoid `'unsafe-inline'` in production. See `docs/security.md`.
 
 ## Token Storage
 
@@ -329,4 +329,4 @@ pnpm release:minor    # New features
 pnpm release:major    # Breaking changes
 ```
 
-See `docs/RELEASING.md` for complete release process.
+See `docs/release.md` for complete release process.

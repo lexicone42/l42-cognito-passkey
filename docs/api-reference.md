@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API documentation for l42-cognito-passkey.
+Complete API documentation for L42 Cognito Passkey (0.19.0).
 
 ## Configuration
 
@@ -9,24 +9,38 @@ Complete API documentation for l42-cognito-passkey.
 Configure the auth module. Must be called before using other functions (unless using `window.L42_AUTH_CONFIG`).
 
 ```javascript
-import { configure } from '/auth/auth.js';
-
 configure({
-    clientId: 'your-client-id',           // REQUIRED
-    cognitoDomain: 'app.auth.us-west-2.amazoncognito.com',  // REQUIRED
-    cognitoRegion: 'us-west-2',           // default: 'us-west-2'
-    redirectUri: '/callback',              // default: origin + '/callback'
-    scopes: 'openid email aws.cognito.signin.user.admin',
-    tokenKey: 'l42_auth_tokens',          // storage key
-    tokenStorage: 'handler',              // only supported mode
-    cookieName: 'l42_id_token',           // cookie name
-    allowedDomains: ['myapp.com'],        // auto-allows current domain if not set
-    // Handler mode endpoints (required for handler mode)
-    tokenEndpoint: '/auth/token',          // GET endpoint returning tokens
-    refreshEndpoint: '/auth/refresh',      // POST endpoint to refresh tokens
-    logoutEndpoint: '/auth/logout',        // POST endpoint to logout
-    oauthCallbackUrl: '/auth/callback',    // Backend OAuth callback URL
-    handlerCacheTtl: 30000                 // Cache TTL in ms (default: 30000)
+    // Required
+    clientId: 'your-client-id',
+    cognitoDomain: 'app.auth.us-west-2.amazoncognito.com',
+
+    // Handler endpoints (required)
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session',
+
+    // Optional endpoints
+    oauthCallbackUrl: '/auth/callback',
+    validateCredentialEndpoint: '/auth/validate-credential',
+
+    // Optional
+    cognitoRegion: 'us-west-2',            // default: 'us-west-2'
+    redirectUri: '/callback',               // default: origin + '/callback'
+    scopes: 'openid email profile aws.cognito.signin.user.admin',
+    handlerCacheTtl: 30000,                 // Cache TTL in ms (default: 30000)
+    relyingPartyId: 'yourdomain.com',       // WebAuthn relying party
+    allowedDomains: ['myapp.com'],          // auto-allows current domain if not set
+    autoUpgradeToPasskey: false,            // conditional create after password login
+
+    // Rate limiting
+    maxLoginAttemptsBeforeDelay: 3,
+    loginBackoffBaseMs: 1000,
+    loginBackoffMaxMs: 30000,
+
+    // Logging
+    securityLogger: null,                   // 'console', function(event), or null
+    debug: false,                           // true, 'verbose', or function(event)
 });
 ```
 
@@ -41,158 +55,87 @@ window.L42_AUTH_CONFIG = {
     domain: 'app.auth.us-west-2.amazoncognito.com',
     region: 'us-west-2',
     redirectUri: window.location.origin + '/callback',
-    scopes: ['openid', 'email', 'aws.cognito.signin.user.admin']
+    tokenEndpoint: '/auth/token',
+    refreshEndpoint: '/auth/refresh',
+    logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session'
 };
 </script>
 <script type="module">
 import { isAuthenticated } from '/auth/auth.js';
-// Auto-configured from window.L42_AUTH_CONFIG
 </script>
 ```
 
 ### isConfigured()
 
-Check if the library has been configured.
-
-```javascript
-import { isConfigured } from '/auth/auth.js';
-
-if (!isConfigured()) {
-    console.log('Need to configure auth');
-}
-```
+Returns `boolean` — whether `configure()` has been called.
 
 ### VERSION
 
-Library version string.
-
-```javascript
-import { VERSION } from '/auth/auth.js';
-console.log(VERSION); // "0.19.0"
-```
+Library version string (`'0.19.0'`).
 
 ## Authentication State
 
 ### isAuthenticated()
 
-Check if user is logged in with valid (non-expired) tokens.
-
-```javascript
-import { isAuthenticated } from '/auth/auth.js';
-
-if (isAuthenticated()) {
-    showDashboard();
-} else {
-    showLogin();
-}
-```
+Synchronous check using cached tokens. Validates token claims (issuer, audience, expiry). Uses a 30-second cache — may briefly return `false` after cache expires. Fine for UI rendering; use `isAuthenticatedAsync()` when the result is critical.
 
 **Returns:** `boolean`
 
+### isAuthenticatedAsync()
+
+Server-verified authentication check. Fetches fresh tokens from the server and validates.
+
+**Returns:** `Promise<boolean>`
+
 ### getTokens()
 
-Get stored authentication tokens. Always use `await` — required for handler mode, works in all modes.
+Get stored tokens. Always use `await` — fetches from server if cache has expired.
 
 ```javascript
-import { getTokens } from '/auth/auth.js';
-
 const tokens = await getTokens();
 // { access_token, id_token, refresh_token, auth_method }
 ```
 
-**Returns:** `Promise<Object|null>` — Fetches tokens from the server if cache has expired. Use `await getTokens()`.
+**Returns:** `Promise<Object|null>`
 
 ### getAuthMethod()
-
-Get the authentication method used for current session.
-
-```javascript
-import { getAuthMethod } from '/auth/auth.js';
-
-const method = getAuthMethod();
-// 'password' or 'passkey' or null
-```
 
 **Returns:** `'password' | 'passkey' | null`
 
 ### getUserEmail()
 
-Get user's email from ID token claims.
-
-```javascript
-import { getUserEmail } from '/auth/auth.js';
-
-const email = getUserEmail();
-```
+Email from cached ID token claims.
 
 **Returns:** `string | null`
 
-### getIdTokenClaims()
-
-Get all claims from the ID token (unverified - display only).
-
-```javascript
-import { getIdTokenClaims } from '/auth/auth.js';
-
-const claims = getIdTokenClaims();
-// { sub, email, cognito:groups, ... }
-```
-
-**Returns:** `Object | null`
-
 ### getUserGroups()
 
-Get user's Cognito groups.
-
-```javascript
-import { getUserGroups } from '/auth/auth.js';
-
-const groups = getUserGroups();
-// ['admin', 'readonly']
-```
+Cognito groups from cached ID token claims.
 
 **Returns:** `string[]`
 
+### getIdTokenClaims()
+
+All claims from the ID token (unverified — display only).
+
+**Returns:** `Object | null`
+
 ### isAdmin()
 
-Check if user is in the 'admin' group.
-
-```javascript
-import { isAdmin } from '/auth/auth.js';
-
-if (isAdmin()) {
-    showAdminPanel();
-}
-```
+True if user is in the `admin` group. Mutually exclusive with `isReadonly()`.
 
 **Returns:** `boolean`
 
 ### isReadonly()
 
-Check if user is in 'readonly' group (and NOT admin).
-
-```javascript
-import { isReadonly } from '/auth/auth.js';
-
-if (isReadonly()) {
-    disableEditButtons();
-}
-```
+True if user is in the `readonly` group and NOT in `admin`.
 
 **Returns:** `boolean`
 
 ### hasAdminScope()
 
-Check if access token has `aws.cognito.signin.user.admin` scope (required for passkey management).
-
-```javascript
-import { hasAdminScope } from '/auth/auth.js';
-
-if (!hasAdminScope()) {
-    // Need to re-login via hosted UI to get admin scope
-    loginWithHostedUI();
-}
-```
+True if access token has `aws.cognito.signin.user.admin` scope (required for passkey management).
 
 **Returns:** `boolean`
 
@@ -200,99 +143,87 @@ if (!hasAdminScope()) {
 
 ### loginWithPassword(email, password)
 
-Login with email and password.
+Login with email and password. Rate-limited client-side. Stores session server-side via `sessionEndpoint`.
 
 ```javascript
-import { loginWithPassword } from '/auth/auth.js';
-
 try {
     const tokens = await loginWithPassword('user@example.com', 'password123');
-    console.log('Logged in!');
 } catch (error) {
     if (error.message.includes('Additional verification')) {
-        // MFA required - redirect to hosted UI
-        loginWithHostedUI(email);
-    } else {
-        console.error('Login failed:', error.message);
+        loginWithHostedUI(email);  // MFA required
     }
 }
 ```
 
-**Returns:** `Promise<Object>` - tokens
+**Returns:** `Promise<Object>` — tokens
 
 ### loginWithPasskey(email)
 
-Login with WebAuthn passkey.
+Login with WebAuthn passkey. Response includes `authenticatorMetadata` with parsed flags.
 
 ```javascript
-import { loginWithPasskey } from '/auth/auth.js';
-
 try {
     const tokens = await loginWithPasskey('user@example.com');
-    console.log('Logged in with passkey!');
 } catch (error) {
     if (error.name === 'NotAllowedError') {
-        console.log('Passkey authentication cancelled');
-    } else {
-        console.error('Passkey login failed:', error.message);
+        console.log('Cancelled by user');
     }
 }
 ```
 
-**Returns:** `Promise<Object>` - tokens
+**Returns:** `Promise<Object>` — tokens
+
+### loginWithConditionalUI(options?)
+
+Passkey autofill login. Requires `<input autocomplete="username webauthn">`.
+
+```javascript
+// Discovery mode — browser shows all passkeys for this domain
+await loginWithConditionalUI({ mode: 'discovery' });
+
+// Email mode — scoped to one user
+await loginWithConditionalUI({ email: 'user@example.com' });
+
+// With abort signal
+const controller = new AbortController();
+await loginWithConditionalUI({ mode: 'discovery', signal: controller.signal });
+```
+
+**Parameters:**
+- `options.mode` — `'email'` (default) or `'discovery'`
+- `options.email` — Required for email mode
+- `options.signal` — Optional AbortSignal
+
+**Returns:** `Promise<Object>` — tokens
 
 ### loginWithHostedUI(email?)
 
-Redirect to Cognito Hosted UI for OAuth login. Required for getting admin scope.
-
-Uses **PKCE** (Proof Key for Code Exchange) for enhanced security. The function generates a cryptographic code challenge before redirecting.
+Redirect to Cognito Hosted UI with PKCE. Required for getting admin scope.
 
 ```javascript
-import { loginWithHostedUI } from '/auth/auth.js';
-
-// Store redirect destination before redirecting
-sessionStorage.setItem('l42_redirect_after_login', window.location.pathname);
-
-// Function is async (generates PKCE challenge)
 await loginWithHostedUI();
-// or with email hint:
-await loginWithHostedUI('user@example.com');
+await loginWithHostedUI('user@example.com');  // with email hint
 ```
 
-**Returns:** `Promise<void>` (redirects browser after generating PKCE challenge)
-
-> **Note (v0.5.2+):** This function is now async. The redirect happens before the promise resolves, so existing synchronous calls still work, but `await` is recommended for clarity.
+**Returns:** `Promise<void>` — redirects browser
 
 ### exchangeCodeForTokens(code, state)
 
 Exchange OAuth authorization code for tokens. Call from callback page.
 
 ```javascript
-import { exchangeCodeForTokens } from '/auth/auth.js';
-
 const params = new URLSearchParams(window.location.search);
-const code = params.get('code');
-const state = params.get('state');
-
-try {
-    const tokens = await exchangeCodeForTokens(code, state);
-    window.location.href = '/';
-} catch (error) {
-    console.error('Token exchange failed:', error.message);
-}
+const tokens = await exchangeCodeForTokens(params.get('code'), params.get('state'));
 ```
 
-**Returns:** `Promise<Object>` - tokens
+**Returns:** `Promise<Object>` — tokens
 
 ### logout()
 
-Clear tokens and session.
+Clear tokens, destroy server session, stop auto-refresh.
 
 ```javascript
-import { logout } from '/auth/auth.js';
-
 logout();
-window.location.href = '/login';
 ```
 
 **Returns:** `void`
@@ -301,269 +232,209 @@ window.location.href = '/login';
 
 ### isTokenExpired(tokens)
 
-Check if token is expired.
-
-```javascript
-import { isTokenExpired, getTokens } from '/auth/auth.js';
-
-const tokens = getTokens();
-if (isTokenExpired(tokens)) {
-    console.log('Token expired');
-}
-```
-
 **Returns:** `boolean`
 
 ### shouldRefreshToken(tokens)
 
-Check if token should be proactively refreshed (approaching expiry).
-
-```javascript
-import { shouldRefreshToken, getTokens } from '/auth/auth.js';
-
-const tokens = getTokens();
-if (shouldRefreshToken(tokens)) {
-    await refreshTokens();
-}
-```
+True if token is approaching expiry (within 5 minutes).
 
 **Returns:** `boolean`
 
 ### refreshTokens()
 
-Refresh tokens using refresh token.
+Refresh tokens via the server (which calls Cognito). Destroys session on failure.
 
-```javascript
-import { refreshTokens } from '/auth/auth.js';
-
-try {
-    const newTokens = await refreshTokens();
-    console.log('Tokens refreshed');
-} catch (error) {
-    console.error('Refresh failed:', error.message);
-    logout();
-}
-```
-
-**Returns:** `Promise<Object>` - new tokens
+**Returns:** `Promise<Object>` — new tokens
 
 ### ensureValidTokens()
 
-Get valid tokens, refreshing if needed. **Call this before API requests.**
+Get valid tokens, refreshing if needed. Prefer this over manual refresh for non-idempotent requests (payments, orders).
 
-```javascript
-import { ensureValidTokens } from '/auth/auth.js';
-
-async function fetchWithAuth(url) {
-    const tokens = await ensureValidTokens();
-    if (!tokens) {
-        throw new Error('Not authenticated');
-    }
-
-    return fetch(url, {
-        headers: {
-            'Authorization': `Bearer ${tokens.id_token}`
-        }
-    });
-}
-```
-
-**Returns:** `Promise<Object | null>`
+**Returns:** `Promise<Object|null>`
 
 ## Passkey Management
 
-All passkey management functions require admin scope. User must have logged in via `loginWithHostedUI()`.
+All passkey functions require admin scope (`loginWithHostedUI()`).
 
-### listPasskeys()
-
-List registered passkeys for current user.
-
-```javascript
-import { listPasskeys } from '/auth/auth.js';
-
-try {
-    const passkeys = await listPasskeys();
-    passkeys.forEach(pk => {
-        console.log(pk.CredentialId, pk.FriendlyName);
-    });
-} catch (error) {
-    console.error('Failed to list passkeys:', error.message);
-}
-```
-
-**Returns:** `Promise<Array>`
-
-### registerPasskey()
+### registerPasskey(options?)
 
 Register a new passkey for current user.
 
 ```javascript
-import { registerPasskey } from '/auth/auth.js';
-
-try {
-    await registerPasskey();
-    console.log('Passkey registered!');
-} catch (error) {
-    console.error('Registration failed:', error.message);
-}
+await registerPasskey();                           // default: no attestation
+await registerPasskey({ attestation: 'direct' });  // manufacturer attestation
+await registerPasskey({ attestation: 'enterprise' }); // managed device attestation
 ```
 
-**Returns:** `Promise<void>`
+**Parameters:**
+- `options.attestation` — `'none'` (default), `'indirect'`, `'direct'`, `'enterprise'`
+- `options.authenticatorAttachment` — `'platform'`, `'cross-platform'`, or omit for any
+- `options.residentKey` — `'required'` (default), `'preferred'`, `'discouraged'`
+- `options.userVerification` — `'preferred'` (default), `'required'`, `'discouraged'`
+
+Response includes `authenticatorMetadata`:
+```javascript
+// { userPresent, userVerified, backupEligible, backupState,
+//   attestedCredentialData, signCount, aaguid }
+```
+
+If `validateCredentialEndpoint` is configured, credentials are validated against server policy (AAGUID allowlist, device-bound requirement) before completing registration.
+
+**Returns:** `Promise<Object>`
+
+### upgradeToPasskey(options?)
+
+Silently offer passkey registration after password login (conditional create). Returns `false` if browser doesn't support it or user declines. Does not throw.
+
+```javascript
+const registered = await upgradeToPasskey();
+```
+
+**Returns:** `Promise<boolean>`
+
+### listPasskeys()
+
+**Returns:** `Promise<Array>` — `[{ CredentialId, FriendlyName, ... }]`
 
 ### deletePasskey(credentialId)
 
-Delete a registered passkey.
+**Returns:** `Promise<void>`
+
+## WebAuthn Capabilities
+
+### isPasskeySupported()
+
+Synchronous check for WebAuthn support (secure context + PublicKeyCredential).
+
+**Returns:** `boolean`
+
+### isConditionalMediationAvailable()
+
+Check if browser supports passkey autofill.
+
+**Returns:** `Promise<boolean>`
+
+### isPlatformAuthenticatorAvailable()
+
+Check if Touch ID / Face ID / Windows Hello is available.
+
+**Returns:** `Promise<boolean>`
+
+### getPasskeyCapabilities()
+
+Full capabilities report. Uses WebAuthn Level 3 `getClientCapabilities()` where available, with fallback to individual checks.
 
 ```javascript
-import { deletePasskey } from '/auth/auth.js';
+const caps = await getPasskeyCapabilities();
+// { supported, conditionalMediation, conditionalCreate, platformAuthenticator,
+//   secureContext, hybridTransport, passkeyPlatformAuthenticator,
+//   relatedOrigins, isWebView, source }
+```
 
-try {
-    await deletePasskey('credential-id-here');
-    console.log('Passkey deleted');
-} catch (error) {
-    console.error('Delete failed:', error.message);
+**Returns:** `Promise<Object>`
+
+## Authorization
+
+### requireServerAuthorization(action, options?)
+
+Send an authorization request to the Cedar policy engine on the server.
+
+```javascript
+const result = await requireServerAuthorization('write:own', {
+    resource: { id: 'doc-123', type: 'document', owner: ownerSub }
+});
+if (result.authorized) {
+    // proceed
 }
 ```
 
-**Returns:** `Promise<void>`
-
-## Events
-
-### onLogin(callback)
-
-Subscribe to login events. Only fires on actual login, never on token refresh. **(v0.6.0+)**
-
-```javascript
-import { onLogin } from '/auth/auth.js';
-
-const unsubscribe = onLogin((tokens, method) => {
-    console.log('User logged in via:', method); // 'password', 'passkey', or 'oauth'
-    window.location.href = '/dashboard';
-});
-
-// Later: unsubscribe();
-```
-
 **Parameters:**
-- `callback(tokens, method)` - Called with tokens object and auth method string
+- `action` — Cedar action string (e.g., `'read:content'`, `'admin:delete-user'`)
+- `options.resource` — `{ id, type, owner }` (optional)
+- `options.context` — Additional context for Cedar (optional)
+- `options.endpoint` — Override endpoint (default: `'/auth/authorize'`)
 
-**Returns:** `Function` - unsubscribe function
+**Returns:** `Promise<{ authorized: boolean, reason?: string }>`
 
-### onLogout(callback)
+### UI_ONLY_hasRole(requiredRole)
 
-Subscribe to logout events. Fires when user logs out or tokens are cleared. **(v0.6.0+)**
-
-```javascript
-import { onLogout } from '/auth/auth.js';
-
-const unsubscribe = onLogout(() => {
-    showLoginScreen();
-});
-
-// Later: unsubscribe();
-```
-
-**Returns:** `Function` - unsubscribe function
-
-### onAuthStateChange(callback)
-
-Subscribe to authentication state changes. For new code, prefer `onLogin()` and `onLogout()`.
+Client-side role check for UI display. **Never use for real authorization.**
 
 ```javascript
-import { onAuthStateChange } from '/auth/auth.js';
-
-const unsubscribe = onAuthStateChange((isAuthenticated) => {
-    if (isAuthenticated) {
-        showDashboard();
-    } else {
-        showLogin();
-    }
-});
-
-// Later: unsubscribe();
-```
-
-**Returns:** `Function` - unsubscribe function
-
-> **Note (v0.5.7+):** This is not called during token refresh, preventing reload loops.
-> For clearer semantics, use `onLogin()` and `onLogout()` instead.
-
-### onSessionExpired(callback) (v0.9.0+)
-
-Subscribe to unrecoverable session expiry events. Fires when refresh fails and the user must re-authenticate.
-
-```javascript
-import { onSessionExpired } from '/auth/auth.js';
-
-const unsubscribe = onSessionExpired((reason) => {
-    alert('Your session has expired. Please log in again.');
-    window.location.href = '/login';
-});
-```
-
-**Parameters:**
-- `callback(reason)` - Called with a string describing why the session expired
-
-**Returns:** `Function` - unsubscribe function
-
-## Auto-Refresh (v0.9.0+)
-
-### startAutoRefresh(options?)
-
-Start automatic background token refresh. Called automatically on login.
-
-```javascript
-import { startAutoRefresh } from '/auth/auth.js';
-
-// Custom options
-startAutoRefresh({
-    intervalMs: 30000,       // Check every 30s (default: 60000)
-    pauseWhenHidden: true    // Pause when tab hidden (default: true)
-});
-```
-
-**Parameters:**
-- `options.intervalMs` - Check interval in milliseconds (default: 60000)
-- `options.pauseWhenHidden` - Pause refresh checks when tab is hidden (default: true)
-
-**Returns:** `Function` - stop function (same as `stopAutoRefresh`)
-
-### stopAutoRefresh()
-
-Stop automatic token refresh. Called automatically on logout.
-
-```javascript
-import { stopAutoRefresh } from '/auth/auth.js';
-
-stopAutoRefresh();
-```
-
-### isAutoRefreshActive()
-
-Check if auto-refresh is currently running.
-
-```javascript
-import { isAutoRefreshActive } from '/auth/auth.js';
-
-console.log(isAutoRefreshActive()); // true or false
+if (UI_ONLY_hasRole('editor')) {
+    showEditButton();  // UI hint only
+}
 ```
 
 **Returns:** `boolean`
 
-## Authenticated Fetch (v0.9.0+)
+## Events
+
+All `on*()` functions return an unsubscribe function.
+
+### onLogin(callback)
+
+Fires on actual login (not token refresh).
+
+```javascript
+const unsub = onLogin((tokens, method) => {
+    console.log('Logged in via:', method); // 'password', 'passkey', 'oauth'
+});
+```
+
+### onLogout(callback)
+
+Fires when user logs out or tokens are cleared.
+
+### onAuthStateChange(callback)
+
+Fires on login or logout (not refresh). Prefer `onLogin`/`onLogout` for new code.
+
+```javascript
+const unsub = onAuthStateChange((isAuthenticated) => { ... });
+```
+
+### onSessionExpired(callback)
+
+Fires when refresh fails permanently and user must re-authenticate.
+
+```javascript
+const unsub = onSessionExpired((reason) => {
+    window.location.href = '/login';
+});
+```
+
+## Auto-Refresh
+
+### startAutoRefresh(options?)
+
+Start background token refresh. Called automatically on login.
+
+```javascript
+startAutoRefresh({
+    intervalMs: 30000,       // default: 60000
+    pauseWhenHidden: true    // default: true (visibility API)
+});
+```
+
+**Returns:** `Function` — stop function
+
+### stopAutoRefresh()
+
+Stop background refresh. Called automatically on logout.
+
+### isAutoRefreshActive()
+
+**Returns:** `boolean`
+
+## Authenticated Fetch
 
 ### fetchWithAuth(url, options?)
 
-Make an authenticated fetch request. Automatically injects Bearer token, handles 401 with retry-after-refresh.
+`fetch()` with automatic Bearer token injection and 401 retry-after-refresh.
 
 ```javascript
-import { fetchWithAuth } from '/auth/auth.js';
-
-// GET
 const res = await fetchWithAuth('/api/data');
-const data = await res.json();
-
-// POST with body
 const res = await fetchWithAuth('/api/data', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -571,113 +442,44 @@ const res = await fetchWithAuth('/api/data', {
 });
 ```
 
-**Parameters:**
-- `url` - URL to fetch
-- `options` - Standard `fetch()` options
+**Warning:** On 401, the entire request is retried (including POST body). For non-idempotent requests (payments, order creation), use `ensureValidTokens()` first and handle 401 yourself.
 
 **Returns:** `Promise<Response>`
 
-**Throws:** `Error` if not authenticated or session expired after retry
-
-**Behavior on 401:**
-1. Attempts `refreshTokens()`
-2. Retries the request with fresh tokens
-3. If refresh fails: clears tokens, fires `onSessionExpired`, throws
-
-## Debug & Diagnostics (v0.11.0+)
-
-### configure({ debug })
-
-Enable debug logging to diagnose auth issues.
-
-```javascript
-import { configure } from '/auth/auth.js';
-
-// Console output with [l42-auth] prefix
-configure({ clientId: '...', cognitoDomain: '...', debug: true });
-
-// Verbose mode — includes data payloads
-configure({ clientId: '...', cognitoDomain: '...', debug: 'verbose' });
-
-// Custom callback (e.g., send to Datadog, Sentry)
-configure({
-    clientId: '...', cognitoDomain: '...',
-    debug: (event) => {
-        myLogger.debug(event.category, event.message, event.data);
-    }
-});
-```
+## Debug & Diagnostics
 
 ### getDiagnostics()
 
-Get a snapshot of current auth state. Works regardless of whether debug mode is enabled.
+Snapshot of current auth state. Works without debug mode.
 
 ```javascript
-import { getDiagnostics } from '/auth/auth.js';
-
 const diag = getDiagnostics();
-// {
-//   configured: true,
-//   tokenStorage: 'handler',
-//   hasTokens: true,
-//   isAuthenticated: true,
-//   tokenExpiry: Date,
-//   authMethod: 'password',
-//   userEmail: 'user@example.com',
-//   userGroups: ['admin'],
-//   isAdmin: true,
-//   isReadonly: false,
-//   autoRefreshActive: true,
-//   debug: true,
-//   version: '0.11.0'
-// }
+// { configured, hasTokens, isAuthenticated, tokenExpiry,
+//   authMethod, userEmail, userGroups, isAdmin, isReadonly,
+//   autoRefreshActive, debug, version }
 ```
 
-**Returns:** `DiagnosticsInfo`
+**Returns:** `Object`
 
 ### getDebugHistory()
 
-Get a copy of the last 100 debug events (newest last). Returns empty array when debug is disabled.
+Last 100 debug events (newest last). Empty when debug is disabled.
 
-```javascript
-import { getDebugHistory } from '/auth/auth.js';
-
-const events = getDebugHistory();
-events.forEach(e => {
-    console.log(`[${new Date(e.timestamp).toISOString()}] ${e.category}: ${e.message}`, e.data);
-});
-```
-
-**Returns:** `DebugEvent[]`
-
-Each event has: `{ timestamp, category, message, data?, version }`
+**Returns:** `Array<{ timestamp, category, message, data?, version }>`
 
 ### clearDebugHistory()
 
 Clear the debug event buffer.
 
-```javascript
-import { clearDebugHistory } from '/auth/auth.js';
-
-clearDebugHistory();
-```
-
-**Returns:** `void`
-
 ## JWT Utilities
 
 ### UNSAFE_decodeJwtPayload(token)
 
-Decode JWT payload. **Does NOT verify signature - use for display only.**
-
-The `UNSAFE_` prefix reminds you that these claims are **unverified** and should never be used for authorization decisions.
+Decode JWT payload without signature verification. The `UNSAFE_` prefix is intentional — these claims are **unverified** and must never be used for authorization.
 
 ```javascript
-import { UNSAFE_decodeJwtPayload } from '/auth/auth.js';
-
 const payload = UNSAFE_decodeJwtPayload(tokens.id_token);
-// Use ONLY for display purposes
-console.log(payload.email, payload.exp);
+// Use ONLY for display: payload.email, payload.exp
 ```
 
 **Returns:** `Object`

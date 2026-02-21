@@ -11,6 +11,8 @@
  * - plugin/CLAUDE.md (version references)
  * - CLAUDE.md (version references)
  * - docs/api-reference.md (version references)
+ * - docs/architecture.md (version references)
+ * - README.md (version badge)
  */
 
 import fs from 'fs';
@@ -84,39 +86,11 @@ const updates = [
     ]
   },
   {
-    file: 'docs/integration-feedback.md',
-    optional: true,
-    patterns: [
-      // Match version in example: // Should be 0.5.6
-      { regex: /Should be [\d.]+(-[\w.]+)?/g, replacement: `Should be ${newVersion}` }
-    ]
-  },
-  {
-    file: 'docs/ocsf-logging.md',
-    optional: true,
-    patterns: [
-      // Match version in JSON example: "version": "0.5.6"
-      { regex: /"version":\s*"[\d.]+(-[\w.]+)?"/g, replacement: `"version": "${newVersion}"` }
-    ]
-  },
-  {
     file: 'docs/architecture.md',
     optional: true,
     patterns: [
       // Match "**Version**: X.Y.Z" in the header line
       { regex: /\*\*Version\*\*:\s*[\d.]+(-[\w.]+)?/g, replacement: `**Version**: ${newVersion}` }
-    ]
-  },
-  {
-    file: 'docs/claude-workflow.md',
-    optional: true,
-    patterns: [
-      // Match Library version: in templates
-      { regex: /Library version:\s*[\d.]+(-[\w.]+)?/g, replacement: `Library version: ${newVersion}` },
-      // Match Version tested: in templates
-      { regex: /Version tested\*\*:\s*[\d.]+(-[\w.]+)?/g, replacement: `Version tested**: ${newVersion}` },
-      // Match "Fixed in vX.Y.Z." patterns (with period)
-      { regex: /Fixed in v[\d]+\.[\d]+\.[\d]+(-[\w.]+)?\./g, replacement: `Fixed in v${newVersion}.` }
     ]
   },
   {

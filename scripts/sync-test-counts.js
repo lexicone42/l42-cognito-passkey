@@ -8,7 +8,7 @@
  * - CLAUDE.md — total count
  * - plugin/CLAUDE.md — total + per-file counts
  * - docs/architecture.md — total + per-file counts + file count
- * - docs/RELEASING.md — total count
+ * - docs/release.md — total count
  *
  * Note: execSync is used with static commands only (no user input).
  */
@@ -181,10 +181,10 @@ updateFile('docs/architecture.md', [
   ...archTableReplacements()
 ]);
 
-// docs/RELEASING.md — "All NNN+ tests must pass"
-updateFile('docs/RELEASING.md', [
+// docs/release.md — "NNN vitest" in current version line
+updateFile('docs/release.md', [
   {
-    regex: /(All\s+)\d+(\+?\s*tests must pass)/,
+    regex: /(\*\*[\d.]+\*\*\s*—\s*)\d+(\s*vitest)/,
     replacement: `$1${totalTests}$2`
   }
 ]);

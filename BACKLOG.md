@@ -8,7 +8,7 @@ Planned features and integrations for future development.
 **Status**: In Progress
 **Goal**: Validate library with actual production sites before 1.0 release.
 
-See `docs/integration-feedback.md` for:
+See `docs/integration.md` for:
 - Minimal integration checklist
 - Structured feedback template
 - Common issues and solutions

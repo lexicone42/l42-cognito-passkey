@@ -181,7 +181,7 @@ Remind users to configure Cognito:
    - SignInPolicy: AllowedFirstAuthFactors includes WEB_AUTHN
    - WebAuthnConfiguration: RelyingPartyId matches production domain
 
-See `docs/cognito-setup.md` for complete instructions.
+See `docs/integration.md` for complete instructions.
 
 ## Best Practices
 

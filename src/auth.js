@@ -675,7 +675,7 @@ export function configure(options = {}) {
     if (newConfig.tokenStorage && newConfig.tokenStorage !== 'handler') {
         throw new Error(
             `tokenStorage "${newConfig.tokenStorage}" was removed in v0.15.0.\n` +
-            'Only handler mode is supported. See docs/handler-mode.md for migration.'
+            'Only handler mode is supported. See docs/architecture.md for details.'
         );
     }
 

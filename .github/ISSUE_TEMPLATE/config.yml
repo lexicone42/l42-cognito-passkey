@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/lexicone42/l42-cognito-passkey/blob/main/docs/api-reference.md
     about: Check the API reference for usage examples
   - name: Integration Guide
-    url: https://github.com/lexicone42/l42-cognito-passkey/blob/main/docs/integration-feedback.md
+    url: https://github.com/lexicone42/l42-cognito-passkey/blob/main/docs/integration.md
     about: Guide for integrating the library and providing structured feedback

@@ -114,8 +114,8 @@ const fileReferences = [
     'plugin/templates/static-site-pattern.html',
     'plugin/templates/admin-panel-pattern.html',
     'scripts/sync-version.js',
-    'docs/RELEASING.md',
-    'docs/integration-feedback.md'
+    'docs/release.md',
+    'docs/integration.md'
   ]},
   { doc: 'plugin/CLAUDE.md', refs: [
     'src/auth.js',

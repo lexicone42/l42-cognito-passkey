@@ -58,9 +58,9 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 | `plugin/templates/handler-token-store.test.js` | Token Handler mode tests |
 | `rust/` | Rust Token Handler backend (recommended) |
 | `examples/backends/express/` | Express Token Handler backend (alternative) |
-| `docs/handler-mode.md` | Token Handler mode documentation |
+| `docs/architecture.md` | Architecture and Token Handler pattern |
 | `scripts/sync-version.js` | Syncs version across all files |
-| `docs/RELEASING.md` | Release process documentation |
+| `docs/release.md` | Release process and migration guide |
 | `plugin/templates/debug-diagnostics.test.js` | Debug logging & diagnostics tests |
 | `plugin/templates/conditional-ui.test.js` | Conditional UI / passkey autofill tests |
 | `plugin/templates/conditional-create.test.js` | Conditional create / passkey upgrade tests |
@@ -70,7 +70,7 @@ pnpm release:major    # Breaking changes: 0.5.1 → 1.0.0
 | `plugin/templates/cedar-authorization.test.js` | Cedar policy authorization tests |
 | `examples/backends/express/cedar-engine.js` | Cedar WASM engine wrapper |
 | `examples/backends/express/cedar/` | Cedar schema and policy files |
-| `docs/cedar-integration.md` | Cedar integration documentation |
+| `docs/rust-backend.md` | Rust backend, Cedar policies, deployment |
 
 ## Security Patterns (CRITICAL)
 
@@ -134,7 +134,7 @@ const tokens = await getTokens();
 - `logout()` calls server endpoint
 - `sessionEndpoint` is called automatically after `loginWithPasskey()` / `loginWithPassword()` to persist the server session
 
-See `docs/handler-mode.md` for complete documentation.
+See `docs/architecture.md` for complete documentation.
 
 ## RBAC System
 
@@ -345,7 +345,7 @@ The function now generates a PKCE code challenge before redirecting. Since the r
 
 **Trimmed RBAC:** Healthcare, Education, SaaS, E-commerce, API, Org roles removed from `rbac-roles.js`.
 
-See `docs/migration.md` for the complete migration guide covering all versions.
+See `docs/release.md` for the complete migration guide covering all versions.
 
 ## Cedar Authorization (v0.13.0)
 
@@ -378,7 +378,7 @@ Key features:
 
 **Admin Override Note:** `:own` actions (`write:own`, `delete:own`) are subject to the ownership forbid policy even for admins. Admins must use `:all` variants (`write:all`, `delete:all`) to modify other users' resources.
 
-See `docs/cedar-integration.md` for complete documentation.
+See `docs/rust-backend.md` for complete documentation.
 
 ## WebAuthn Authenticator Metadata (v0.19.0)
 
@@ -413,7 +413,7 @@ await registerPasskey({ attestation: 'enterprise' });
 
 The attestation level is included in OCSF security events. AAGUID and BE/BS flags flow to the backend via credential responses for policy decisions.
 
-See `docs/passkey-security-analysis.md` for the full security analysis.
+See `docs/security.md` for the full security analysis.
 
 ## Future Plans
 
@@ -430,7 +430,7 @@ If integrating this library into a project and encountering issues:
 2. Include: what worked, what didn't, error messages
 3. Tag with `integration-feedback`
 
-See `docs/integration-feedback.md` for the quick checklist.
+See `docs/integration.md` for setup details.
 
 ## Claude-to-Claude Workflow
 
@@ -449,4 +449,4 @@ pnpm process-issue <number>
 cat .claude/issues/issue-<number>.md
 ```
 
-See `docs/claude-workflow.md` for the complete workflow.
+See GitHub Issues for the workflow.

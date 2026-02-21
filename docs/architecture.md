@@ -1,73 +1,60 @@
-# Architecture Overview
+# Architecture
 
-A developer-friendly guide to how L42 Cognito Passkey works internally.
+How L42 Cognito Passkey works internally.
 
-**Version**: 0.19.0 | **Tests**: 733 vitest + 149 cargo | **License**: Apache-2.0
+## Overview
 
-## What This Library Does
-
-L42 Cognito Passkey is a **client-side JavaScript module** that handles authentication against AWS Cognito. You copy a single file (`auth.js`) into your project and import it as an ES module — no build step, no CDN, no npm install required.
-
-It handles:
-- Password and passkey (WebAuthn) login against Cognito
-- OAuth2/OIDC redirect flows with PKCE
-- Token storage, refresh, and lifecycle management
-- Role-based access control (RBAC) via Cognito groups
-- Server-side authorization via Cedar policies (v0.13.0+)
-
-## The Big Picture
+Two components: a client library (`auth.js`) and a Token Handler backend.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Browser (auth.js)                                              │
-│                                                                 │
-│  ┌──────────┐  ┌──────────────┐  ┌──────────────┐              │
-│  │  Login    │  │    Token     │  │    Event     │              │
-│  │  Methods  │  │   Storage    │  │   System     │              │
-│  │          │  │              │  │              │              │
-│  │ password  │  │ handler mode │  │ onLogin()    │              │
-│  │ passkey   │  │ (HttpOnly    │  │ onLogout()   │              │
-│  │ hosted UI │  │  cookies)    │  │ onAuthState  │              │
-│  │ cond. UI  │  │              │  │ onExpired()  │              │
-│  └─────┬─────┘  └──────┬───────┘  └──────────────┘              │
-│        │               │                                        │
-│        ▼               ▼                                        │
-│  ┌──────────────────────────┐  ┌────────────────────┐           │
-│  │     Auto-Refresh         │  │  UI RBAC (hints)   │           │
-│  │  (background interval)   │  │  isAdmin()         │           │
-│  │  (visibility API aware)  │  │  isReadonly()       │           │
-│  └──────────────────────────┘  └────────────────────┘           │
-│                                                                 │
-│  requireServerAuthorization() ──────────────────────────┐       │
-└──────────────────────────────────────────────────────────│───────┘
-                                                           │
-                   ┌───────────────────────────────────────▼───┐
-                   │  Your Backend (Rust or Express)            │
-                   │                                           │
-                   │  /auth/token     → session token store    │
-                   │  /auth/refresh   → Cognito token refresh  │
-                   │  /auth/logout    → session destroy         │
-                   │  /auth/authorize → Cedar policy engine    │
-                   │                                           │
-                   └───────────────┬───────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Browser (auth.js)                                        │
+│                                                           │
+│  ┌────────────┐  ┌──────────────┐  ┌───────────────┐     │
+│  │   Login    │  │    Token     │  │    Event      │     │
+│  │  Methods   │  │   Cache      │  │   System      │     │
+│  │            │  │              │  │               │     │
+│  │ password   │  │ 30s TTL     │  │ onLogin()     │     │
+│  │ passkey    │  │ from server  │  │ onLogout()    │     │
+│  │ hosted UI  │  │              │  │ onExpired()   │     │
+│  │ cond. UI   │  │              │  │               │     │
+│  └─────┬──────┘  └──────┬───────┘  └───────────────┘     │
+│        │                │                                 │
+│        ▼                ▼                                 │
+│  ┌──────────────────────────┐  ┌────────────────────┐     │
+│  │     Auto-Refresh         │  │  UI RBAC (hints)   │     │
+│  │  visibility API aware    │  │  isAdmin()         │     │
+│  └──────────────────────────┘  └────────────────────┘     │
+│                                                           │
+│  requireServerAuthorization() ────────────────────┐       │
+└───────────────────────────────────────────────────│───────┘
+                                                    │
+                  ┌─────────────────────────────────▼───┐
+                  │  Token Handler Backend                │
+                  │                                      │
+                  │  /auth/token     → return tokens      │
+                  │  /auth/session   → store tokens       │
+                  │  /auth/refresh   → Cognito refresh    │
+                  │  /auth/logout    → destroy session    │
+                  │  /auth/callback  → OAuth exchange     │
+                  │  /auth/authorize → Cedar evaluation   │
+                  └────────────────┬─────────────────────┘
                                    │
-                   ┌───────────────▼───────────────────────────┐
-                   │  AWS Cognito                               │
-                   │                                           │
-                   │  User Pool → password auth, token issue   │
-                   │  WebAuthn  → passkey register/verify      │
-                   │  OAuth2    → hosted UI, code exchange     │
-                   └───────────────────────────────────────────┘
+                  ┌────────────────▼─────────────────────┐
+                  │  AWS Cognito                          │
+                  │                                      │
+                  │  User Pool → password auth, tokens   │
+                  │  WebAuthn  → passkey register/verify  │
+                  │  OAuth2    → hosted UI, code exchange │
+                  └──────────────────────────────────────┘
 ```
 
-## Token Storage Modes
+## Token Handler Pattern
 
-Handler mode is the only supported token storage mode (since v0.15.0).
-
-Tokens live on your server in an HttpOnly session cookie. The browser never sees the refresh token.
+The Token Handler is a thin backend that manages OAuth/OIDC tokens so the browser never stores them. The browser gets an opaque HttpOnly session cookie; the backend holds the actual JWTs.
 
 ```
-Browser tab ──► session cookie (HttpOnly, Secure, SameSite=Strict)
+Browser tab ──► session cookie (HttpOnly, Secure, SameSite=Lax)
                   │
                   ▼
 Your Server ──► req.session.tokens
@@ -76,89 +63,91 @@ Your Server ──► req.session.tokens
                   └── refresh_token  ← never sent to browser
 ```
 
-Tokens are invisible to JavaScript entirely — XSS can't steal them.
+Tokens are invisible to JavaScript entirely — XSS can't steal them. The client calls `await getTokens()` to fetch access/id tokens from the server (cached for 30 seconds).
 
-### `getTokens()` and `await`
+This is a specific type of Backend-for-Frontend (BFF) pattern. A full BFF proxies all API calls; a Token Handler is lighter — the browser still makes API calls directly but gets tokens from the backend instead of storing them locally. Cedar authorization adds server-verified policy checks, making this an authorization BFF as well.
 
-Always use `await getTokens()` — it works in all modes and is required for handler mode:
+## Protocol Specification
 
-```javascript
-const tokens = await getTokens();
+Any server implementing these endpoints works with `auth.js`, regardless of language.
+
+### Session Contract
+
+The backend stores one structure per session:
+
+```json
+{
+  "tokens": {
+    "access_token": "<JWT>",
+    "id_token": "<JWT>",
+    "refresh_token": "<JWT or null>",
+    "auth_method": "direct | oauth"
+  }
+}
 ```
+
+The refresh token **never** leaves the server. Session cookies must be `HttpOnly`, `Secure` (in production), and `SameSite=Lax`.
+
+### Endpoints
+
+| Endpoint | Method | CSRF | Purpose |
+|----------|--------|------|---------|
+| `/auth/token` | GET | No | Return `{access_token, id_token}` from session |
+| `/auth/session` | POST | Yes | Store tokens after passkey/password login |
+| `/auth/refresh` | POST | Yes | Refresh tokens via Cognito, return new tokens |
+| `/auth/logout` | POST | Yes | Destroy session, clear cookie |
+| `/auth/callback` | GET | No* | OAuth code exchange, store tokens, redirect |
+| `/auth/authorize` | POST | Yes | Cedar policy evaluation |
+| `/auth/me` | GET | No | Return user info from session |
+| `/health` | GET | No | Liveness check |
+
+\* `/auth/callback` uses OAuth `state` for CSRF instead.
+
+### CSRF Protection
+
+All POST endpoints require `X-L42-CSRF: 1`. `auth.js` adds this automatically. Cross-origin requests can't set custom headers without a CORS preflight, which your backend rejects for unknown origins.
+
+### Security Invariants
+
+1. Refresh tokens never leave the server
+2. Session cookie is HttpOnly
+3. CSRF header required on all POSTs (except `/auth/callback`)
+4. `/auth/session` verifies `id_token` signature against Cognito JWKS before storing
+5. `/auth/authorize` fails closed — denies access if the policy engine errors
+6. Session destroyed on refresh failure
+7. CORS restricted to frontend origin (no wildcards with credentials)
 
 ## Authentication Flows
 
-### Password Login
-
-The simplest flow — direct Cognito SRP (Secure Remote Password) authentication:
+### Password
 
 ```
 loginWithPassword(email, password)
-    │
-    ├─ checkLoginRateLimit(email)    ← throttle if too many failures
-    │
-    ├─ cognitoRequest('InitiateAuth', {
-    │      AuthFlow: 'USER_PASSWORD_AUTH',
-    │      AuthParameters: { USERNAME: email, PASSWORD: password }
-    │  })
-    │
-    ├─ Cognito returns tokens
-    │
-    ├─ setTokens(tokens, { authMethod: 'password' })
-    │      └─ Writes to storage (localStorage/memory/handler)
-    │
-    ├─ resetLoginAttempts(email)     ← clear failure counter
-    │
-    └─ notifyLogin(tokens, 'password')
-           ├─ fires onLogin() listeners
-           └─ starts auto-refresh
+    ├── checkLoginRateLimit(email)
+    ├── cognitoRequest('InitiateAuth', USER_PASSWORD_AUTH)
+    ├── Cognito returns tokens
+    ├── POST /auth/session (store tokens server-side)
+    ├── resetLoginAttempts(email)
+    └── notifyLogin → starts auto-refresh
 ```
 
-### Passkey Login
-
-WebAuthn authentication using platform authenticators (Touch ID, Windows Hello, etc.):
+### Passkey
 
 ```
 loginWithPasskey(email)
-    │
-    ├─ checkLoginRateLimit(email)
-    │
-    ├─ cognitoRequest('InitiateAuth', {
-    │      AuthFlow: 'CUSTOM_AUTH',
-    │      AuthParameters: { USERNAME: email }
-    │  })
-    │
-    ├─ Cognito returns challenge:
-    │  { ChallengeName: 'CUSTOM_CHALLENGE', Session: '...',
-    │    ChallengeParameters: { CREDENTIAL_REQUEST_OPTIONS: '...' } }
-    │
-    ├─ navigator.credentials.get({
-    │      publicKey: {
-    │          challenge: ...,
-    │          rpId: config.relyingPartyId,
-    │          allowCredentials: [...],  ← from Cognito's options
-    │          userVerification: 'preferred'
-    │      }
-    │  })
-    │
-    ├─ User touches fingerprint sensor / enters PIN
-    │
-    ├─ buildAssertionResponse(credential)
-    │      └─ base64url-encodes authenticatorData, clientDataJSON, signature
-    │
-    ├─ cognitoRequest('RespondToAuthChallenge', {
-    │      ChallengeName: 'CUSTOM_CHALLENGE',
-    │      ChallengeResponses: { CREDENTIAL: JSON.stringify(assertion) }
-    │  })
-    │
-    ├─ Cognito verifies the signature, returns tokens
-    │
-    └─ setTokens → notifyLogin → auto-refresh starts
+    ├── checkLoginRateLimit(email)
+    ├── cognitoRequest('InitiateAuth', CUSTOM_AUTH)
+    ├── Cognito returns CUSTOM_CHALLENGE with credential request options
+    ├── navigator.credentials.get({ publicKey: ... })
+    ├── User touches biometric / enters PIN
+    ├── buildAssertionResponse(credential)  ← includes authenticatorMetadata
+    ├── cognitoRequest('RespondToAuthChallenge', credential)
+    ├── Cognito verifies signature, returns tokens
+    ├── POST /auth/session (store tokens server-side)
+    └── notifyLogin → starts auto-refresh
 ```
 
 ### Conditional UI (Passkey Autofill)
-
-This is the "passkey-first" experience where the browser shows passkeys in the username field's autofill dropdown:
 
 ```html
 <input type="email" autocomplete="username webauthn">
@@ -166,137 +155,71 @@ This is the "passkey-first" experience where the browser shows passkeys in the u
 
 ```
 loginWithConditionalUI({ mode: 'discovery' })
-    │
-    ├─ Creates AbortController (_conditionalAbortController)
-    │   └─ Auto-aborted if user calls loginWithPassword/logout/etc.
-    │
-    ├─ navigator.credentials.get({
-    │      publicKey: { challenge: ... },
-    │      mediation: 'conditional',     ← key: shows in autofill
-    │      signal: abortController.signal
-    │  })
-    │
-    ├─ User picks a passkey from autofill dropdown
-    │
-    └─ Same flow as loginWithPasskey from here
+    ├── Creates AbortController (auto-aborted on other login/logout)
+    ├── navigator.credentials.get({ mediation: 'conditional' })
+    ├── User picks passkey from autofill dropdown
+    └── Same flow as loginWithPasskey from here
 ```
 
-Two modes:
-- **Mode A (email)**: Scoped to a specific email — shows only that user's passkeys
-- **Mode B (discovery)**: Browser shows all passkeys for this domain
+Two modes: **email** (scoped to one user) and **discovery** (browser shows all passkeys for this domain).
 
 ### OAuth / Hosted UI
 
-For federated login (Google, SAML, etc.) via Cognito's hosted UI:
-
 ```
 loginWithHostedUI(email?)
-    │
-    ├─ Generate PKCE: code_verifier + code_challenge
-    │
-    ├─ Store OAuth state in localStorage:
-    │   { state: random, code_verifier, redirect_uri, timestamp }
-    │
-    ├─ Redirect browser to:
-    │   https://{domain}/oauth2/authorize?
-    │     client_id={}&response_type=code&
-    │     redirect_uri={}&code_challenge={}&
-    │     state={}
-    │
-    │   ← User authenticates at Cognito hosted UI →
-    │
-    ├─ Cognito redirects back to redirectUri?code={}&state={}
-    │
-    └─ exchangeCodeForTokens(code, state)
-           ├─ Verify state matches what we stored (CSRF protection)
-           ├─ POST /oauth2/token with code + code_verifier (PKCE)
-           └─ Store tokens → notify login
+    ├── Generate PKCE: code_verifier + code_challenge
+    ├── Store state + verifier in localStorage
+    ├── Redirect to Cognito hosted UI
+    │   User authenticates
+    ├── Cognito redirects to /auth/callback?code=...&state=...
+    ├── Backend exchanges code for tokens (server-to-server)
+    ├── Backend stores tokens in session
+    └── Backend redirects to frontend
 ```
 
 ## Token Lifecycle
 
-Tokens have a lifecycle managed by the auto-refresh system:
-
 ```
-                    Token Lifetime (~1 hour)
-    ┌────────────────────────────────────────────────┐
-    │                                                │
-    │    Valid           Refresh Window    Expired    │
-    │  ◄──────────────►◄──────────────►◄────────►    │
-    │                   (last 5 min)                 │
-    └────────────────────────────────────────────────┘
-         │                   │               │
-         │                   │               │
-    getTokens()         shouldRefresh()   isExpired()
-    returns tokens      → refreshTokens()  → try refresh
-                                           → if fails: onSessionExpired()
+                Token Lifetime (~1 hour)
+    ┌────────────────────────────────────────────┐
+    │  Valid         Refresh Window     Expired   │
+    │ ◄────────────►◄──────────────►◄──────────► │
+    │                 (last 5 min)                │
+    └────────────────────────────────────────────┘
+        getTokens()    shouldRefresh()    try refresh
+        returns cache  → refreshTokens()  → if fails: onSessionExpired()
 ```
 
 ### Auto-Refresh
 
-When auto-refresh is active (started automatically on login):
+Starts on login, stops on logout:
 
-1. A `setInterval` runs every 60 seconds (configurable)
-2. It calls `shouldRefreshToken()` — returns true if expiry < 5 minutes away
-3. If true, calls `refreshTokens()` which contacts Cognito for new tokens
-4. New tokens are stored silently (no `onAuthStateChange` fired)
-5. If the page is hidden (tab in background), refresh pauses to save bandwidth
-6. When the tab becomes visible again, it immediately checks and refreshes if needed
+1. `setInterval` checks every 60s (configurable)
+2. If token nearing expiry → proactive `refreshTokens()`
+3. Tab hidden → pauses (visibility API)
+4. Tab visible → immediate check + resume
 
-### Visibility API Integration
+## Cedar Authorization
 
-```
-Tab visible  → auto-refresh running every 60s
-Tab hidden   → auto-refresh paused
-Tab visible  → immediate check + resume interval
-```
+Two authorization layers with different trust levels:
 
-This prevents wasted network requests when the user isn't looking at the page, while ensuring tokens are fresh when they return.
+**Client-side (UI hints only):** `isAdmin()`, `isReadonly()`, `UI_ONLY_hasRole()` read unverified JWT claims. Never use for real authorization.
 
-## RBAC and Authorization
-
-The library has two authorization layers with very different trust levels:
-
-### Client-Side (UI Hints Only)
+**Server-side (Cedar policies):**
 
 ```javascript
-isAdmin()     // → reads JWT claims, checks for 'admin' group
-isReadonly()  // → reads JWT claims, checks for 'readonly' group
-UI_ONLY_hasRole('editor')  // → checks JWT claims for any role
-```
-
-These are for **showing/hiding UI elements only**. They read unverified JWT claims that a sophisticated attacker could forge. Never use them for real authorization.
-
-### Server-Side (Cedar Policies)
-
-```javascript
-const result = await requireServerAuthorization('admin:delete-user', {
-    resource: { id: 'user-123', type: 'user', owner: 'user-456' }
+const result = await requireServerAuthorization('write:own', {
+    resource: { id: 'doc-123', type: 'document', owner: ownerSub }
 });
-// → POSTs to /auth/authorize
-// → Server evaluates Cedar policies against verified session
-// → Returns { authorized: true/false, reason, diagnostics }
 ```
 
-This is real authorization. The server:
-1. Reads the user's identity from the verified session (not client claims)
-2. Maps Cognito groups to Cedar entity types
-3. Evaluates Cedar policies: `(principal, action, resource) → allow/deny`
-4. Returns a cryptographically trustworthy decision
-
-### Cedar Policy Architecture
-
-Cedar is a declarative policy language from AWS. Policies are simple to read:
+The server reads user identity from the verified session, maps Cognito groups to Cedar entities, and evaluates policies:
 
 ```cedar
-// Editors can read, write, and publish content
+// Editors can read and write content
 permit(
     principal in App::UserGroup::"editors",
-    action in [
-        App::Action::"read:content",
-        App::Action::"write:content",
-        App::Action::"publish:content"
-    ],
+    action in [App::Action::"read:content", App::Action::"write:content"],
     resource
 );
 
@@ -305,164 +228,25 @@ forbid(
     principal,
     action == App::Action::"write:own",
     resource
-) when {
-    resource has owner &&
-    resource.owner != principal
-};
+) when { resource has owner && resource.owner != principal };
 ```
 
-Key design principle: **forbid always overrides permit**. This makes ownership enforcement robust — even if a user has a `permit` for `write:own`, the `forbid` blocks them if they're not the owner.
+Key principle: **forbid always overrides permit**, making ownership enforcement robust.
 
-### Entity Mapping
-
-```
-Cognito Group 'admins'
-        │
-        ▼  (group alias resolution)
-Cedar Entity: App::UserGroup::"admin"
-        │
-        ▼  (policy evaluation)
-permit(principal in App::UserGroup::"admin", action, resource)
-        │
-        ▼
-Decision: ALLOW (for any action)
-```
-
-The group alias system handles the common problem of Cognito groups being named inconsistently (`admin`, `admins`, `administrators` all map to the Cedar group `admin`).
+Cognito group aliases are resolved automatically: `admin`, `admins`, `administrators` all map to the Cedar entity `App::UserGroup::"admin"`.
 
 ## Event System
 
-The library provides four event channels:
-
-| Event | Fires When | Callback Signature |
-|-------|-----------|-------------------|
-| `onLogin(cb)` | User logs in (any method) | `(tokens, method)` |
+| Event | Fires When | Signature |
+|-------|-----------|-----------|
+| `onLogin(cb)` | User logs in | `(tokens, method)` |
 | `onLogout(cb)` | User logs out | `()` |
-| `onAuthStateChange(cb)` | Auth state changes (login or logout) | `(isAuthenticated)` |
-| `onSessionExpired(cb)` | Token refresh fails permanently | `(reason)` |
+| `onAuthStateChange(cb)` | Login or logout | `(isAuthenticated)` |
+| `onSessionExpired(cb)` | Refresh fails permanently | `(reason)` |
 
-Important: `onAuthStateChange` does **not** fire on token refresh. This prevents infinite reload loops that plagued earlier versions.
+`onAuthStateChange` does **not** fire on token refresh. All `on*()` functions return an unsubscribe function.
 
-```javascript
-// Typical usage
-onLogin((tokens, method) => {
-    analytics.track('login', { method });
-    router.push('/dashboard');
-});
-
-onLogout(() => {
-    router.push('/login');
-});
-
-onSessionExpired((reason) => {
-    showModal('Your session has expired. Please log in again.');
-    router.push('/login?expired=true');
-});
-```
-
-All `on*()` functions return an unsubscribe function:
-
-```javascript
-const unsub = onLogin(handler);
-// Later:
-unsub(); // Removes the listener
-```
-
-## Security Architecture
-
-### What's Verified Where
-
-| Check | Client-Side | Server-Side |
-|-------|------------|-------------|
-| Token not expired | `isTokenExpired()` | Session TTL |
-| Token issuer correct | `validateTokenClaims()` | Cognito verification |
-| Token audience correct | `validateTokenClaims()` | Cognito verification |
-| User has role | `isAdmin()` (untrusted) | Cedar policy evaluation |
-| User owns resource | N/A | Cedar `forbid` policy |
-| CSRF on mutations | N/A | `X-L42-CSRF` header check |
-| PKCE on OAuth | `code_verifier` stored client-side | Cognito verifies at `/oauth2/token` |
-| Rate limiting | `checkLoginRateLimit()` (client) | Cognito account lockout |
-
-### Trust Boundaries
-
-```
-┌─────────────────────────────────┐
-│  UNTRUSTED: Browser             │
-│                                 │
-│  JWT claims (can be forged)     │
-│  Client RBAC (UI hints only)    │
-│  Rate limiting (can be bypassed)│
-│  localStorage (XSS-accessible)  │
-└──────────────┬──────────────────┘
-               │
-    ═══════════╪═══════════  Trust Boundary
-               │
-┌──────────────▼──────────────────┐
-│  TRUSTED: Server                │
-│                                 │
-│  Session cookies (HttpOnly)     │
-│  Cedar policy evaluation        │
-│  Token refresh (refresh_token   │
-│    never leaves server)         │
-│  Cognito API calls              │
-└─────────────────────────────────┘
-```
-
-### Known Limitations (Sharp-Edges)
-
-These are documented, tested, and by-design:
-
-1. **`resource.owner` is caller-controlled (S1)**: The client sends `resource.owner` in the request body. A malicious client can lie about ownership. The fix (post-1.0) is the `EntityProvider` interface that loads ownership from a trusted database.
-
-2. **`validateTokenClaims()` requires `aud`/`client_id` and `exp` (S2, fixed)**: As of v0.18.0, missing `aud`/`client_id` or `exp` claims cause validation to fail. Tokens from misconfigured pools are now rejected.
-
-3. **Rate limiting is client-side only (S3)**: The `checkLoginRateLimit()` delays are enforced in JavaScript. A determined attacker can bypass them. Cognito's server-side lockout is the real protection.
-
-## File Layout
-
-```
-src/
-├── auth.js              ← The library (~1400 lines, self-contained)
-└── auth.d.ts            ← TypeScript declarations
-
-dist/
-└── auth.js              ← Copy of src/auth.js (for package consumers)
-
-plugin/templates/
-├── rbac-roles.js        ← Role definitions and permission helpers
-├── *.test.js            ← 19 test files (733 tests)
-└── *.html               ← Integration template patterns
-
-rust/                            ← Rust Token Handler backend (recommended)
-├── src/
-│   ├── main.rs                  ← Dual-mode: Lambda or local Axum server
-│   ├── lib.rs                   ← create_app(), AppState
-│   ├── cedar/engine.rs          ← Native Cedar evaluation
-│   ├── cognito/jwt.rs           ← JWT decode, JWKS verification
-│   ├── session/middleware.rs    ← HMAC-SHA256 session cookies
-│   └── routes/*.rs              ← 9 HTTP handlers
-├── cedar/                       ← Cedar schema + 9 policy files
-└── tests/test_routes.rs         ← Integration tests
-
-examples/backends/express/       ← Express Token Handler backend (alternative)
-├── server.js                    ← Token Handler Express backend
-├── cedar-engine.js              ← Cedar WASM wrapper (~300 lines)
-└── cedar/
-    ├── schema.cedarschema.json  ← Entity types and actions
-    └── policies/*.cedar         ← 9 policy files (identical to rust/cedar/)
-
-docs/
-├── architecture.md      ← This file
-├── api-reference.md     ← Complete function documentation
-├── cedar-integration.md ← Cedar setup and usage guide
-├── handler-mode.md      ← Token Handler mode guide
-├── migration.md         ← Version upgrade guide
-├── design-decisions.md  ← Why things are the way they are
-├── security-hardening.md← CSP, BFF, threat models
-└── ...
-```
-
-## Configuration Reference
+## Configuration
 
 ```javascript
 configure({
@@ -470,60 +254,73 @@ configure({
     clientId: 'your-cognito-client-id',
     cognitoDomain: 'yourapp.auth.us-west-2.amazoncognito.com',
 
-    // Token storage — handler mode (only supported mode since v0.15.0)
-
-    // Handler mode endpoints (required)
+    // Handler endpoints (required)
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
     logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session',
+
+    // Optional
     oauthCallbackUrl: '/auth/callback',
-
-    // WebAuthn
-    relyingPartyId: 'yourdomain.com',
-
-    // Rate limiting
+    handlerCacheTtl: 30000,          // Cache TTL in ms
+    relyingPartyId: 'yourdomain.com', // WebAuthn
     maxLoginAttemptsBeforeDelay: 3,
     loginBackoffBaseMs: 1000,
     loginBackoffMaxMs: 30000,
-
-    // Debug
-    debug: false,  // true, 'verbose', or function(event)
+    debug: false,                     // true, 'verbose', or function(event)
 });
 ```
 
-## Testing
+Alternative: set `window.L42_AUTH_CONFIG` before importing `auth.js`.
 
-The library has 733 vitest tests across 19 files (plus 149 Rust backend tests), organized by feature:
+## Design Decisions & Gotchas
 
-| Test File | Tests | What It Covers |
-|-----------|-------|----------------|
-| `cedar-authorization.test.js` | 135 | Policy evaluation, ownership, group aliases, property tests |
-| `handler-sync-api.test.js` | 52 | Handler mode token operations |
-| `oauth-security.test.js` | 44 | PKCE, CSRF, OAuth state validation |
-| `token-storage.test.js` | 15 | localStorage/memory/handler storage |
-| `admin-panel-pattern.test.js` | 41 | Admin UI patterns |
-| `login-rate-limiting.test.js` | 40 | Rate limiting and exponential backoff |
-| `static-site-pattern.test.js` | 27 | Static site integration |
-| `auto-refresh.test.js` | 35 | Background token refresh |
-| `debug-diagnostics.test.js` | 34 | Debug logging |
-| `auth-properties.test.js` | 53 | Property-based tests (fast-check) |
-| `conditional-ui.test.js` | 32 | Passkey autofill |
-| `token-validation.test.js` | 31 | Token claim validation |
-| `conditional-create.test.js` | 23 | Passkey upgrade |
-| `rbac-roles.property.test.js` | 22 | RBAC property tests |
-| `webauthn-capabilities.test.js` | 22 | WebAuthn feature detection |
-| `version-consistency.test.js` | 11 | Version sync across files |
-| `handler-token-store.test.js` | 56 | Handler mode token store |
-| `authenticator-metadata.test.js` | 38 | WebAuthn authenticator metadata parsing |
-| `validate-credential.test.js` | 22 | Pre-registration credential validation |
+### `getTokens()` always returns a Promise
 
-Tests use Vitest with jsdom environment. Property-based tests use fast-check for invariant verification (e.g., "admin is always permitted", "backoff delay never exceeds max").
+Always use `await getTokens()`. It fetches from the server when the cache expires. Calling it without `await` gives you a Promise object, not tokens.
 
-## Where to Go Next
+### `isAuthenticated()` uses a 30-second cache
 
-- **Setting up for the first time?** Start with [the Quick Start in README.md](../README.md#quick-start)
-- **Using handler mode?** See [handler-mode.md](handler-mode.md)
-- **Adding Cedar authorization?** See [cedar-integration.md](cedar-integration.md)
-- **Upgrading from an older version?** See [migration.md](migration.md)
-- **Understanding design trade-offs?** See [design-decisions.md](design-decisions.md)
-- **Hardening for production?** See [security-hardening.md](security-hardening.md)
+It's synchronous and fast, but may briefly return `false` after the cache expires. Use `isAuthenticatedAsync()` when the result is critical. `isAuthenticated()` is fine for UI rendering.
+
+### `fetchWithAuth` retries on 401
+
+If a request gets a 401, `fetchWithAuth` refreshes tokens and retries the entire request — including POST bodies. For non-idempotent requests (payments, order creation), refresh tokens proactively with `ensureValidTokens()` and handle 401 yourself.
+
+### Admin overrides readonly
+
+`isAdmin()` and `isReadonly()` are mutually exclusive. A user in both `admin` and `readonly` groups gets `isAdmin() === true`, `isReadonly() === false`.
+
+### `:own` vs `:all` actions
+
+The ownership forbid policy fires unconditionally when `resource.owner != principal` — even for admins. Admins must use `:all` variants (`write:all`, `delete:all`) to modify other users' resources.
+
+### `resource.owner` is caller-controlled
+
+The client sends `resource.owner` in the request body. A malicious client can lie. For production ownership enforcement, the server must look up the true owner from a database (EntityProvider interface). Client-supplied ownership is acceptable only as defense-in-depth in UI-gated workflows.
+
+## File Layout
+
+```
+src/auth.js              ← The library (~1400 lines, self-contained)
+src/auth.d.ts            ← TypeScript declarations
+
+rust/                    ← Rust Token Handler backend (recommended)
+├── src/
+│   ├── main.rs          ← Dual-mode: Lambda or local Axum server
+│   ├── cedar/engine.rs  ← Native Cedar evaluation
+│   ├── session/         ← HMAC-SHA256 session cookies
+│   └── routes/*.rs      ← HTTP handlers
+├── cedar/               ← Schema + 9 policy files
+└── tests/               ← Integration tests
+
+examples/backends/express/  ← Express backend (alternative)
+├── server.js
+├── cedar-engine.js
+└── cedar/
+
+plugin/templates/
+├── rbac-roles.js        ← Role definitions and permission helpers
+├── *.test.js            ← Test files
+└── *.html               ← Integration template patterns
+```
