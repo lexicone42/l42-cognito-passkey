@@ -618,7 +618,7 @@ import { getDiagnostics } from '/auth/auth.js';
 const diag = getDiagnostics();
 // {
 //   configured: true,
-//   tokenStorage: 'localStorage',
+//   tokenStorage: 'handler',
 //   hasTokens: true,
 //   isAuthenticated: true,
 //   tokenExpiry: Date,

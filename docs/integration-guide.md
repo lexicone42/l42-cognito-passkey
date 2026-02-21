@@ -44,18 +44,18 @@ if (isAuthenticated()) {
 
 **Handler mode is the only supported token storage mode** (since v0.15.0). It stores tokens server-side in HttpOnly cookies, making them invisible to JavaScript.
 
-### Handler mode setup
+### Backend setup
 
-Handler mode requires a backend. See `examples/backends/express/` for a reference implementation.
+Handler mode requires a backend. See `rust/` (recommended) or `examples/backends/express/` for reference implementations.
 
 ```javascript
 configure({
     clientId: 'xxx',
     cognitoDomain: 'xxx.auth.region.amazoncognito.com',
-    tokenStorage: 'handler',
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
-    logoutEndpoint: '/auth/logout'
+    logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session'
 });
 ```
 
@@ -105,10 +105,10 @@ import { configure, fetchWithAuth, onSessionExpired } from './auth.js';
 configure({
     clientId: 'xxx',
     cognitoDomain: 'xxx.auth.region.amazoncognito.com',
-    tokenStorage: 'handler',
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
-    logoutEndpoint: '/auth/logout'
+    logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session'
 });
 
 // Use fetchWithAuth for all API calls
@@ -124,30 +124,25 @@ onSessionExpired(() => router.navigate('/login'));
 
 ### Multi-Site Deployment
 
-For multiple sites sharing a Cognito user pool:
+For multiple sites sharing a Cognito user pool, configure the Rust backend with `COOKIE_DOMAIN` for cross-subdomain SSO and use `CALLBACK_USE_ORIGIN=true` for multi-origin support:
 
 ```javascript
-// Site A: admin.myapp.com
+// Both admin.myapp.com and app.myapp.com use the same backend
 configure({
     clientId: 'xxx',
     cognitoDomain: 'xxx.auth.region.amazoncognito.com',
-    cookieDomain: '.myapp.com',  // Shared cookie domain
-    tokenStorage: 'handler',
     tokenEndpoint: 'https://api.myapp.com/auth/token',
     refreshEndpoint: 'https://api.myapp.com/auth/refresh',
-    logoutEndpoint: 'https://api.myapp.com/auth/logout'
+    logoutEndpoint: 'https://api.myapp.com/auth/logout',
+    sessionEndpoint: 'https://api.myapp.com/auth/session'
 });
+```
 
-// Site B: app.myapp.com
-configure({
-    clientId: 'xxx',  // Same or different client ID
-    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
-    cookieDomain: '.myapp.com',  // Same shared cookie domain
-    tokenStorage: 'handler',
-    tokenEndpoint: 'https://api.myapp.com/auth/token',
-    refreshEndpoint: 'https://api.myapp.com/auth/refresh',
-    logoutEndpoint: 'https://api.myapp.com/auth/logout'
-});
+Backend config (Rust `.env`):
+```bash
+COOKIE_DOMAIN=.myapp.com
+CALLBACK_USE_ORIGIN=true
+CALLBACK_ALLOWED_ORIGINS=https://admin.myapp.com,https://app.myapp.com
 ```
 
 ## RBAC Integration
@@ -262,27 +257,20 @@ When helping a user set up auth, you need these values from them:
 2. **`cognitoDomain`** — The Cognito domain prefix (e.g., `myapp.auth.us-west-2.amazoncognito.com`)
 3. **`cognitoRegion`** — AWS region (default: `us-west-2`)
 
-For handler mode, also need:
-4. The backend URL for token/refresh/logout endpoints
+You also need:
+4. The backend URL for token/refresh/logout/session endpoints
 
 ### Generating the Configuration
 
 ```javascript
-// Minimal configuration (localStorage mode)
-configure({
-    clientId: '${CLIENT_ID}',
-    cognitoDomain: '${COGNITO_DOMAIN}'
-});
-
-// Production configuration (handler mode)
 configure({
     clientId: '${CLIENT_ID}',
     cognitoDomain: '${COGNITO_DOMAIN}',
     cognitoRegion: '${REGION}',
-    tokenStorage: 'handler',
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
-    logoutEndpoint: '/auth/logout'
+    logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session'
 });
 ```
 
@@ -386,7 +374,7 @@ cd node_modules/l42-cognito-passkey && pnpm test
 
 ### Key Gotchas
 
-1. **`await getTokens()`** — Always use `await` on `getTokens()`. It's sync in localStorage/memory mode but async in handler mode. Using `await` is safe in all modes.
+1. **`await getTokens()`** — Always use `await` on `getTokens()`. It returns a Promise that fetches tokens from the server if the cache is expired.
 
 2. **`isAuthenticated()` is sync** — It uses cached tokens, so it works without `await`. But the cache may be stale in handler mode. Use `isAuthenticatedAsync()` if you need a server-verified check.
 

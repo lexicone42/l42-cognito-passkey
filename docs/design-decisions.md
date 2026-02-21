@@ -468,8 +468,8 @@ This sends a POST to your authorization endpoint with the action and context. Yo
 | `cognitoDomain` | Matches `*.auth.*.amazoncognito.com` OR valid domain format | `"Invalid cognitoDomain format"` |
 | `cognitoRegion` | Non-empty string | `"Invalid cognitoRegion"` |
 | `tokenKey` | Non-empty string | `"Invalid tokenKey"` |
-| `tokenStorage` | One of: `localStorage`, `memory`, `handler` | `"Invalid tokenStorage"` |
-| Handler endpoints | All three required when `tokenStorage: 'handler'` | Lists missing endpoints |
+| `tokenStorage` | Must be `'handler'` (only supported mode since v0.15.0) | `"Invalid tokenStorage"` |
+| Handler endpoints | `tokenEndpoint`, `refreshEndpoint`, `logoutEndpoint` required | Lists missing endpoints |
 | `redirectUri` | Valid URL, HTTPS for non-localhost | `"HTTPS is required for non-localhost URLs"` |
 | `redirectUri` domain | Must match `allowedDomains` or current domain | `"Redirect URI domain not allowed"` |
 

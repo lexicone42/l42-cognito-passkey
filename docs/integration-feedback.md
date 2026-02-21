@@ -223,14 +223,11 @@ Check:
 2. `callback.html` exists at the configured path
 3. No CSP blocking Cognito domain
 
-### Cookies Not Set
+### Session Cookies Not Working
 
-For ccTLDs (`.co.uk`, `.com.au`), explicitly set:
-```javascript
-window.L42_AUTH_CONFIG = {
-    // ...
-    cookieDomain: '.yoursite.co.uk'
-};
+Cookie domain is set server-side by the Token Handler backend. For the Rust backend, set `COOKIE_DOMAIN` in your `.env`:
+```bash
+COOKIE_DOMAIN=.yoursite.co.uk
 ```
 
 ### Groups Not Appearing
