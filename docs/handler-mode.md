@@ -128,13 +128,11 @@ configure({
     clientId: 'your-cognito-client-id',
     cognitoDomain: 'your-app.auth.us-west-2.amazoncognito.com',
 
-    // Enable handler mode
-    tokenStorage: 'handler',
-
     // Required endpoints (your backend)
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
     logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session',  // Persists passkey/password sessions
 
     // Optional: Backend OAuth callback
     oauthCallbackUrl: '/auth/callback',
@@ -199,27 +197,28 @@ await logout();
 
 ## Migration Guide
 
-### From localStorage mode
+### From localStorage mode (pre-v0.15.0)
 
-1. **Deploy a backend** (Express, Lambda, or Workers)
+localStorage and memory modes were removed in v0.15.0. To migrate:
+
+1. **Deploy a backend** — Rust (recommended) or Express
 2. **Update configuration**:
 
 ```javascript
-// Before (v0.7.0)
+// Before (v0.14.0 and earlier)
 configure({
     clientId: 'xxx',
-    cognitoDomain: 'xxx.auth.region.amazoncognito.com',
-    tokenStorage: 'localStorage'  // or omitted (default)
+    cognitoDomain: 'xxx.auth.region.amazoncognito.com'
 });
 
-// After (v0.8.0)
+// After (v0.15.0+)
 configure({
     clientId: 'xxx',
     cognitoDomain: 'xxx.auth.region.amazoncognito.com',
-    tokenStorage: 'handler',
     tokenEndpoint: '/auth/token',
     refreshEndpoint: '/auth/refresh',
-    logoutEndpoint: '/auth/logout'
+    logoutEndpoint: '/auth/logout',
+    sessionEndpoint: '/auth/session'
 });
 ```
 

@@ -1,7 +1,7 @@
 # Passkey Security Analysis
 
 **Date**: 2026-02-19
-**Version**: 0.18.0
+**Version**: 0.19.0
 **Context**: Security review prompted by Cloudbrothers "Are Passkeys As Secure As You Think" (Disobey 2026) and device attestation integration planning.
 
 ## Current Posture

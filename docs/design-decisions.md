@@ -44,27 +44,6 @@ Handler mode is the only supported token storage mode (since v0.15.0). Tokens ar
 
 ### Common Misconfigurations
 
-#### HIGH: Switching storage mode mid-session
-
-```javascript
-// WRONG — tokens from the old store are orphaned
-configure({ tokenStorage: 'localStorage', ... });
-// ... user logs in ...
-configure({ tokenStorage: 'handler', ... });
-// The localStorage tokens still exist but are now ignored
-// isAuthenticated() returns false because the handler cache is empty
-```
-
-**Why it breaks**: `configure()` does not migrate tokens between stores. If you reconfigure at runtime, the old tokens remain in their original store, and the new store starts empty. The user appears logged out.
-
-**Fix**: Only call `configure()` once, during page initialization. If you must switch modes, call `logout()` first.
-
-#### MEDIUM: Assuming `memory` mode is immune to XSS
-
-Memory mode keeps tokens out of `localStorage` and cookies, which protects against storage-scanning attacks. However, any XSS that can execute JavaScript can call `getTokens()` and read the tokens directly from the module's internal variable.
-
-**What memory mode actually protects against**: Browser extensions that scan localStorage, other-tab attacks via storage events, and tokens surviving after the tab is closed.
-
 #### LOW: Handler mode without understanding the cache
 
 Handler mode fetches tokens from the server via HTTP and caches them for 30 seconds (configurable via `handlerCacheTtl`). During the cache gap (after TTL expires, before next fetch), `isAuthenticated()` may return `false` even though the user is authenticated server-side. See [Section 3](#3-authentication-state-checks) for details.
@@ -176,38 +155,11 @@ The library sets an `l42_id_token` cookie containing the full JWT ID token. This
 
 Cognito ID tokens with many groups/custom claims can exceed 4096 bytes — the per-cookie limit in most browsers. When this happens, `document.cookie` **silently fails** to set the cookie. There is no error thrown.
 
-**Symptoms**: Server-side validation works in development (small tokens) but fails in production (users with many groups).
+**Note**: This is no longer a concern since v0.15.0 — handler mode uses a compact server-side session cookie, not the raw JWT.
 
-**Workaround**: If your Cognito users are in many groups, use handler mode instead (server sets a compact session cookie).
+### Cookie Domain (Historical)
 
-### Cookie Domain Auto-Detection
-
-The library handles country-code TLDs (ccTLDs) with a public suffix list:
-
-```
-app.example.com     → .example.com      (standard 2-part TLD)
-app.example.co.uk   → .example.co.uk    (3-part public suffix)
-localhost            → null              (no domain set)
-192.168.1.1          → null              (IP addresses)
-```
-
-### MEDIUM: Missing Public Suffix
-
-The `PUBLIC_SUFFIXES` list contains 30+ entries but is not exhaustive. If your domain uses a public suffix not in the list (e.g., `.nom.br`, `.co.id`), the library will compute the wrong cookie domain:
-
-```
-app.example.co.id → .example.co.id  (CORRECT if co.id were in the list)
-app.example.co.id → .co.id          (WRONG — library treats co.id as the registrable domain)
-```
-
-**Fix**: Set `cookieDomain` explicitly in your configuration:
-
-```javascript
-configure({
-    cookieDomain: '.example.co.id',
-    // ...
-});
-```
+Prior to v0.15.0, the library set cookies client-side and needed cookie domain auto-detection with a public suffix list. This was removed when handler mode became the only storage mode. Cookie domain is now configured server-side (e.g., `COOKIE_DOMAIN` in the Rust backend).
 
 ---
 
