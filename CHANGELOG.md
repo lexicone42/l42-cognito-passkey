@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.0] - 2026-02-21
+
+_Release notes pending._
+
 ## [0.19.0] - 2026-02-20
 
 _Release notes pending._
