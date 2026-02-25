@@ -26,6 +26,8 @@ pub struct Config {
     pub aaguid_allowlist: Vec<String>,
     pub require_device_bound: bool,
     pub service_token: Option<String>,
+    /// Additional client IDs accepted as valid JWT audiences (for dual-client setups).
+    pub additional_audience: Vec<String>,
 }
 
 impl Config {
@@ -76,6 +78,12 @@ impl Config {
                 .map(|v| v == "true" || v == "1" || v == "True")
                 .unwrap_or(false),
             service_token: env::var("SERVICE_TOKEN").ok().filter(|s| !s.is_empty()),
+            additional_audience: env::var("ADDITIONAL_AUDIENCE")
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
         })
     }
 
@@ -126,6 +134,7 @@ impl Config {
             aaguid_allowlist: Vec::new(),
             require_device_bound: false,
             service_token: None,
+            additional_audience: Vec::new(),
         }
     }
 }

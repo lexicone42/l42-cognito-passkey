@@ -172,7 +172,11 @@ pub async fn verify_id_token(
     // Validate
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_issuer(&[&config.cognito_issuer()]);
-    validation.set_audience(&[&config.cognito_client_id]);
+    let mut audiences: Vec<&str> = vec![&config.cognito_client_id];
+    for aud in &config.additional_audience {
+        audiences.push(aud.as_str());
+    }
+    validation.set_audience(&audiences);
     validation.set_required_spec_claims(&["exp", "iss", "aud"]);
 
     let token_data = decode::<Claims>(token, decoding_key, &validation)
