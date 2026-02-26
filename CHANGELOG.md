@@ -4,7 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [0.20.1] - 2026-02-26
 
-_Release notes pending._
+### Fixed
+
+- **`autoConfigureFromWindow` missing handler endpoints** — `window.L42_AUTH_CONFIG` now maps `tokenEndpoint`, `refreshEndpoint`, `logoutEndpoint`, `sessionEndpoint`, and `validateCredentialEndpoint`
+- **`getTokens()` missing `requireConfig()` guard** — could silently fail if called before `configure()`
+- **OAuth session persistence** — `exchangeCodeForTokens()` now calls `_persistHandlerSession()` to create a server session after OAuth callback
+- **Rust `client.rs` test config** missing `additional_audience` field (build failure)
+
+### Added
+
+- **`additional_audience` config** (Rust backend) — `ADDITIONAL_AUDIENCE` env var accepts comma-separated client IDs for dual-client JWT verification (e.g., when a site's Cognito app client differs from the backend's)
+
+### Documentation
+
+- Filled in v0.19.0 and v0.20.0 changelog entries
+- Updated `docs/api-reference.md` and `docs/release.md` version refs (0.19.0 → 0.20.0)
+- Updated `plugin/CLAUDE.md` cargo test count (149 → 157)
+- Synced `dist/auth.js` with `src/auth.js`
 
 ## [0.20.0] - 2026-02-21
 
