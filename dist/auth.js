@@ -571,7 +571,12 @@ function autoConfigureFromWindow() {
             scopes: Array.isArray(windowConfig.scopes)
                 ? windowConfig.scopes.join(' ')
                 : windowConfig.scopes,
-            allowedDomains: windowConfig.allowedDomains
+            allowedDomains: windowConfig.allowedDomains,
+            tokenEndpoint: windowConfig.tokenEndpoint,
+            refreshEndpoint: windowConfig.refreshEndpoint,
+            logoutEndpoint: windowConfig.logoutEndpoint,
+            sessionEndpoint: windowConfig.sessionEndpoint,
+            validateCredentialEndpoint: windowConfig.validateCredentialEndpoint,
         });
     }
 }
@@ -777,6 +782,7 @@ function getTokensSync() {
  * @returns {Promise<Object|null>} Tokens object or null.
  */
 export function getTokens() {
+    requireConfig();
     return getTokenStore().get(config.tokenKey);
 }
 
@@ -2111,6 +2117,7 @@ export async function exchangeCodeForTokens(code, state) {
         auth_method: 'oauth'
     };
     setTokens(tokens);
+    await _persistHandlerSession(tokens);
     notifyLogin(tokens, 'oauth');
 
     // Extract email from the new token for logging

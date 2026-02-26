@@ -4,16 +4,16 @@ Release process and version upgrade guide.
 
 ## Current Version
 
-**0.19.0** — 733 vitest + 149 cargo tests
+**0.20.0** — 733 vitest + 157 cargo tests
 
 ## Release Process
 
 ### Commands
 
 ```bash
-pnpm release:patch    # Bug fix:  0.19.0 → 0.19.1
-pnpm release:minor    # Feature:  0.19.0 → 0.20.0
-pnpm release:major    # Breaking: 0.19.0 → 1.0.0
+pnpm release:patch    # Bug fix:  0.20.0 → 0.20.1
+pnpm release:minor    # Feature:  0.20.0 → 0.21.0
+pnpm release:major    # Breaking: 0.20.0 → 1.0.0
 ```
 
 ### What Happens

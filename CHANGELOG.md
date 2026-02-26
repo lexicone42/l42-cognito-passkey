@@ -4,11 +4,64 @@ All notable changes to this project will be documented in this file.
 
 ## [0.20.0] - 2026-02-21
 
-_Release notes pending._
+### Added
+
+- **Service token bypass** for headless/programmatic API access
+  - `SERVICE_TOKEN` env var + `X-Service-Token` header bypass session cookies and CSRF
+  - Constant-time comparison via `subtle::ConstantTimeEq`
+  - Synthetic `SessionHandle` with `"__service__"` ID for service requests
+  - OCSF authentication event with `AUTH_PROTOCOL_SERVICE_TOKEN` (100)
+  - Startup warning if token < 32 chars
+  - 5 integration + 3 unit tests
+
+### Documentation
+
+- **Consolidated 18 doc files into 6 focused guides** — removed duplication, updated all cross-references
+- Removed stale pre-v0.15.0 references (localStorage, memory mode, FastAPI)
+- README badges for version, tests, license, and Rust backend
 
 ## [0.19.0] - 2026-02-20
 
-_Release notes pending._
+### Added
+
+- **WebAuthn authenticator metadata** — `parseAuthenticatorData()` extracts UP/UV/BE/BS/AT/ED flags, signCount, and AAGUID from raw `authenticatorData`
+  - `authenticatorMetadata` field on registration and login credential responses
+  - OCSF events include backup eligibility, backup state, AAGUID, and attestation level
+  - `attestation` option on `registerPasskey()` and `upgradeToPasskey()` ('none'/'indirect'/'direct'/'enterprise')
+  - 38 tests in `authenticator-metadata.test.js`
+
+- **Pre-registration credential validation gate** (Rust backend)
+  - `POST /auth/validate-credential` — CSRF-protected, requires session
+  - AAGUID allowlist (`AAGUID_ALLOWLIST` env var) and device-bound policy (`REQUIRE_DEVICE_BOUND`)
+  - CBOR attestation parsing via `ciborium` crate
+  - Client-side `validateCredentialEndpoint` config option, gate in `registerPasskey()` and `upgradeToPasskey()`
+  - 17 unit + 7 integration + 13 JS tests
+
+- **Multi-origin OAuth callback** (Rust backend)
+  - `CALLBACK_USE_ORIGIN` env var — redirects to request origin instead of static `FRONTEND_URL`
+  - `CALLBACK_ALLOWED_ORIGINS` — validates `X-Forwarded-Host` to prevent open redirect
+  - Enables one Lambda behind multiple CloudFront distributions
+
+### Security
+
+- **v1.0 security hardening** — 4 blocking + 7 important + 8 hardening items addressed
+  - `validateTokenClaims()` now requires `aud`/`client_id` and `exp` claims (fixes S2)
+  - `SESSION_SECRET` required at startup (was silently defaulting)
+  - `clientDataJSON` origin validation in credential.rs
+  - Refresh token rotation preservation from Cognito
+  - OCSF coverage on `/token`, `/me`, fixed `/logout` auth_method
+  - 10 PKCE + 13 credential + 3 Cedar forbid composition property tests
+  - `X-Forwarded-Proto` validation (only "http"/"https")
+  - Callback session cleanup on all error paths
+  - Startup warnings for HTTPS_ONLY mismatch + empty allowed origins
+
+### Removed
+
+- **FastAPI backend** (`app/` directory) — Rust backend is now the sole recommended backend
+
+### Tests
+
+- 733 vitest + 149 → 157 cargo tests
 
 ## [0.18.0] - 2026-02-17
 
