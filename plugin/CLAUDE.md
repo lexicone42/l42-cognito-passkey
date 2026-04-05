@@ -4,7 +4,7 @@ This plugin provides quick setup for AWS Cognito authentication with WebAuthn pa
 
 **Plugin Name**: `l42-cognito-passkey`
 **Current Version**: 0.21.0
-**Tests**: 733 vitest + 157 cargo tests
+**Tests**: 707 vitest + 164 cargo tests
 
 ## Overview
 
@@ -303,10 +303,9 @@ Each template has an accompanying test file:
 - `plugin/templates/admin-panel-pattern.test.js`
 - `plugin/templates/rbac-roles.property.test.js` (22 property-based tests)
 - `plugin/templates/version-consistency.test.js`
-- `plugin/templates/token-storage.test.js` (15 token storage tests)
 - `plugin/templates/auto-refresh.test.js` (35 auto-refresh, fetchWithAuth, CSRF tests)
-- `plugin/templates/auth-properties.test.js` (53 auth property-based tests)
-- `plugin/templates/debug-diagnostics.test.js` (34 debug logging & diagnostics tests)
+- `plugin/templates/auth-properties.test.js` (48 auth property-based tests)
+- `plugin/templates/debug-diagnostics.test.js` (29 debug logging & diagnostics tests)
 - `plugin/templates/conditional-ui.test.js` (32 conditional UI / passkey autofill tests)
 - `plugin/templates/conditional-create.test.js` (23 conditional create / passkey upgrade tests)
 - `plugin/templates/token-validation.test.js` (31 token validation on load tests)
@@ -314,7 +313,7 @@ Each template has an accompanying test file:
 - `plugin/templates/login-rate-limiting.test.js` (40 login rate limiting tests)
 - `plugin/templates/cedar-authorization.test.js` (135 Cedar policy authorization tests)
 
-**Total: 733 vitest tests** (+ 149 Rust backend tests via `cargo test`)
+**Total: 707 vitest tests** (+ 164 Rust backend tests via `cargo test`)
 
 Run tests with:
 ```bash

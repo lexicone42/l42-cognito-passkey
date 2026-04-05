@@ -26,7 +26,11 @@ import {
     isTokenExpired,
     shouldRefreshToken,
     generateCodeVerifier,
-    generateCodeChallenge
+    generateCodeChallenge,
+    configure,
+    setTokens,
+    isAuthenticated,
+    _resetForTesting
 } from '../../src/auth.js';
 
 // ============================================================================
@@ -775,5 +779,120 @@ describe('PROPERTY: PKCE Code Challenge Invariants', () => {
         const verifier = generateCodeVerifier();
         const challenge = await generateCodeChallenge(verifier);
         expect(challenge.length).toBeLessThan(verifier.length);
+    });
+});
+
+// ============================================================================
+// PROPERTY: Real auth.js integration (end-to-end via _resetForTesting)
+// ============================================================================
+
+describe('PROPERTY: Real auth.js isAuthenticated invariants', () => {
+    beforeEach(() => {
+        _resetForTesting();
+        configure({
+            clientId: 'test-client',
+            cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
+            cognitoRegion: 'us-west-2',
+            tokenEndpoint: '/auth/token',
+            refreshEndpoint: '/auth/refresh',
+            logoutEndpoint: '/auth/logout',
+            sessionEndpoint: '/auth/session'
+        });
+    });
+
+    it('valid tokens always make isAuthenticated return true', () => {
+        fc.assert(
+            fc.property(
+                fc.string({ minLength: 1, maxLength: 36 }),  // sub
+                fc.emailAddress(),
+                cognitoGroupArb,
+                (sub, email, group) => {
+                    const exp = Math.floor(Date.now() / 1000) + 3600;
+                    const tokens = {
+                        access_token: createTestJwt({ sub, client_id: 'test-client', exp }),
+                        id_token: createTestJwt({
+                            sub, email, 'cognito:groups': [group],
+                            aud: 'test-client',
+                            iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_test',
+                            exp
+                        }),
+                        auth_method: 'password'
+                    };
+                    setTokens(tokens);
+                    return isAuthenticated() === true;
+                }
+            ),
+            { numRuns: 100 }
+        );
+    });
+
+    it('expired tokens always make isAuthenticated return false', () => {
+        fc.assert(
+            fc.property(
+                fc.string({ minLength: 1, maxLength: 36 }),
+                fc.integer({ min: 1, max: 86400 }),  // seconds ago
+                (sub, secondsAgo) => {
+                    const exp = Math.floor(Date.now() / 1000) - secondsAgo;
+                    const tokens = {
+                        access_token: createTestJwt({ sub, client_id: 'test-client', exp }),
+                        id_token: createTestJwt({
+                            sub, aud: 'test-client',
+                            iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_test',
+                            exp
+                        })
+                    };
+                    setTokens(tokens);
+                    return isAuthenticated() === false;
+                }
+            ),
+            { numRuns: 100 }
+        );
+    });
+
+    it('wrong client_id always makes isAuthenticated return false', () => {
+        fc.assert(
+            fc.property(
+                fc.string({ minLength: 1, maxLength: 36 }),
+                fc.string({ minLength: 1, maxLength: 20 }),
+                (sub, wrongClientId) => {
+                    fc.pre(wrongClientId !== 'test-client');
+                    const exp = Math.floor(Date.now() / 1000) + 3600;
+                    const tokens = {
+                        access_token: createTestJwt({ sub, client_id: wrongClientId, exp }),
+                        id_token: createTestJwt({
+                            sub, aud: wrongClientId,
+                            iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_test',
+                            exp
+                        })
+                    };
+                    setTokens(tokens);
+                    return isAuthenticated() === false;
+                }
+            ),
+            { numRuns: 100 }
+        );
+    });
+
+    it('wrong issuer region always makes isAuthenticated return false', () => {
+        fc.assert(
+            fc.property(
+                fc.string({ minLength: 1, maxLength: 36 }),
+                fc.constantFrom('eu-west-1', 'ap-southeast-1', 'us-east-1', 'eu-central-1'),
+                (sub, wrongRegion) => {
+                    const exp = Math.floor(Date.now() / 1000) + 3600;
+                    const tokens = {
+                        access_token: createTestJwt({ sub, client_id: 'test-client', exp }),
+                        id_token: createTestJwt({
+                            sub, aud: 'test-client',
+                            iss: `https://cognito-idp.${wrongRegion}.amazonaws.com/${wrongRegion}_pool`,
+                            exp
+                        })
+                    };
+                    setTokens(tokens);
+                    return isAuthenticated() === false;
+                }
+            ),
+            { numRuns: 50 }
+        );
     });
 });

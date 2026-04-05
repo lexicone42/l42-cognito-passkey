@@ -6,7 +6,7 @@ L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for A
 
 **Current Version**: 0.21.0
 **License**: Apache-2.0
-**Tests**: 733 vitest + 164 cargo (including 53 property-based tests + 15 token storage tests + 56 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 132 Cedar authorization tests)
+**Tests**: 697 vitest + 164 cargo (including 48 auth property tests + 48 handler mode tests + 35 auto-refresh tests + 29 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 135 Cedar authorization tests)
 
 ## Quick Start for Claude Instances
 
@@ -23,10 +23,10 @@ cp /path/to/l42cognitopasskey/src/auth.js ./public/auth/auth.js
 ### Key Commands
 
 ```bash
-# Run all JS tests (733 tests)
+# Run all JS tests (707 tests)
 pnpm test
 
-# Run Rust backend tests (157 tests)
+# Run Rust backend tests (164 tests)
 cd rust && cargo test
 
 # Run tests in watch mode
