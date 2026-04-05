@@ -82,6 +82,30 @@ Content-Security-Policy:
 
 Use nonce-based CSP. `script-src 'self'` alone can be bypassed via JSONP endpoints, CDN gadgets, or base tag injection.
 
+### Perfect Types (Trusted Types + `setHTML()`)
+
+For maximum DOM XSS protection, add Trusted Types with a zero-policy configuration:
+
+```
+Content-Security-Policy:
+  require-trusted-types-for 'script';
+  trusted-types 'none';
+```
+
+This makes it **impossible** to use dangerous DOM sinks — the browser rejects them at runtime. Application code must use `setHTML()` (with the built-in Sanitizer) or `textContent` instead.
+
+auth.js already uses `textContent` exclusively and never assigns to dangerous sinks, so it works with Perfect Types out of the box. The value is protecting *your application code* around auth.js from accidentally injecting user-controlled data (JWT claims, emails, group names) via unsafe DOM APIs.
+
+```javascript
+// Safe — works with Perfect Types
+element.textContent = auth.getUserEmail();
+
+// Use setHTML() for HTML content (sanitizes automatically)
+element.setHTML('<b>' + auth.getUserEmail() + '</b>');
+```
+
+See [Perfect Types with setHTML()](https://frederikbraun.de/perfect-types-with-sethtml.html) for the full rationale. Browser support: Chrome 124+, Firefox (behind flag), Safari 18+.
+
 ### Server Implementation
 
 ```javascript
@@ -175,7 +199,7 @@ Cognito does not process attestation server-side. It stores credentials but does
 
 | # | Finding | Severity | Notes |
 |---|---------|----------|-------|
-| S1 | `resource.owner` is caller-controlled | HIGH | Client can lie about ownership. Use EntityProvider for production. |
+| S1 | `resource.owner` is caller-controlled | Fixed | `ENTITY_TABLE` env var enables server-side ownership verification (v0.21.0). |
 | S2 | `validateTokenClaims` requires `aud`/`client_id` and `exp` | Fixed | Missing claims now cause validation failure. |
 | S3 | Rate limiting is client-side only | LOW | Cognito enforces server-side lockout. |
 | S5 | Context from request body passed unvalidated to Cedar | MEDIUM | Server should build context, not forward client input. |

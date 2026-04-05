@@ -13,42 +13,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+    isPasskeySupported,
+    isConditionalMediationAvailable,
+    isPlatformAuthenticatorAvailable,
+    getPasskeyCapabilities
+} from '../../src/auth.js';
 
-// ============================================================================
-// Simulated auth.js internals
-// ============================================================================
-
-function isPasskeySupported() {
-    return typeof window !== 'undefined'
-        && window.isSecureContext === true
-        && typeof window.PublicKeyCredential !== 'undefined'
-        && typeof navigator.credentials !== 'undefined';
-}
-
-async function isConditionalMediationAvailable() {
-    if (!isPasskeySupported()) return false;
-    try {
-        if (typeof PublicKeyCredential.isConditionalMediationAvailable === 'function') {
-            return await PublicKeyCredential.isConditionalMediationAvailable();
-        }
-    } catch {
-        // Ignore
-    }
-    return false;
-}
-
-async function isPlatformAuthenticatorAvailable() {
-    if (!isPasskeySupported()) return false;
-    try {
-        if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
-            return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-        }
-    } catch {
-        // Ignore
-    }
-    return false;
-}
-
+// detectWebView is private — tested indirectly via getPasskeyCapabilities().isWebView
 function detectWebView() {
     if (typeof navigator === 'undefined') return false;
     var ua = navigator.userAgent || '';
@@ -56,65 +28,6 @@ function detectWebView() {
     if (/iPhone|iPad/.test(ua) && !/Safari/.test(ua)) return true;
     if (/Electron/.test(ua)) return true;
     return false;
-}
-
-async function getPasskeyCapabilities() {
-    var supported = isPasskeySupported();
-    var secureContext = typeof window !== 'undefined' ? window.isSecureContext === true : false;
-
-    if (supported && typeof PublicKeyCredential.getClientCapabilities === 'function') {
-        try {
-            var caps = await PublicKeyCredential.getClientCapabilities();
-            return {
-                supported: supported,
-                conditionalMediation: caps.conditionalMediation === true
-                    || caps['conditional-mediation'] === true,
-                conditionalCreate: caps.conditionalCreate === true
-                    || caps['conditional-create'] === true,
-                platformAuthenticator: supported
-                    ? await isPlatformAuthenticatorAvailable()
-                    : false,
-                secureContext: secureContext,
-                hybridTransport: caps.hybridTransport === true
-                    || caps['hybrid-transport'] === true,
-                passkeyPlatformAuthenticator: caps.passkeyPlatformAuthenticator === true
-                    || caps['passkey-platform-authenticator'] === true,
-                userVerifyingPlatformAuthenticator: caps.userVerifyingPlatformAuthenticator === true
-                    || caps['user-verifying-platform-authenticator'] === true,
-                relatedOrigins: caps.relatedOrigins === true
-                    || caps['related-origins'] === true,
-                signalAllAcceptedCredentials: caps.signalAllAcceptedCredentials === true
-                    || caps['signal-all-accepted-credentials'] === true,
-                signalCurrentUserDetails: caps.signalCurrentUserDetails === true
-                    || caps['signal-current-user-details'] === true,
-                signalUnknownCredential: caps.signalUnknownCredential === true
-                    || caps['signal-unknown-credential'] === true,
-                isWebView: detectWebView(),
-                source: 'getClientCapabilities'
-            };
-        } catch {
-            // Fall through
-        }
-    }
-
-    return {
-        supported: supported,
-        conditionalMediation: supported ? await isConditionalMediationAvailable() : false,
-        conditionalCreate: false,
-        platformAuthenticator: supported ? await isPlatformAuthenticatorAvailable() : false,
-        secureContext: secureContext,
-        hybridTransport: false,
-        passkeyPlatformAuthenticator: false,
-        userVerifyingPlatformAuthenticator: supported
-            ? await isPlatformAuthenticatorAvailable()
-            : false,
-        relatedOrigins: false,
-        signalAllAcceptedCredentials: false,
-        signalCurrentUserDetails: false,
-        signalUnknownCredential: false,
-        isWebView: detectWebView(),
-        source: 'fallback'
-    };
 }
 
 // ============================================================================
