@@ -4,7 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [0.21.0] - 2026-04-05
 
-_Release notes pending._
+### Added
+
+- **Entity provider for trusted resource ownership** (Rust backend, closes S1 gap)
+  - `ENTITY_TABLE` env var — DynamoDB table for server-side ownership verification
+  - `/auth/authorize` looks up true owner by resource ID, ignoring client-provided `resource.owner`
+  - Table schema: PK `id` (S), attribute `owner` (S)
+  - Backwards compatible — without `ENTITY_TABLE`, client value is still used with startup warning
+  - `EntityProvider` trait + `DynamoDbEntityProvider` + `InMemoryEntityProvider` (dev/test)
+  - WARN log when client-provided owner differs from true owner (attack audit trail)
+  - 4 integration tests + 3 unit tests
+
+- **Lambda session backend auto-detection** (Rust backend, fixes #24)
+  - `SESSION_BACKEND` defaults to `dynamodb` when `AWS_LAMBDA_FUNCTION_NAME` is set
+  - Startup warnings for Lambda+memory, DYNAMODB_TABLE mismatch, Cedar without entity provider
+  - Shared DynamoDB client between session backend and entity provider
+
+### Changed
+
+- **JS deps:** vitest 4.0→4.1, jsdom 27→29, picomatch >=4.0.4 override
+- **Rust deps:** cargo update (103 crates — aws-sdk, cedar-policy, hyper, chrono, etc.)
+
+### Security
+
+- Resolved rollup path traversal (GHSA-mw96-cpmx-2vgc) via vitest update
+- Resolved picomatch ReDoS (GHSA-c2c7-rcm5-vvqj) and method injection (GHSA-3v7f-55p6-f55p) via override
+- `pnpm audit` and `cargo audit` clean (dev-only rsa advisory, no fix available)
 
 ## [0.20.1] - 2026-02-26
 
