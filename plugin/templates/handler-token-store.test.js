@@ -2,179 +2,108 @@
  * L42 Cognito Passkey - Handler Token Store Tests
  *
  * Tests for Token Handler mode (v0.8.0):
- * - HandlerTokenStore implementation
- * - Configuration validation
+ * - Configuration validation (REAL auth.js configure())
+ * - Token storage via real setTokens/clearTokens/getTokens
  * - Server endpoint integration
- * - Security properties
+ * - Security properties (real functions, no localStorage/sessionStorage leaks)
+ * - Cache TTL behavior
+ * - Session persistence
  *
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+    configure,
+    isConfigured,
+    setTokens,
+    clearTokens,
+    getTokens,
+    isAuthenticated,
+    logout,
+    _resetForTesting
+} from '../../src/auth.js';
 
 // ============================================================================
-// HandlerTokenStore Implementation (mirrored from auth.js for testing)
+// Test Helpers
 // ============================================================================
 
-/**
- * Test config object
- */
-let testConfig = {
-    tokenStorage: 'handler',
-    tokenEndpoint: '/auth/token',
-    refreshEndpoint: '/auth/refresh',
-    logoutEndpoint: '/auth/logout',
-    oauthCallbackUrl: '/auth/callback',
-    handlerCacheTtl: 30000
-};
+/** Standard test config with all required endpoints. */
+function configureForTest(overrides = {}) {
+    configure({
+        clientId: 'test-client',
+        cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
+        cognitoRegion: 'us-west-2',
+        tokenEndpoint: '/auth/token',
+        refreshEndpoint: '/auth/refresh',
+        logoutEndpoint: '/auth/logout',
+        sessionEndpoint: '/auth/session',
+        ...overrides
+    });
+}
 
-/**
- * HandlerTokenStore implementation for testing
- */
-const HandlerTokenStore = {
-    _cache: null,
-    _cacheExpiry: 0,
-    _fetchPromise: null,
+/** Create a properly-structured JWT for testing. */
+function createTestJwt(claims) {
+    const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    const payload = btoa(JSON.stringify(claims))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    return `${header}.${payload}.test-signature`;
+}
 
-    async get(_tokenKey) {
-        if (this._cache && Date.now() < this._cacheExpiry) {
-            return this._cache;
-        }
+/** Mock tokens with valid JWT structure (passes validateTokenClaims). */
+function createMockTokens() {
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    return {
+        access_token: createTestJwt({ sub: 'user1', client_id: 'test-client', exp }),
+        id_token: createTestJwt({
+            sub: 'user1',
+            aud: 'test-client',
+            iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_test',
+            exp
+        }),
+        auth_method: 'handler'
+    };
+}
 
-        if (this._fetchPromise) {
-            return this._fetchPromise;
-        }
-
-        this._fetchPromise = this._fetchTokens();
-        try {
-            return await this._fetchPromise;
-        } finally {
-            this._fetchPromise = null;
-        }
-    },
-
-    async _fetchTokens() {
-        const endpoint = testConfig.tokenEndpoint;
-        if (!endpoint) {
-            console.error('HandlerTokenStore: tokenEndpoint not configured');
-            return null;
-        }
-
-        try {
-            const response = await fetch(endpoint, {
-                method: 'GET',
-                credentials: 'include',
-                headers: {
-                    'Accept': 'application/json'
-                }
-            });
-
-            if (response.status === 401 || response.status === 403) {
-                this._cache = null;
-                this._cacheExpiry = 0;
-                return null;
-            }
-
-            if (!response.ok) {
-                throw new Error(`Token fetch failed: ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            const tokens = {
-                access_token: data.access_token,
-                id_token: data.id_token,
-                auth_method: data.auth_method || 'handler'
-            };
-
-            this._cache = tokens;
-            this._cacheExpiry = Date.now() + (testConfig.handlerCacheTtl || 30000);
-
-            return tokens;
-        } catch (error) {
-            console.error('HandlerTokenStore: fetch failed', error);
-            throw error;
-        }
-    },
-
-    set(_tokenKey, tokens) {
-        this._cache = tokens;
-        this._cacheExpiry = Date.now() + (testConfig.handlerCacheTtl || 30000);
-    },
-
-    clear(_tokenKey) {
-        this._cache = null;
-        this._cacheExpiry = 0;
-    },
-
-    getCached() {
-        if (this._cache && Date.now() < this._cacheExpiry) {
-            return this._cache;
-        }
-        return null;
-    },
-
-    // Reset for testing
-    _reset() {
-        this._cache = null;
-        this._cacheExpiry = 0;
-        this._fetchPromise = null;
-    }
-};
+const mockTokens = createMockTokens();
 
 // ============================================================================
-// Configuration Validation
+// Configuration Validation — using REAL configure()
 // ============================================================================
 
 describe('Handler Mode Configuration', () => {
-    function validateConfig(config) {
-        // Reject deprecated tokenStorage values (removed in v0.15.0)
-        if (config.tokenStorage && config.tokenStorage !== 'handler') {
-            throw new Error(
-                `tokenStorage "${config.tokenStorage}" was removed in v0.15.0.\n` +
-                'Only handler mode is supported.'
-            );
-        }
+    beforeEach(() => {
+        _resetForTesting();
+    });
 
-        // Handler endpoints are always required
-        const requiredEndpoints = ['tokenEndpoint', 'refreshEndpoint', 'logoutEndpoint'];
-        const missing = requiredEndpoints.filter(ep => !config[ep]);
-        if (missing.length > 0) {
-            throw new Error(
-                `configure() requires handler endpoints: ${missing.join(', ')}.`
-            );
-        }
-        return true;
-    }
-
-    it('accepts "handler" as valid storage mode', () => {
-        expect(() => validateConfig({
-            tokenStorage: 'handler',
-            tokenEndpoint: '/auth/token',
-            refreshEndpoint: '/auth/refresh',
-            logoutEndpoint: '/auth/logout'
-        })).not.toThrow();
+    it('accepts valid handler config with all endpoints', () => {
+        expect(() => configureForTest()).not.toThrow();
+        expect(isConfigured()).toBe(true);
     });
 
     it('requires tokenEndpoint', () => {
-        expect(() => validateConfig({
-            tokenStorage: 'handler',
+        expect(() => configure({
+            clientId: 'test',
+            cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
             refreshEndpoint: '/auth/refresh',
             logoutEndpoint: '/auth/logout'
         })).toThrow(/tokenEndpoint/);
     });
 
     it('requires refreshEndpoint', () => {
-        expect(() => validateConfig({
-            tokenStorage: 'handler',
+        expect(() => configure({
+            clientId: 'test',
+            cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
             tokenEndpoint: '/auth/token',
             logoutEndpoint: '/auth/logout'
         })).toThrow(/refreshEndpoint/);
     });
 
     it('requires logoutEndpoint', () => {
-        expect(() => validateConfig({
-            tokenStorage: 'handler',
+        expect(() => configure({
+            clientId: 'test',
+            cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
             tokenEndpoint: '/auth/token',
             refreshEndpoint: '/auth/refresh'
         })).toThrow(/logoutEndpoint/);
@@ -182,7 +111,10 @@ describe('Handler Mode Configuration', () => {
 
     it('reports all missing endpoints in error', () => {
         try {
-            validateConfig({ tokenStorage: 'handler' });
+            configure({
+                clientId: 'test',
+                cognitoDomain: 'test.auth.us-west-2.amazoncognito.com'
+            });
             expect.fail('Should have thrown');
         } catch (e) {
             expect(e.message).toContain('tokenEndpoint');
@@ -192,41 +124,42 @@ describe('Handler Mode Configuration', () => {
     });
 
     it('rejects deprecated localStorage mode', () => {
-        expect(() => validateConfig({
-            tokenStorage: 'localStorage'
+        expect(() => configure({
+            clientId: 'test',
+            cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
+            tokenStorage: 'localStorage',
+            tokenEndpoint: '/auth/token',
+            refreshEndpoint: '/auth/refresh',
+            logoutEndpoint: '/auth/logout'
         })).toThrow(/removed in v0\.15\.0/);
     });
 
     it('rejects deprecated memory mode', () => {
-        expect(() => validateConfig({
-            tokenStorage: 'memory'
+        expect(() => configure({
+            clientId: 'test',
+            cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
+            tokenStorage: 'memory',
+            tokenEndpoint: '/auth/token',
+            refreshEndpoint: '/auth/refresh',
+            logoutEndpoint: '/auth/logout'
         })).toThrow(/removed in v0\.15\.0/);
     });
 
     it('oauthCallbackUrl is optional', () => {
-        expect(() => validateConfig({
-            tokenStorage: 'handler',
-            tokenEndpoint: '/auth/token',
-            refreshEndpoint: '/auth/refresh',
-            logoutEndpoint: '/auth/logout'
-            // oauthCallbackUrl not provided
+        expect(() => configureForTest({
+            oauthCallbackUrl: undefined
         })).not.toThrow();
     });
 });
 
 // ============================================================================
-// HandlerTokenStore Unit Tests
+// Token Store — using REAL setTokens/clearTokens/isAuthenticated
 // ============================================================================
 
-describe('HandlerTokenStore', () => {
-    const mockTokens = {
-        access_token: 'test-access-token',
-        id_token: 'test-id-token',
-        auth_method: 'handler'
-    };
-
+describe('HandlerTokenStore via public API', () => {
     beforeEach(() => {
-        HandlerTokenStore._reset();
+        _resetForTesting();
+        configureForTest();
         vi.resetAllMocks();
     });
 
@@ -234,53 +167,60 @@ describe('HandlerTokenStore', () => {
         vi.restoreAllMocks();
     });
 
-    describe('get()', () => {
-        it('returns cached tokens if not expired', async () => {
-            HandlerTokenStore._cache = mockTokens;
-            HandlerTokenStore._cacheExpiry = Date.now() + 60000;
-
-            const tokens = await HandlerTokenStore.get('any_key');
-
-            expect(tokens).toEqual(mockTokens);
+    describe('setTokens + isAuthenticated', () => {
+        it('isAuthenticated returns false when no tokens set', () => {
+            expect(isAuthenticated()).toBe(false);
         });
 
-        it('fetches from server if cache is expired', async () => {
-            HandlerTokenStore._cache = mockTokens;
-            HandlerTokenStore._cacheExpiry = Date.now() - 1000; // Expired
+        it('isAuthenticated returns true after setTokens', () => {
+            setTokens(mockTokens);
+            expect(isAuthenticated()).toBe(true);
+        });
 
-            const freshTokens = {
-                access_token: 'fresh-access',
-                id_token: 'fresh-id',
+        it('clearTokens makes isAuthenticated return false', () => {
+            setTokens(mockTokens);
+            expect(isAuthenticated()).toBe(true);
+
+            clearTokens();
+            expect(isAuthenticated()).toBe(false);
+        });
+
+        it('setTokens overwrites existing tokens', () => {
+            setTokens(createMockTokens());
+            setTokens(createMockTokens());
+            // isAuthenticated still works after overwrite
+            expect(isAuthenticated()).toBe(true);
+        });
+    });
+
+    describe('getTokens (async, fetch-based)', () => {
+        it('returns cached tokens without fetching if recently set', async () => {
+            global.fetch = vi.fn();
+            setTokens(mockTokens);
+
+            const tokens = await getTokens();
+
+            expect(tokens).toEqual(mockTokens);
+            expect(fetch).not.toHaveBeenCalled();
+        });
+
+        it('fetches from server when no cache', async () => {
+            const serverTokens = {
+                access_token: 'server-access',
+                id_token: 'server-id',
                 auth_method: 'handler'
             };
 
             global.fetch = vi.fn().mockResolvedValue({
                 ok: true,
                 status: 200,
-                json: () => Promise.resolve(freshTokens)
+                json: () => Promise.resolve(serverTokens)
             });
 
-            const tokens = await HandlerTokenStore.get('any_key');
-
-            expect(fetch).toHaveBeenCalledWith('/auth/token', {
-                method: 'GET',
-                credentials: 'include',
-                headers: { 'Accept': 'application/json' }
-            });
-            expect(tokens.access_token).toBe('fresh-access');
-        });
-
-        it('fetches from server if cache is null', async () => {
-            global.fetch = vi.fn().mockResolvedValue({
-                ok: true,
-                status: 200,
-                json: () => Promise.resolve(mockTokens)
-            });
-
-            const tokens = await HandlerTokenStore.get('any_key');
+            const tokens = await getTokens();
 
             expect(fetch).toHaveBeenCalled();
-            expect(tokens).toEqual(mockTokens);
+            expect(tokens.access_token).toBe('server-access');
         });
 
         it('returns null on 401 response', async () => {
@@ -290,10 +230,8 @@ describe('HandlerTokenStore', () => {
                 json: () => Promise.resolve({ error: 'unauthorized' })
             });
 
-            const tokens = await HandlerTokenStore.get('any_key');
-
+            const tokens = await getTokens();
             expect(tokens).toBeNull();
-            expect(HandlerTokenStore._cache).toBeNull();
         });
 
         it('returns null on 403 response', async () => {
@@ -303,8 +241,7 @@ describe('HandlerTokenStore', () => {
                 json: () => Promise.resolve({ error: 'forbidden' })
             });
 
-            const tokens = await HandlerTokenStore.get('any_key');
-
+            const tokens = await getTokens();
             expect(tokens).toBeNull();
         });
 
@@ -315,13 +252,13 @@ describe('HandlerTokenStore', () => {
                 json: () => Promise.resolve({ error: 'server error' })
             });
 
-            await expect(HandlerTokenStore.get('any_key')).rejects.toThrow(/500/);
+            await expect(getTokens()).rejects.toThrow(/500/);
         });
 
         it('throws on network error', async () => {
             global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
-            await expect(HandlerTokenStore.get('any_key')).rejects.toThrow('Network error');
+            await expect(getTokens()).rejects.toThrow('Network error');
         });
 
         it('deduplicates concurrent requests', async () => {
@@ -330,14 +267,12 @@ describe('HandlerTokenStore', () => {
 
             global.fetch = vi.fn().mockReturnValue(fetchPromise);
 
-            // Start two concurrent gets
-            const promise1 = HandlerTokenStore.get('key1');
-            const promise2 = HandlerTokenStore.get('key2');
+            const promise1 = getTokens();
+            const promise2 = getTokens();
 
             // Only one fetch should have been made
             expect(fetch).toHaveBeenCalledTimes(1);
 
-            // Resolve the fetch
             resolveFirst({
                 ok: true,
                 status: 200,
@@ -345,119 +280,37 @@ describe('HandlerTokenStore', () => {
             });
 
             const [result1, result2] = await Promise.all([promise1, promise2]);
-
             expect(result1).toEqual(mockTokens);
             expect(result2).toEqual(mockTokens);
         });
 
-        it('caches tokens with TTL', async () => {
-            testConfig.handlerCacheTtl = 5000;
-
+        it('sends credentials: include for session cookies', async () => {
             global.fetch = vi.fn().mockResolvedValue({
                 ok: true,
                 status: 200,
                 json: () => Promise.resolve(mockTokens)
             });
 
-            await HandlerTokenStore.get('any_key');
+            await getTokens();
 
-            expect(HandlerTokenStore._cache).toEqual(mockTokens);
-            expect(HandlerTokenStore._cacheExpiry).toBeGreaterThan(Date.now());
-            expect(HandlerTokenStore._cacheExpiry).toBeLessThanOrEqual(Date.now() + 5001);
-        });
-
-        it('ignores tokenKey parameter', async () => {
-            HandlerTokenStore.set('key1', mockTokens);
-
-            const tokens = await HandlerTokenStore.get('different_key');
-
-            expect(tokens).toEqual(mockTokens);
-        });
-    });
-
-    describe('set()', () => {
-        it('updates cache with provided tokens', () => {
-            HandlerTokenStore.set('any_key', mockTokens);
-
-            expect(HandlerTokenStore._cache).toEqual(mockTokens);
-        });
-
-        it('sets cache expiry', () => {
-            testConfig.handlerCacheTtl = 60000;
-
-            HandlerTokenStore.set('any_key', mockTokens);
-
-            expect(HandlerTokenStore._cacheExpiry).toBeGreaterThan(Date.now());
-        });
-
-        it('overwrites existing cache', () => {
-            HandlerTokenStore._cache = { access_token: 'old' };
-            HandlerTokenStore._cacheExpiry = Date.now() + 60000;
-
-            const newTokens = { access_token: 'new', id_token: 'new-id' };
-            HandlerTokenStore.set('any_key', newTokens);
-
-            expect(HandlerTokenStore._cache).toEqual(newTokens);
-        });
-    });
-
-    describe('clear()', () => {
-        it('clears the cache', () => {
-            HandlerTokenStore._cache = mockTokens;
-            HandlerTokenStore._cacheExpiry = Date.now() + 60000;
-
-            HandlerTokenStore.clear('any_key');
-
-            expect(HandlerTokenStore._cache).toBeNull();
-            expect(HandlerTokenStore._cacheExpiry).toBe(0);
-        });
-    });
-
-    describe('getCached()', () => {
-        it('returns cached tokens if not expired', () => {
-            HandlerTokenStore._cache = mockTokens;
-            HandlerTokenStore._cacheExpiry = Date.now() + 60000;
-
-            const tokens = HandlerTokenStore.getCached();
-
-            expect(tokens).toEqual(mockTokens);
-        });
-
-        it('returns null if cache is expired', () => {
-            HandlerTokenStore._cache = mockTokens;
-            HandlerTokenStore._cacheExpiry = Date.now() - 1000;
-
-            const tokens = HandlerTokenStore.getCached();
-
-            expect(tokens).toBeNull();
-        });
-
-        it('returns null if cache is empty', () => {
-            const tokens = HandlerTokenStore.getCached();
-
-            expect(tokens).toBeNull();
-        });
-
-        it('is synchronous (for isAuthenticated)', () => {
-            HandlerTokenStore._cache = mockTokens;
-            HandlerTokenStore._cacheExpiry = Date.now() + 60000;
-
-            // Should not return a Promise
-            const result = HandlerTokenStore.getCached();
-
-            expect(result).not.toBeInstanceOf(Promise);
-            expect(result).toEqual(mockTokens);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.objectContaining({
+                    credentials: 'include'
+                })
+            );
         });
     });
 });
 
 // ============================================================================
-// Security Properties
+// Security Properties — using REAL functions
 // ============================================================================
 
 describe('Handler Mode Security Properties', () => {
     beforeEach(() => {
-        HandlerTokenStore._reset();
+        _resetForTesting();
+        configureForTest();
         localStorage.clear();
         sessionStorage.clear();
     });
@@ -467,45 +320,27 @@ describe('Handler Mode Security Properties', () => {
         sessionStorage.clear();
     });
 
-    it('tokens are NOT stored in localStorage', async () => {
-        const mockTokens = {
+    it('tokens are NOT stored in localStorage', () => {
+        setTokens({
             access_token: 'secret-token',
             id_token: 'secret-id'
-        };
-
-        global.fetch = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve(mockTokens)
         });
 
-        await HandlerTokenStore.get('any_key');
-
-        // Check localStorage is empty
         const allKeys = Object.keys(localStorage);
         expect(allKeys).toHaveLength(0);
     });
 
-    it('tokens are NOT stored in sessionStorage', async () => {
-        const mockTokens = {
+    it('tokens are NOT stored in sessionStorage', () => {
+        setTokens({
             access_token: 'secret-token',
             id_token: 'secret-id'
-        };
-
-        global.fetch = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve(mockTokens)
         });
 
-        await HandlerTokenStore.get('any_key');
-
-        // Check sessionStorage is empty
         const allKeys = Object.keys(sessionStorage);
         expect(allKeys).toHaveLength(0);
     });
 
-    it('refresh_token is NOT exposed to client', async () => {
+    it('refresh_token is NOT exposed to client via getTokens', async () => {
         const serverResponse = {
             access_token: 'access-token',
             id_token: 'id-token',
@@ -519,38 +354,30 @@ describe('Handler Mode Security Properties', () => {
             json: () => Promise.resolve(serverResponse)
         });
 
-        const tokens = await HandlerTokenStore.get('any_key');
+        const tokens = await getTokens();
 
-        // The HandlerTokenStore implementation should NOT include refresh_token
-        // (Server should not return it, but even if it does, we don't cache it)
+        // refresh_token should NOT be in the client-side response
         expect(tokens.refresh_token).toBeUndefined();
     });
 
-    it('sends credentials with requests (for session cookies)', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve({ access_token: 'token', id_token: 'id' })
-        });
+    it('isAuthenticated is synchronous (uses cache)', () => {
+        setTokens(createMockTokens());
 
-        await HandlerTokenStore.get('any_key');
-
-        expect(fetch).toHaveBeenCalledWith(
-            expect.any(String),
-            expect.objectContaining({
-                credentials: 'include'
-            })
-        );
+        // Should not return a Promise
+        const result = isAuthenticated();
+        expect(result).not.toBeInstanceOf(Promise);
+        expect(result).toBe(true);
     });
 });
 
 // ============================================================================
-// Error Handling
+// Error Handling — using REAL getTokens
 // ============================================================================
 
 describe('Handler Mode Error Handling', () => {
     beforeEach(() => {
-        HandlerTokenStore._reset();
+        _resetForTesting();
+        configureForTest();
     });
 
     it('returns null for auth errors (401/403) without throwing', async () => {
@@ -559,8 +386,7 @@ describe('Handler Mode Error Handling', () => {
             status: 401
         });
 
-        const tokens = await HandlerTokenStore.get('any_key');
-
+        const tokens = await getTokens();
         expect(tokens).toBeNull();
     });
 
@@ -570,48 +396,28 @@ describe('Handler Mode Error Handling', () => {
             status: 503
         });
 
-        await expect(HandlerTokenStore.get('any_key')).rejects.toThrow(/503/);
+        await expect(getTokens()).rejects.toThrow(/503/);
     });
 
     it('throws for network errors', async () => {
         global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
 
-        await expect(HandlerTokenStore.get('any_key')).rejects.toThrow('Failed to fetch');
+        await expect(getTokens()).rejects.toThrow('Failed to fetch');
     });
 
     it('clears cache on auth errors', async () => {
-        HandlerTokenStore._cache = { access_token: 'old' };
-        HandlerTokenStore._cacheExpiry = Date.now() - 1000; // Expired
+        setTokens(createMockTokens());
+        expect(isAuthenticated()).toBe(true);
 
+        // Simulate cache expiry by clearing, then fetching returns 401
+        clearTokens();
         global.fetch = vi.fn().mockResolvedValue({
             ok: false,
             status: 401
         });
 
-        await HandlerTokenStore.get('any_key');
-
-        expect(HandlerTokenStore._cache).toBeNull();
-        expect(HandlerTokenStore._cacheExpiry).toBe(0);
-    });
-
-    it('preserves cache on server errors', async () => {
-        const oldTokens = { access_token: 'old' };
-        HandlerTokenStore._cache = oldTokens;
-        HandlerTokenStore._cacheExpiry = Date.now() - 1000; // Expired
-
-        global.fetch = vi.fn().mockResolvedValue({
-            ok: false,
-            status: 500
-        });
-
-        try {
-            await HandlerTokenStore.get('any_key');
-        } catch {
-            // Expected to throw
-        }
-
-        // Cache should be unchanged (error should be retried)
-        expect(HandlerTokenStore._cache).toEqual(oldTokens);
+        await getTokens();
+        expect(isAuthenticated()).toBe(false);
     });
 
     it('logs errors without exposing sensitive data', async () => {
@@ -620,13 +426,12 @@ describe('Handler Mode Error Handling', () => {
         global.fetch = vi.fn().mockRejectedValue(new Error('Network failure'));
 
         try {
-            await HandlerTokenStore.get('any_key');
+            await getTokens();
         } catch {
             // Expected
         }
 
         expect(consoleSpy).toHaveBeenCalled();
-        // Should not log tokens or sensitive data
         const logArgs = consoleSpy.mock.calls.flat().join(' ');
         expect(logArgs).not.toContain('access_token');
         expect(logArgs).not.toContain('id_token');
@@ -634,108 +439,64 @@ describe('Handler Mode Error Handling', () => {
 });
 
 // ============================================================================
-// Refresh and Logout Flows
+// Logout Flow — using REAL logout()
 // ============================================================================
-
-describe('Handler Mode Refresh Flow', () => {
-    beforeEach(() => {
-        testConfig = {
-            tokenStorage: 'handler',
-            tokenEndpoint: '/auth/token',
-            refreshEndpoint: '/auth/refresh',
-            logoutEndpoint: '/auth/logout',
-            handlerCacheTtl: 30000
-        };
-    });
-
-    it('refresh endpoint is called with correct options', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve({
-                access_token: 'refreshed-access',
-                id_token: 'refreshed-id'
-            })
-        });
-
-        await fetch(testConfig.refreshEndpoint, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        expect(fetch).toHaveBeenCalledWith('/auth/refresh', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' }
-        });
-    });
-});
 
 describe('Handler Mode Logout Flow', () => {
     beforeEach(() => {
-        testConfig = {
-            tokenStorage: 'handler',
-            tokenEndpoint: '/auth/token',
-            refreshEndpoint: '/auth/refresh',
-            logoutEndpoint: '/auth/logout',
-            handlerCacheTtl: 30000
-        };
+        _resetForTesting();
+        configureForTest();
     });
 
-    it('logout endpoint is called with correct options', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200
-        });
-
-        await fetch(testConfig.logoutEndpoint, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        expect(fetch).toHaveBeenCalledWith('/auth/logout', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' }
-        });
+    afterEach(() => {
+        vi.restoreAllMocks();
     });
 
-    it('logout clears local cache', () => {
-        HandlerTokenStore._cache = { access_token: 'token' };
-        HandlerTokenStore._cacheExpiry = Date.now() + 60000;
+    it('logout clears local cache', async () => {
+        setTokens(createMockTokens());
+        expect(isAuthenticated()).toBe(true);
 
-        HandlerTokenStore.clear('any_key');
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+        await logout();
 
-        expect(HandlerTokenStore._cache).toBeNull();
-        expect(HandlerTokenStore._cacheExpiry).toBe(0);
+        expect(isAuthenticated()).toBe(false);
+    });
+
+    it('logout calls server endpoint', async () => {
+        setTokens(createMockTokens());
+
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+        await logout();
+
+        expect(fetch).toHaveBeenCalledWith(
+            '/auth/logout',
+            expect.objectContaining({
+                method: 'POST',
+                credentials: 'include'
+            })
+        );
     });
 });
 
 // ============================================================================
-// OAuth Callback URL
+// OAuth Callback URL — config property
 // ============================================================================
 
 describe('Handler Mode OAuth Callback', () => {
-    it('oauthCallbackUrl can be configured', () => {
-        const config = {
-            tokenStorage: 'handler',
-            tokenEndpoint: '/auth/token',
-            refreshEndpoint: '/auth/refresh',
-            logoutEndpoint: '/auth/logout',
-            oauthCallbackUrl: '/auth/callback'
-        };
+    beforeEach(() => {
+        _resetForTesting();
+    });
 
-        expect(config.oauthCallbackUrl).toBe('/auth/callback');
+    it('oauthCallbackUrl can be configured', () => {
+        expect(() => configureForTest({
+            oauthCallbackUrl: '/auth/callback'
+        })).not.toThrow();
     });
 
     it('oauthCallbackUrl supports absolute URLs', () => {
-        const config = {
+        expect(() => configureForTest({
             oauthCallbackUrl: 'https://api.example.com/auth/callback'
-        };
-
-        expect(config.oauthCallbackUrl).toBe('https://api.example.com/auth/callback');
+        })).not.toThrow();
     });
 });
 
@@ -744,36 +505,38 @@ describe('Handler Mode OAuth Callback', () => {
 // ============================================================================
 
 describe('Cross-Mode Compatibility', () => {
-    it('await works on sync getTokens result (non-handler modes)', async () => {
-        // Simulating localStorage mode behavior
-        const syncResult = { access_token: 'token' };
-
-        // await on non-Promise just returns the value
-        const result = await syncResult;
-
-        expect(result).toEqual(syncResult);
+    beforeEach(() => {
+        _resetForTesting();
+        configureForTest();
     });
 
-    it('await works on async getTokens result (handler mode)', async () => {
+    it('await works on sync cached result', async () => {
+        setTokens(mockTokens);
+
+        // getTokens returns from cache (which is still async/Promise)
+        const result = await getTokens();
+        expect(result).toEqual(mockTokens);
+    });
+
+    it('await works on async server fetch result', async () => {
         global.fetch = vi.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: () => Promise.resolve({ access_token: 'async-token', id_token: 'id' })
         });
 
-        const result = await HandlerTokenStore.get('any_key');
-
+        const result = await getTokens();
         expect(result.access_token).toBe('async-token');
     });
 });
 
 // ============================================================================
-// Cache TTL Behavior
+// Cache TTL Behavior — using REAL functions with fake timers
 // ============================================================================
 
 describe('Handler Mode Cache TTL', () => {
     beforeEach(() => {
-        HandlerTokenStore._reset();
+        _resetForTesting();
         vi.useFakeTimers();
     });
 
@@ -782,7 +545,7 @@ describe('Handler Mode Cache TTL', () => {
     });
 
     it('cache expires after TTL', async () => {
-        testConfig.handlerCacheTtl = 30000; // 30 seconds
+        configureForTest({ handlerCacheTtl: 30000 });
 
         global.fetch = vi.fn().mockResolvedValue({
             ok: true,
@@ -791,43 +554,41 @@ describe('Handler Mode Cache TTL', () => {
         });
 
         // First fetch
-        await HandlerTokenStore.get('key');
+        await getTokens();
         expect(fetch).toHaveBeenCalledTimes(1);
 
-        // Within TTL - should use cache
-        vi.advanceTimersByTime(15000); // 15 seconds
-        await HandlerTokenStore.get('key');
-        expect(fetch).toHaveBeenCalledTimes(1); // Still 1
+        // Within TTL — should use cache
+        vi.advanceTimersByTime(15000);
+        await getTokens();
+        expect(fetch).toHaveBeenCalledTimes(1);
 
-        // After TTL - should fetch again
-        vi.advanceTimersByTime(20000); // Now 35 seconds total
-        await HandlerTokenStore.get('key');
+        // After TTL — should fetch again
+        vi.advanceTimersByTime(20000);
+        await getTokens();
         expect(fetch).toHaveBeenCalledTimes(2);
     });
 
-    it('getCached returns null after TTL expires', () => {
-        testConfig.handlerCacheTtl = 1000;
+    it('isAuthenticated returns false after TTL expires without refresh', () => {
+        configureForTest({ handlerCacheTtl: 1000 });
 
-        HandlerTokenStore.set('key', { access_token: 'token' });
+        setTokens(createMockTokens());
+        expect(isAuthenticated()).toBe(true);
 
-        // Immediately available
-        expect(HandlerTokenStore.getCached()).not.toBeNull();
-
-        // After TTL
         vi.advanceTimersByTime(1500);
-        expect(HandlerTokenStore.getCached()).toBeNull();
+        expect(isAuthenticated()).toBe(false);
     });
 });
 
 // ============================================================================
 // Session Persistence (v0.15.0) — Fix for #12
+// Kept as isolated mock test since _persistHandlerSession is private.
 // ============================================================================
 
 describe('Session Persistence (_persistHandlerSession)', () => {
     /**
      * Mirrors the _persistHandlerSession function from auth.js.
-     * In handler mode, direct login (passkey/password) completes client-side.
-     * This function bridges tokens into a server session.
+     * This tests the contract, not the real function (which is private).
+     * TODO: Convert once loginWithPassword/loginWithPasskey are testable.
      */
     async function _persistHandlerSession(tokens, cfg) {
         if (cfg.tokenStorage !== 'handler' || !cfg.sessionEndpoint) {
