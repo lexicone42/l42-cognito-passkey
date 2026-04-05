@@ -8,40 +8,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+    generateCodeVerifier,
+    generateCodeChallenge
+} from '../../src/auth.js';
 
 // ============================================================================
-// PKCE (Proof Key for Code Exchange)
+// PKCE (Proof Key for Code Exchange) — REAL auth.js functions
 // ============================================================================
 
 describe('PKCE Implementation', () => {
-    /**
-     * Generate a code verifier matching RFC 7636 requirements
-     * @returns {string} 43-128 character URL-safe string
-     */
-    function generateCodeVerifier() {
-        const array = new Uint8Array(48);
-        crypto.getRandomValues(array);
-        return btoa(String.fromCharCode(...array))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-    }
-
-    /**
-     * Generate SHA-256 code challenge from verifier
-     * @param {string} verifier
-     * @returns {Promise<string>}
-     */
-    async function generateCodeChallenge(verifier) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(verifier);
-        const hash = await crypto.subtle.digest('SHA-256', data);
-        return btoa(String.fromCharCode(...new Uint8Array(hash)))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-    }
-
     describe('Code Verifier Generation', () => {
         it('generates verifier of correct length (43-128 chars)', () => {
             const verifier = generateCodeVerifier();

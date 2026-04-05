@@ -1223,7 +1223,7 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function getBackoffDelay(attempt) {
+export function getBackoffDelay(attempt) {
     const exponentialDelay = RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt);
     const jitter = Math.random() * 0.3 * exponentialDelay;
     return Math.min(exponentialDelay + jitter, RETRY_CONFIG.maxDelayMs);
@@ -1290,7 +1290,7 @@ function resetLoginAttempts(email) {
  * Detect Cognito account lockout from error response.
  * Returns true if the error indicates a server-side lockout.
  */
-function detectCognitoLockout(error) {
+export function detectCognitoLockout(error) {
     const msg = (error.message || '').toLowerCase();
     const type = (error.__type || error.code || '').toLowerCase();
     return (
@@ -1517,7 +1517,7 @@ export async function loginWithPassword(email, password) {
  * @returns {string} UUID-formatted string
  * @private
  */
-function formatAaguid(bytes) {
+export function formatAaguid(bytes) {
     const hex = Array.from(bytes, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
     return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20, 32);
 }
@@ -1535,7 +1535,7 @@ function formatAaguid(bytes) {
  * @returns {Object|null} Parsed flags, signCount, and optional AAGUID; null if too short
  * @private
  */
-function parseAuthenticatorData(authData) {
+export function parseAuthenticatorData(authData) {
     var bytes = new Uint8Array(authData);
     if (bytes.length < 37) return null;
 
@@ -1961,7 +1961,7 @@ const PKCE_VERIFIER_KEY = 'l42_pkce_verifier';
  * RFC 7636 requires 43-128 characters from unreserved URI characters.
  * @returns {string} Random code verifier (64 characters)
  */
-function generateCodeVerifier() {
+export function generateCodeVerifier() {
     const array = new Uint8Array(48); // 48 bytes = 64 base64url chars
     crypto.getRandomValues(array);
     // Base64url encoding without padding
@@ -1976,7 +1976,7 @@ function generateCodeVerifier() {
  * @param {string} verifier - Code verifier
  * @returns {Promise<string>} Base64url-encoded SHA-256 hash
  */
-async function generateCodeChallenge(verifier) {
+export async function generateCodeChallenge(verifier) {
     const encoder = new TextEncoder();
     const data = encoder.encode(verifier);
     const hash = await crypto.subtle.digest('SHA-256', data);
@@ -3196,5 +3196,13 @@ export default {
     getDiagnostics,
     clearDebugHistory,
     // Login rate limiting (v0.12.1+)
-    getLoginAttemptInfo
+    getLoginAttemptInfo,
+    getBackoffDelay,
+    detectCognitoLockout,
+    // WebAuthn parsing utilities (v0.19.0+)
+    parseAuthenticatorData,
+    formatAaguid,
+    // PKCE utilities
+    generateCodeVerifier,
+    generateCodeChallenge
 };

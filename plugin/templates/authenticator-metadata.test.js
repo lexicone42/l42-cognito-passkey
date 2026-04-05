@@ -17,38 +17,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-
-// ============================================================================
-// Simulated auth.js internals (matching the actual implementation)
-// ============================================================================
-
-function formatAaguid(bytes) {
-    const hex = Array.from(bytes, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20, 32);
-}
-
-function parseAuthenticatorData(authData) {
-    var bytes = new Uint8Array(authData);
-    if (bytes.length < 37) return null;
-
-    var flags = bytes[32];
-    var result = {
-        userPresent: !!(flags & 0x01),
-        userVerified: !!(flags & 0x04),
-        backupEligible: !!(flags & 0x08),
-        backupState: !!(flags & 0x10),
-        attestedCredentialData: !!(flags & 0x40),
-        extensionData: !!(flags & 0x80),
-        signCount: new DataView(authData).getUint32(33, false)
-    };
-
-    if (result.attestedCredentialData && bytes.length >= 55) {
-        var aaguidBytes = bytes.slice(37, 53);
-        result.aaguid = formatAaguid(aaguidBytes);
-    }
-
-    return result;
-}
+import {
+    parseAuthenticatorData,
+    formatAaguid
+} from '../../src/auth.js';
 
 function arrayBufferToB64(buffer) {
     const bytes = new Uint8Array(buffer);

@@ -17,9 +17,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+    detectCognitoLockout,
+    getBackoffDelay
+} from '../../src/auth.js';
 
 // ============================================================================
-// Simulated internals (mirrors auth.js rate limiting logic)
+// Simulated internals for stateful rate limiting (private in auth.js)
+// These test the algorithm, not the real implementation. The real functions
+// (checkLoginRateLimit, recordLoginFailure, resetLoginAttempts) are private
+// and exercised through loginWithPassword() in integration.
 // ============================================================================
 
 const DEFAULT_RATE_LIMIT_CONFIG = {
@@ -103,14 +110,7 @@ function resetLoginAttempts(email) {
     _loginAttempts.delete(email);
 }
 
-function detectCognitoLockout(error) {
-    const msg = (error.message || '').toLowerCase();
-    const type = (error.__type || error.code || '').toLowerCase();
-    return (
-        (type.includes('notauthorizedexception') || msg.includes('notauthorizedexception')) &&
-        (msg.includes('temporarily locked') || msg.includes('password attempts exceeded'))
-    );
-}
+// detectCognitoLockout imported from real auth.js above
 
 function getLoginAttemptInfo(email) {
     const entry = _loginAttempts.get(email);
