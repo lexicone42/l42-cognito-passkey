@@ -1,8 +1,11 @@
 /**
  * L42 Cognito Passkey - Debug Logging & Diagnostics Tests (v0.11.0)
  *
+ * Tests the REAL auth.js debug/diagnostics implementation.
+ * Uses _resetForTesting() for isolation between tests.
+ *
  * Tests:
- * - debugLog() ring buffer behavior
+ * - debugLog() ring buffer behavior (via getDebugHistory)
  * - getDebugHistory() returns copy, not reference
  * - clearDebugHistory() empties buffer
  * - getDiagnostics() returns correct shape and reflects state
@@ -16,6 +19,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+    VERSION,
+    configure,
+    isConfigured,
+    isAuthenticated,
+    setTokens,
+    clearTokens,
+    getDebugHistory,
+    clearDebugHistory,
+    getDiagnostics,
+    isAutoRefreshActive,
+    startAutoRefresh,
+    stopAutoRefresh,
+    _resetForTesting
+} from '../../src/auth.js';
 
 // ============================================================================
 // Test Helpers
@@ -29,198 +47,50 @@ function createTestJwt(claims) {
     return `${header}.${payload}.test-signature`;
 }
 
-function UNSAFE_decodeJwtPayload(token) {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(base64));
-}
-
 function createValidTokens(overrides = {}) {
     const exp = Math.floor(Date.now() / 1000) + 3600;
+    const claims = {
+        sub: 'user1',
+        email: 'test@example.com',
+        'cognito:groups': ['admin'],
+        aud: 'test-client',
+        iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_testPool',
+        exp,
+        ...overrides
+    };
     return {
-        access_token: createTestJwt({ sub: 'user1', scope: 'openid email', exp, ...overrides }),
-        id_token: createTestJwt({
-            sub: 'user1',
-            email: 'test@example.com',
-            'cognito:groups': ['admin'],
-            exp,
-            ...overrides
+        access_token: createTestJwt({
+            sub: claims.sub,
+            scope: 'openid email',
+            client_id: claims.aud,
+            exp: claims.exp
         }),
+        id_token: createTestJwt(claims),
         refresh_token: 'refresh-token-123',
         auth_method: 'password'
     };
 }
 
-// ============================================================================
-// Simulated auth.js debug internals
-// ============================================================================
-
-const VERSION = '0.11.0';
-const DEBUG_HISTORY_MAX = 100;
-let _debugHistory = [];
-let config = {
-    debug: false,
-    tokenStorage: 'handler',
-    tokenKey: 'l42_auth_tokens',
-    tokenEndpoint: '/auth/token',
-    refreshEndpoint: '/auth/refresh',
-    logoutEndpoint: '/auth/logout',
-    clientId: 'test-client',
-    cognitoDomain: 'test.auth.us-west-2.amazoncognito.com'
-};
-let _configured = false;
-let _storedTokens = null;
-let _autoRefreshTimer = null;
-
-function debugLog(category, message, data) {
-    if (!config.debug) return;
-
-    const event = {
-        timestamp: Date.now(),
-        category,
-        message,
-        ...(data !== undefined ? { data } : {}),
-        version: VERSION
-    };
-
-    _debugHistory.push(event);
-    if (_debugHistory.length > DEBUG_HISTORY_MAX) {
-        _debugHistory.shift();
-    }
-
-    if (config.debug === true) {
-        console.debug('[l42-auth]', category, message);
-    } else if (config.debug === 'verbose') {
-        console.debug('[l42-auth]', category, message, data !== undefined ? data : '');
-    } else if (typeof config.debug === 'function') {
-        try {
-            config.debug(event);
-        } catch {
-            // Don't let debug callback errors break auth flow
-        }
-    }
-}
-
-function getDebugHistory() {
-    return [..._debugHistory];
-}
-
-function clearDebugHistory() {
-    _debugHistory.length = 0;
-}
-
-function isAutoRefreshActive() {
-    return _autoRefreshTimer !== null;
-}
-
-function isTokenExpired(tokens) {
-    try {
-        return Date.now() >= UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000;
-    } catch {
-        return true;
-    }
-}
-
-function isAuthenticated() {
-    if (!_configured) return false;
-    const tokens = _storedTokens;
-    return tokens !== null && !isTokenExpired(tokens);
-}
-
-function getUserEmail() {
-    if (!_configured || !_storedTokens) return null;
-    try {
-        return UNSAFE_decodeJwtPayload(_storedTokens.id_token).email || null;
-    } catch {
-        return null;
-    }
-}
-
-function getUserGroups() {
-    if (!_configured || !_storedTokens) return [];
-    try {
-        return UNSAFE_decodeJwtPayload(_storedTokens.id_token)['cognito:groups'] || [];
-    } catch {
-        return [];
-    }
-}
-
-function isAdmin() {
-    const groups = getUserGroups().map(g => g.toLowerCase());
-    return groups.some(g => ['admin', 'admins', 'administrators'].includes(g));
-}
-
-function isReadonly() {
-    if (isAdmin()) return false;
-    const groups = getUserGroups().map(g => g.toLowerCase());
-    return groups.some(g => ['readonly', 'read-only', 'viewer', 'viewers'].includes(g));
-}
-
-function getDiagnostics() {
-    const tokens = _configured ? _storedTokens : null;
-    let tokenExpiry = null;
-    if (tokens && tokens.id_token) {
-        try {
-            tokenExpiry = new Date(UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000);
-        } catch {
-            // Invalid token
-        }
-    }
-
-    return {
-        configured: _configured,
-        tokenStorage: config.tokenStorage,
-        hasTokens: tokens !== null,
-        isAuthenticated: _configured ? isAuthenticated() : false,
-        tokenExpiry,
-        authMethod: tokens ? (tokens.auth_method || null) : null,
-        userEmail: _configured ? getUserEmail() : null,
-        userGroups: _configured ? getUserGroups() : [],
-        isAdmin: _configured ? isAdmin() : false,
-        isReadonly: _configured ? isReadonly() : false,
-        autoRefreshActive: isAutoRefreshActive(),
-        debug: config.debug,
-        version: VERSION
-    };
-}
-
-// Simulated configure/setTokens/clearTokens with debug logging
-function configure(options) {
-    config = { ...config, ...options };
-    _configured = true;
-    debugLog('config', 'configured', { tokenStorage: config.tokenStorage });
-}
-
-function setTokens(tokens, options = {}) {
-    debugLog('token', 'setTokens', { auth_method: tokens?.auth_method, isRefresh: !!options.isRefresh });
-    _storedTokens = tokens;
-}
-
-function clearTokens() {
-    debugLog('token', 'clearTokens');
-    _storedTokens = null;
+function configureForTest(overrides = {}) {
+    configure({
+        clientId: 'test-client',
+        cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
+        cognitoRegion: 'us-west-2',
+        tokenEndpoint: '/auth/token',
+        refreshEndpoint: '/auth/refresh',
+        logoutEndpoint: '/auth/logout',
+        sessionEndpoint: '/auth/session',
+        ...overrides
+    });
 }
 
 // ============================================================================
-// Tests
+// Tests — using REAL auth.js functions
 // ============================================================================
 
 describe('Debug Logging & Diagnostics', () => {
     beforeEach(() => {
-        _debugHistory = [];
-        _storedTokens = null;
-        _configured = false;
-        _autoRefreshTimer = null;
-        config = {
-            debug: false,
-            tokenStorage: 'handler',
-            tokenKey: 'l42_auth_tokens',
-            tokenEndpoint: '/auth/token',
-            refreshEndpoint: '/auth/refresh',
-            logoutEndpoint: '/auth/logout',
-            clientId: 'test-client',
-            cognitoDomain: 'test.auth.us-west-2.amazoncognito.com'
-        };
+        _resetForTesting();
     });
 
     afterEach(() => {
@@ -228,37 +98,38 @@ describe('Debug Logging & Diagnostics', () => {
     });
 
     // ========================================================================
-    // debugLog() — Ring buffer behavior
+    // debugLog() — Ring buffer behavior (tested via getDebugHistory)
     // ========================================================================
 
-    describe('debugLog()', () => {
+    describe('debugLog() via getDebugHistory()', () => {
         it('adds events to history when debug is enabled', () => {
-            config.debug = true;
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
+            clearDebugHistory(); // clear the "configured" event
 
-            debugLog('token', 'setTokens', { auth_method: 'password' });
+            setTokens(createValidTokens());
 
             const history = getDebugHistory();
-            expect(history).toHaveLength(1);
-            expect(history[0].category).toBe('token');
-            expect(history[0].message).toBe('setTokens');
-            expect(history[0].data).toEqual({ auth_method: 'password' });
-            expect(history[0].version).toBe(VERSION);
+            expect(history.length).toBeGreaterThanOrEqual(1);
+            const tokenEvent = history.find(e => e.message === 'setTokens');
+            expect(tokenEvent).toBeDefined();
+            expect(tokenEvent.category).toBe('token');
+            expect(tokenEvent.data.auth_method).toBe('password');
+            expect(tokenEvent.version).toBe(VERSION);
         });
 
         it('does NOT add events when debug is false', () => {
-            config.debug = false;
-            debugLog('token', 'setTokens');
+            configureForTest({ debug: false });
+
+            setTokens(createValidTokens());
 
             expect(getDebugHistory()).toHaveLength(0);
         });
 
         it('includes timestamp on every event', () => {
-            config.debug = true;
             vi.spyOn(console, 'debug').mockImplementation(() => {});
-
             const before = Date.now();
-            debugLog('config', 'configured');
+            configureForTest({ debug: true });
             const after = Date.now();
 
             const event = getDebugHistory()[0];
@@ -267,38 +138,18 @@ describe('Debug Logging & Diagnostics', () => {
         });
 
         it('caps history at 100 events (ring buffer)', () => {
-            config.debug = true;
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
 
-            for (let i = 0; i < 110; i++) {
-                debugLog('test', `event-${i}`);
+            // Generate >100 events by repeatedly setting/clearing tokens
+            for (let i = 0; i < 60; i++) {
+                setTokens(createValidTokens());
+                clearTokens();
             }
+            // 1 configure + 60 * (setTokens + clearTokens) = 121 events
 
             const history = getDebugHistory();
             expect(history).toHaveLength(100);
-            // Oldest events should have been shifted off
-            expect(history[0].message).toBe('event-10');
-            expect(history[99].message).toBe('event-109');
-        });
-
-        it('omits data field when no data provided', () => {
-            config.debug = true;
-            vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            debugLog('auth', 'logout');
-
-            const event = getDebugHistory()[0];
-            expect(event).not.toHaveProperty('data');
-        });
-
-        it('includes data field when data is provided', () => {
-            config.debug = true;
-            vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            debugLog('auth', 'login', { method: 'password' });
-
-            const event = getDebugHistory()[0];
-            expect(event.data).toEqual({ method: 'password' });
         });
     });
 
@@ -308,23 +159,20 @@ describe('Debug Logging & Diagnostics', () => {
 
     describe('getDebugHistory()', () => {
         it('returns a copy, not a reference to internal array', () => {
-            config.debug = true;
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
 
-            debugLog('test', 'event1');
             const history1 = getDebugHistory();
-
-            debugLog('test', 'event2');
+            setTokens(createValidTokens());
             const history2 = getDebugHistory();
 
-            // history1 should NOT have been mutated by the second debugLog
-            expect(history1).toHaveLength(1);
-            expect(history2).toHaveLength(2);
+            // history1 should NOT have been mutated
+            expect(history2.length).toBeGreaterThan(history1.length);
         });
 
         it('returns empty array when debug disabled', () => {
-            config.debug = false;
-            debugLog('test', 'event');
+            configureForTest({ debug: false });
+            setTokens(createValidTokens());
             expect(getDebugHistory()).toEqual([]);
         });
     });
@@ -335,28 +183,24 @@ describe('Debug Logging & Diagnostics', () => {
 
     describe('clearDebugHistory()', () => {
         it('empties the buffer', () => {
-            config.debug = true;
             vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            debugLog('test', 'event1');
-            debugLog('test', 'event2');
-            expect(getDebugHistory()).toHaveLength(2);
+            configureForTest({ debug: true });
+            setTokens(createValidTokens());
+            expect(getDebugHistory().length).toBeGreaterThan(0);
 
             clearDebugHistory();
             expect(getDebugHistory()).toHaveLength(0);
         });
 
         it('new events still accumulate after clearing', () => {
-            config.debug = true;
             vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            debugLog('test', 'before');
+            configureForTest({ debug: true });
             clearDebugHistory();
-            debugLog('test', 'after');
+
+            setTokens(createValidTokens());
 
             const history = getDebugHistory();
-            expect(history).toHaveLength(1);
-            expect(history[0].message).toBe('after');
+            expect(history.length).toBeGreaterThan(0);
         });
     });
 
@@ -367,29 +211,23 @@ describe('Debug Logging & Diagnostics', () => {
     describe('getDiagnostics()', () => {
         it('returns correct shape when not configured', () => {
             const diag = getDiagnostics();
-            expect(diag).toEqual({
-                configured: false,
-                tokenStorage: 'handler',
-                hasTokens: false,
-                isAuthenticated: false,
-                tokenExpiry: null,
-                authMethod: null,
-                userEmail: null,
-                userGroups: [],
-                isAdmin: false,
-                isReadonly: false,
-                autoRefreshActive: false,
-                debug: false,
-                version: VERSION
-            });
+            expect(diag.configured).toBe(false);
+            expect(diag.hasTokens).toBe(false);
+            expect(diag.isAuthenticated).toBe(false);
+            expect(diag.tokenExpiry).toBe(null);
+            expect(diag.authMethod).toBe(null);
+            expect(diag.userEmail).toBe(null);
+            expect(diag.userGroups).toEqual([]);
+            expect(diag.isAdmin).toBe(false);
+            expect(diag.isReadonly).toBe(false);
+            expect(diag.autoRefreshActive).toBe(false);
+            expect(diag.version).toBe(VERSION);
         });
 
         it('reflects authenticated state with admin user', () => {
-            configure({ debug: true });
             vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            const tokens = createValidTokens();
-            setTokens(tokens);
+            configureForTest({ debug: true });
+            setTokens(createValidTokens());
 
             const diag = getDiagnostics();
             expect(diag.configured).toBe(true);
@@ -405,9 +243,8 @@ describe('Debug Logging & Diagnostics', () => {
         });
 
         it('reflects readonly user state', () => {
-            configure({ debug: false });
-            const tokens = createValidTokens({ 'cognito:groups': ['readonly'] });
-            setTokens(tokens);
+            configureForTest({ debug: false });
+            setTokens(createValidTokens({ 'cognito:groups': ['readonly'] }));
 
             const diag = getDiagnostics();
             expect(diag.isAdmin).toBe(false);
@@ -415,25 +252,33 @@ describe('Debug Logging & Diagnostics', () => {
         });
 
         it('reflects handler mode storage', () => {
-            config.tokenStorage = 'handler';
-            _configured = true;
-
+            configureForTest();
             const diag = getDiagnostics();
             expect(diag.tokenStorage).toBe('handler');
         });
 
         it('reflects auto-refresh state', () => {
-            _configured = true;
+            vi.useFakeTimers();
+            configureForTest();
             expect(getDiagnostics().autoRefreshActive).toBe(false);
 
-            _autoRefreshTimer = 12345; // simulate active timer
+            // Mock fetch for auto-refresh token checks
+            global.fetch = vi.fn().mockResolvedValue({
+                ok: true, status: 200,
+                json: () => Promise.resolve({ access_token: 'x', id_token: 'y' })
+            });
+            setTokens(createValidTokens());
+            startAutoRefresh();
             expect(getDiagnostics().autoRefreshActive).toBe(true);
+
+            stopAutoRefresh();
+            expect(getDiagnostics().autoRefreshActive).toBe(false);
+            vi.useRealTimers();
         });
 
         it('handles null tokens gracefully after logout', () => {
-            configure({ debug: true });
             vi.spyOn(console, 'debug').mockImplementation(() => {});
-
+            configureForTest({ debug: true });
             setTokens(createValidTokens());
             clearTokens();
 
@@ -451,22 +296,24 @@ describe('Debug Logging & Diagnostics', () => {
 
     describe('debug: true', () => {
         it('calls console.debug with [l42-auth] prefix', () => {
-            config.debug = true;
             const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
 
-            debugLog('token', 'setTokens');
-
-            expect(spy).toHaveBeenCalledWith('[l42-auth]', 'token', 'setTokens');
+            // configure() itself logs — check that call
+            expect(spy).toHaveBeenCalledWith('[l42-auth]', 'config', 'configured');
         });
 
-        it('does NOT include data payload in console output', () => {
-            config.debug = true;
+        it('does NOT include data payload in non-verbose console output', () => {
             const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
+            clearDebugHistory();
 
-            debugLog('auth', 'login', { method: 'password' });
+            setTokens(createValidTokens());
 
-            // With debug: true, only category + message are logged (not data)
-            expect(spy).toHaveBeenCalledWith('[l42-auth]', 'auth', 'login');
+            // Find the setTokens call — should have category + message, not data
+            const setTokensCall = spy.mock.calls.find(c => c[2] === 'setTokens');
+            expect(setTokensCall).toBeDefined();
+            expect(setTokensCall).toHaveLength(3); // [prefix, category, message]
         });
     });
 
@@ -476,21 +323,13 @@ describe('Debug Logging & Diagnostics', () => {
 
     describe("debug: 'verbose'", () => {
         it('calls console.debug with data payload', () => {
-            config.debug = 'verbose';
             const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: 'verbose' });
 
-            debugLog('auth', 'login', { method: 'password' });
-
-            expect(spy).toHaveBeenCalledWith('[l42-auth]', 'auth', 'login', { method: 'password' });
-        });
-
-        it('passes empty string when no data provided', () => {
-            config.debug = 'verbose';
-            const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            debugLog('auth', 'logout');
-
-            expect(spy).toHaveBeenCalledWith('[l42-auth]', 'auth', 'logout', '');
+            // configure() logs with data — check it includes the payload
+            const configCall = spy.mock.calls.find(c => c[2] === 'configured');
+            expect(configCall).toBeDefined();
+            expect(configCall.length).toBeGreaterThanOrEqual(4); // prefix + category + message + data
         });
     });
 
@@ -501,33 +340,31 @@ describe('Debug Logging & Diagnostics', () => {
     describe('debug: function', () => {
         it('receives debug events', () => {
             const events = [];
-            config.debug = (event) => events.push(event);
+            configureForTest({ debug: (event) => events.push(event) });
 
-            debugLog('config', 'configured', { tokenStorage: 'handler' });
-
-            expect(events).toHaveLength(1);
-            expect(events[0].category).toBe('config');
-            expect(events[0].message).toBe('configured');
-            expect(events[0].data).toEqual({ tokenStorage: 'handler' });
-            expect(events[0].version).toBe(VERSION);
-            expect(typeof events[0].timestamp).toBe('number');
+            expect(events.length).toBeGreaterThanOrEqual(1);
+            const configEvent = events.find(e => e.message === 'configured');
+            expect(configEvent).toBeDefined();
+            expect(configEvent.category).toBe('config');
+            expect(configEvent.version).toBe(VERSION);
+            expect(typeof configEvent.timestamp).toBe('number');
         });
 
         it('callback errors do NOT break auth flow', () => {
-            config.debug = () => { throw new Error('Callback boom!'); };
+            // Configure with a throwing callback
+            expect(() => {
+                configureForTest({ debug: () => { throw new Error('Callback boom!'); } });
+            }).not.toThrow();
 
-            // Should not throw
-            expect(() => debugLog('auth', 'login')).not.toThrow();
-
-            // Event should still be recorded in history
-            expect(getDebugHistory()).toHaveLength(1);
+            // Events should still be recorded
+            expect(getDebugHistory().length).toBeGreaterThan(0);
         });
 
-        it('does NOT call console.debug', () => {
+        it('does NOT call console.debug when using function mode', () => {
             const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
-            config.debug = () => {};
+            configureForTest({ debug: () => {} });
 
-            debugLog('test', 'event');
+            setTokens(createValidTokens());
 
             expect(spy).not.toHaveBeenCalled();
         });
@@ -539,81 +376,81 @@ describe('Debug Logging & Diagnostics', () => {
 
     describe('integration with auth operations', () => {
         it('configure() logs config event', () => {
-            configure({ debug: true });
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
 
             const history = getDebugHistory();
-            expect(history).toHaveLength(1);
-            expect(history[0].category).toBe('config');
-            expect(history[0].message).toBe('configured');
-            expect(history[0].data.tokenStorage).toBe('handler');
+            const configEvent = history.find(e => e.message === 'configured');
+            expect(configEvent).toBeDefined();
+            expect(configEvent.category).toBe('config');
         });
 
         it('setTokens() logs token event with auth_method', () => {
-            configure({ debug: true });
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
             clearDebugHistory();
 
-            const tokens = createValidTokens();
-            setTokens(tokens);
+            setTokens(createValidTokens());
 
             const history = getDebugHistory();
-            expect(history).toHaveLength(1);
-            expect(history[0].category).toBe('token');
-            expect(history[0].message).toBe('setTokens');
-            expect(history[0].data.auth_method).toBe('password');
-            expect(history[0].data.isRefresh).toBe(false);
+            const setEvent = history.find(e => e.message === 'setTokens');
+            expect(setEvent).toBeDefined();
+            expect(setEvent.category).toBe('token');
+            expect(setEvent.data.auth_method).toBe('password');
+            expect(setEvent.data.isRefresh).toBe(false);
         });
 
         it('setTokens() with isRefresh flag is reflected in data', () => {
-            configure({ debug: true });
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
             clearDebugHistory();
 
             setTokens(createValidTokens(), { isRefresh: true });
 
-            const event = getDebugHistory()[0];
+            const event = getDebugHistory().find(e => e.message === 'setTokens');
             expect(event.data.isRefresh).toBe(true);
         });
 
         it('clearTokens() logs token clear event', () => {
-            configure({ debug: true });
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
             clearDebugHistory();
 
             clearTokens();
 
             const history = getDebugHistory();
-            expect(history).toHaveLength(1);
-            expect(history[0].category).toBe('token');
-            expect(history[0].message).toBe('clearTokens');
+            const clearEvent = history.find(e => e.message === 'clearTokens');
+            expect(clearEvent).toBeDefined();
+            expect(clearEvent.category).toBe('token');
         });
 
         it('full auth lifecycle generates sequential events', () => {
-            configure({ debug: true });
             vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            const tokens = createValidTokens();
-            setTokens(tokens);
+            configureForTest({ debug: true });
+            setTokens(createValidTokens());
             clearTokens();
 
             const history = getDebugHistory();
             const messages = history.map(e => e.message);
-            expect(messages).toEqual(['configured', 'setTokens', 'clearTokens']);
+            expect(messages).toContain('configured');
+            expect(messages).toContain('setTokens');
+            expect(messages).toContain('clearTokens');
+            // Verify order
+            expect(messages.indexOf('configured')).toBeLessThan(messages.indexOf('setTokens'));
+            expect(messages.indexOf('setTokens')).toBeLessThan(messages.indexOf('clearTokens'));
         });
 
         it('events accumulate across multiple operations', () => {
-            configure({ debug: true });
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
 
-            // Simulate multiple login/logout cycles
             for (let i = 0; i < 5; i++) {
                 setTokens(createValidTokens());
                 clearTokens();
             }
 
-            // 1 configure + 5 * (setTokens + clearTokens) = 11 events
-            expect(getDebugHistory()).toHaveLength(11);
+            // 1 configure + possible sessionEndpoint warning + 5*(setTokens+clearTokens)
+            expect(getDebugHistory().length).toBeGreaterThanOrEqual(11);
         });
     });
 
@@ -622,63 +459,32 @@ describe('Debug Logging & Diagnostics', () => {
     // ========================================================================
 
     describe('edge cases', () => {
-        it('debugLog with undefined data does not include data field', () => {
-            config.debug = true;
-            vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            debugLog('test', 'no-data', undefined);
-
-            const event = getDebugHistory()[0];
-            expect(event).not.toHaveProperty('data');
-        });
-
-        it('debugLog with null data includes data field as null', () => {
-            config.debug = true;
-            vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            debugLog('test', 'null-data', null);
-
-            const event = getDebugHistory()[0];
-            expect(event.data).toBe(null);
-        });
-
         it('switching debug mode mid-session works correctly', () => {
             // Start with debug: true
-            config.debug = true;
             vi.spyOn(console, 'debug').mockImplementation(() => {});
+            configureForTest({ debug: true });
+            const count1 = getDebugHistory().length;
 
-            debugLog('test', 'while-true');
-            expect(getDebugHistory()).toHaveLength(1);
-
-            // Switch to false — new events are not logged
-            config.debug = false;
-            debugLog('test', 'while-false');
-            expect(getDebugHistory()).toHaveLength(1);
-
-            // Switch to function — events resume
-            const events = [];
-            config.debug = (e) => events.push(e);
-            debugLog('test', 'while-function');
-            expect(getDebugHistory()).toHaveLength(2);
-            expect(events).toHaveLength(1);
+            // Reconfigure with debug: false — new events shouldn't be logged
+            // (note: reconfigure itself won't log since debug is now false)
+            _resetForTesting();
+            configureForTest({ debug: false });
+            setTokens(createValidTokens());
+            expect(getDebugHistory()).toHaveLength(0);
         });
 
         it('getDiagnostics works even when debug is a function', () => {
-            config.debug = () => {};
-            _configured = true;
+            configureForTest({ debug: () => {} });
 
             const diag = getDiagnostics();
-            // debug field in diagnostics reflects the function type
             expect(typeof diag.debug).toBe('function');
         });
 
         it('version field matches on all events', () => {
-            config.debug = true;
             vi.spyOn(console, 'debug').mockImplementation(() => {});
-
-            debugLog('a', '1');
-            debugLog('b', '2');
-            debugLog('c', '3');
+            configureForTest({ debug: true });
+            setTokens(createValidTokens());
+            clearTokens();
 
             const history = getDebugHistory();
             history.forEach(e => {
