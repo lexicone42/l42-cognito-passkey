@@ -148,6 +148,7 @@ mod tests {
             require_device_bound: false,
             service_token: None,
             additional_audience: Vec::new(),
+            entity_table: None,
         }
     }
 

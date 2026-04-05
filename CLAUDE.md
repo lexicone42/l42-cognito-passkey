@@ -6,7 +6,7 @@ L42 Cognito Passkey is a **self-hosted JavaScript authentication library** for A
 
 **Current Version**: 0.20.1
 **License**: Apache-2.0
-**Tests**: 733 vitest + 157 cargo (including 53 property-based tests + 15 token storage tests + 56 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 132 Cedar authorization tests)
+**Tests**: 733 vitest + 164 cargo (including 53 property-based tests + 15 token storage tests + 56 handler mode tests + 35 auto-refresh tests + 34 debug diagnostics tests + 32 conditional UI tests + 23 conditional create tests + 31 token validation tests + 22 WebAuthn capabilities tests + 40 login rate limiting tests + 132 Cedar authorization tests)
 
 ## Quick Start for Claude Instances
 
@@ -272,7 +272,9 @@ Key features:
 - InMemory + DynamoDB session backends
 - HMAC-SHA256 session cookies
 - Service token bypass (`SERVICE_TOKEN` env var) for headless/programmatic API access
-- 157 tests (113 unit + 44 integration), Rust edition 2024, clippy clean
+- Entity provider for trusted resource ownership lookups (`ENTITY_TABLE` env var) — closes S1 gap
+- Lambda auto-detection: defaults to DynamoDB session backend when `AWS_LAMBDA_FUNCTION_NAME` is set
+- 164 tests (116 unit + 48 integration), Rust edition 2024, clippy clean
 
 No changes to `auth.js` or client-side code.
 
@@ -372,10 +374,10 @@ Key features:
 - 9 policy files mapping all RBAC roles to Cedar policies
 - Ownership enforcement via `forbid` policies
 - Cognito group alias resolution (mirrors `rbac-roles.js`)
-- EntityProvider interface for trusted ownership (see below)
+- EntityProvider for trusted ownership via `ENTITY_TABLE` env var (see S1 fix above)
 - Fail-closed: returns 503 if Cedar unavailable
 
-**Known Limitation (S1):** `resource.owner` is sent by the client in `requireServerAuthorization()`. A malicious client can lie about ownership, bypassing the forbid policy. For production, use the EntityProvider interface to load the true owner from a trusted data store (DynamoDB, database). For UI-gated workflows where the app already knows the owner, passing it from the client is acceptable as defense-in-depth.
+**S1 Fix (Entity Provider):** `resource.owner` was previously trusted from the client, allowing ownership spoofing. When `ENTITY_TABLE` is configured in the Rust backend, the `/auth/authorize` endpoint looks up the true owner from DynamoDB and ignores the client-provided value. Table schema: PK `id` (S), attribute `owner` (S). Without `ENTITY_TABLE`, the client value is still used (backwards compatible) with a startup warning when Cedar is enabled.
 
 **Admin Override Note:** `:own` actions (`write:own`, `delete:own`) are subject to the ownership forbid policy even for admins. Admins must use `:all` variants (`write:all`, `delete:all`) to modify other users' resources.
 
@@ -419,7 +421,7 @@ See `docs/security.md` for the full security analysis.
 ## Future Plans
 
 - **Semgrep Rules** - Security scanning (post-1.0)
-- **Persistent Entity Store** - DynamoDB/Redis entity provider for Cedar (post-1.0)
+- ~~**Persistent Entity Store**~~ - Done: `ENTITY_TABLE` env var in Rust backend (v0.21.0)
 - **AAGUID Allowlist in Cedar** - Server-side device-type restrictions at registration time
 - **FIDO MDS Integration** - Map AAGUIDs to authenticator metadata from FIDO Metadata Service
 

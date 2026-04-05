@@ -192,6 +192,7 @@ pub fn build_test_app(with_cedar: bool) -> (axum::Router, Arc<AppState>) {
         jwks_cache,
         cedar,
         session_layer,
+        entity_provider: None,
     });
 
     let app = create_app(state.clone());
@@ -202,6 +203,15 @@ pub fn build_test_app(with_cedar: bool) -> (axum::Router, Arc<AppState>) {
 pub fn build_test_app_with_config(
     config: Config,
     with_cedar: bool,
+) -> (axum::Router, Arc<AppState>) {
+    build_test_app_with_entity_provider(config, with_cedar, None)
+}
+
+/// Build a test app with custom config, optional Cedar, and optional entity provider.
+pub fn build_test_app_with_entity_provider(
+    config: Config,
+    with_cedar: bool,
+    entity_provider: Option<l42_token_handler::entity::AnyEntityProvider>,
 ) -> (axum::Router, Arc<AppState>) {
     let http_client = reqwest::Client::new();
     let jwks_cache = Arc::new(JwksCache::new(http_client.clone()));
@@ -232,6 +242,7 @@ pub fn build_test_app_with_config(
         jwks_cache,
         cedar,
         session_layer,
+        entity_provider,
     });
 
     let app = create_app(state.clone());
@@ -239,7 +250,11 @@ pub fn build_test_app_with_config(
 }
 
 /// Build a request with X-Service-Token header.
-pub fn request_with_service_token(method: &str, uri: &str, token: &str) -> axum::http::Request<axum::body::Body> {
+pub fn request_with_service_token(
+    method: &str,
+    uri: &str,
+    token: &str,
+) -> axum::http::Request<axum::body::Body> {
     axum::http::Request::builder()
         .method(method)
         .uri(uri)
@@ -249,7 +264,11 @@ pub fn request_with_service_token(method: &str, uri: &str, token: &str) -> axum:
 }
 
 /// Build a POST request with X-Service-Token header and JSON body.
-pub fn post_with_service_token(uri: &str, token: &str, body: &serde_json::Value) -> axum::http::Request<axum::body::Body> {
+pub fn post_with_service_token(
+    uri: &str,
+    token: &str,
+    body: &serde_json::Value,
+) -> axum::http::Request<axum::body::Body> {
     axum::http::Request::builder()
         .method("POST")
         .uri(uri)

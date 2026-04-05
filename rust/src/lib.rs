@@ -7,6 +7,7 @@ pub mod cedar;
 pub mod cognito;
 pub mod config;
 pub mod credential;
+pub mod entity;
 pub mod error;
 pub mod middleware;
 pub mod ocsf;
@@ -33,6 +34,8 @@ pub struct AppState {
     pub jwks_cache: Arc<JwksCache>,
     pub cedar: Option<CedarState>,
     pub session_layer: Arc<SessionLayer<AnyBackend>>,
+    /// Entity provider for trusted resource ownership lookups (closes S1 gap).
+    pub entity_provider: Option<entity::AnyEntityProvider>,
 }
 
 /// Build the Axum router with all middleware and routes.

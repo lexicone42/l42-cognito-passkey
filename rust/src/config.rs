@@ -28,6 +28,10 @@ pub struct Config {
     pub service_token: Option<String>,
     /// Additional client IDs accepted as valid JWT audiences (for dual-client setups).
     pub additional_audience: Vec<String>,
+    /// DynamoDB table for resource entity ownership lookups (closes S1 gap).
+    /// When set, the `/auth/authorize` endpoint queries this table to verify
+    /// `resource.owner` instead of trusting the client-provided value.
+    pub entity_table: Option<String>,
 }
 
 impl Config {
@@ -49,7 +53,15 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(3001),
-            session_backend: env::var("SESSION_BACKEND").unwrap_or_else(|_| "memory".into()),
+            session_backend: env::var("SESSION_BACKEND").unwrap_or_else(|_| {
+                // Auto-detect Lambda: default to DynamoDB since in-memory sessions
+                // don't persist across Lambda invocations (issue #24).
+                if env::var("AWS_LAMBDA_FUNCTION_NAME").is_ok() {
+                    "dynamodb".into()
+                } else {
+                    "memory".into()
+                }
+            }),
             dynamodb_table: env::var("DYNAMODB_TABLE").unwrap_or_else(|_| "l42_sessions".into()),
             dynamodb_endpoint: env::var("DYNAMODB_ENDPOINT").unwrap_or_default(),
             session_https_only: env::var("SESSION_HTTPS_ONLY")
@@ -84,6 +96,7 @@ impl Config {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect(),
+            entity_table: env::var("ENTITY_TABLE").ok().filter(|s| !s.is_empty()),
         })
     }
 
@@ -135,6 +148,7 @@ impl Config {
             require_device_bound: false,
             service_token: None,
             additional_audience: Vec::new(),
+            entity_table: None,
         }
     }
 }
@@ -177,6 +191,7 @@ mod tests {
         assert!(!cfg.session_https_only);
         assert_eq!(cfg.cookie_domain, None);
         assert_eq!(cfg.auth_path_prefix, "/auth");
+        assert_eq!(cfg.entity_table, None);
     }
 
     #[test]

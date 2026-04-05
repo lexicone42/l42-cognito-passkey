@@ -5,7 +5,7 @@ Guide for Claude instances working on the Rust Token Handler backend.
 ## Quick Reference
 
 ```bash
-cargo test            # 157 tests (113 unit + 44 integration)
+cargo test            # 164 tests (116 unit + 48 integration)
 cargo clippy -- -D warnings   # Must pass clean
 cargo run             # Local dev server on :3001 (needs .env)
 ```
@@ -39,6 +39,9 @@ This is the **preferred Token Handler** backend — it stores JWT tokens server-
 | `cedar::entities` | Build Cedar entities from JWT claims | `build_entities()` |
 | `cedar::groups` | Cognito group alias resolution | `DEFAULT_GROUP_MAP` (30+ aliases → 8 groups) |
 | `credential` | WebAuthn CBOR parsing + AAGUID/policy checks | `parse_attestation_object`, `check_aaguid_allowed`, `check_device_bound` |
+| `entity` | Resource ownership lookups (closes S1 gap) | `EntityProvider` trait, `AnyEntityProvider` |
+| `entity::dynamodb` | DynamoDB entity ownership store | `DynamoDbEntityProvider` |
+| `entity::memory` | In-memory entity store (dev/test) | `InMemoryEntityProvider` |
 | `session::cookie` | HMAC-SHA256 session cookie signing | `sign_session_id`, `verify_cookie` |
 | `session::memory` | In-memory session store | `InMemoryBackend` (DashMap) |
 | `session::dynamodb` | DynamoDB session store | `DynamoDbBackend` |
@@ -125,7 +128,10 @@ Three env vars handle CDN deployment:
 | `AAGUID_ALLOWLIST` | (empty) | Comma-separated list of allowed AAGUIDs (UUID format, case-insensitive). Empty = allow all. Used by `POST /auth/validate-credential`. |
 | `REQUIRE_DEVICE_BOUND` | `false` | When `true`, rejects credentials with BE=true (backup-eligible / synced passkeys) at registration time. |
 | `SERVICE_TOKEN` | (none) | Pre-shared token for headless/programmatic API access. When set, requests with a matching `X-Service-Token` header bypass session cookie auth and CSRF. Use a strong random value (32+ chars). Empty/missing = disabled. |
+| `ENTITY_TABLE` | (none) | DynamoDB table for resource entity ownership lookups. When set, `/auth/authorize` verifies `resource.owner` from this table instead of trusting the client (closes S1 gap). Table schema: PK `id` (S), attribute `owner` (S). |
 | (none — uses headers) | — | `X-Forwarded-Host` header preferred over `Host` for callback `redirect_uri` |
+
+**Lambda session backend auto-detection:** When running in Lambda (`AWS_LAMBDA_FUNCTION_NAME` is set) and `SESSION_BACKEND` is not explicitly set, the default changes from `memory` to `dynamodb`. This prevents the silent session loss described in issue #24. To force in-memory sessions in Lambda (e.g., for testing), set `SESSION_BACKEND=memory` explicitly.
 
 Example CloudFront config: CloudFront routes `/_auth/*` to Lambda origin, sets `X-Forwarded-Host: app.example.com`. Lambda env: `AUTH_PATH_PREFIX=/_auth`, `COOKIE_DOMAIN=.example.com`.
 

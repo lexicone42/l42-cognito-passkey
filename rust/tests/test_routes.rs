@@ -10,10 +10,12 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use ciborium::Value as CborValue;
 use common::{
-    TestKeys, build_test_app, build_test_app_with_config, expired_claims,
-    post_with_service_token, request_with_service_token, test_claims,
+    TestKeys, build_test_app, build_test_app_with_config, build_test_app_with_entity_provider,
+    expired_claims, post_with_service_token, request_with_service_token, test_claims,
 };
 use l42_token_handler::config::Config;
+use l42_token_handler::entity::AnyEntityProvider;
+use l42_token_handler::entity::memory::InMemoryEntityProvider;
 use l42_token_handler::session::cookie::sign_session_id;
 use l42_token_handler::session::{SessionBackend, SessionData};
 use l42_token_handler::types::SessionTokens;
@@ -1197,7 +1199,11 @@ async fn test_service_token_bypasses_csrf() {
     // POST /auth/authorize without CSRF header but with valid service token.
     // Should get 401 (no session tokens) instead of 403 (CSRF failed).
     let body = json!({"action": "read:content"});
-    let req = post_with_service_token("/auth/authorize", "test-service-token-32chars-long!!", &body);
+    let req = post_with_service_token(
+        "/auth/authorize",
+        "test-service-token-32chars-long!!",
+        &body,
+    );
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     let body = body_json(resp).await;
@@ -1240,4 +1246,178 @@ async fn test_service_token_no_set_cookie() {
         resp.headers().get("set-cookie").is_none(),
         "service token responses must not set cookies"
     );
+}
+
+// ───── S1 Fix: Entity Provider Ownership Verification ─────
+
+#[tokio::test]
+async fn test_s1_entity_provider_prevents_ownership_lie() {
+    // Setup: doc-1 is owned by "real-owner" in the entity store
+    let entity_provider = InMemoryEntityProvider::new();
+    entity_provider.set_owner("doc-1", "real-owner");
+
+    let config = Config::test_default();
+    let (app, state) = build_test_app_with_entity_provider(
+        config,
+        true,
+        Some(AnyEntityProvider::Memory(entity_provider)),
+    );
+
+    // Create session for attacker (sub = "attacker-sub")
+    let claims = test_claims("attacker-sub", "attacker@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-attacker".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-attack", &tokens).await;
+
+    // Attacker claims to own doc-1 (lie!)
+    let body = json!({
+        "action": "write:own",
+        "resource": {"id": "doc-1", "type": "document", "owner": "attacker-sub"}
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-attack");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/authorize")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_json(resp).await;
+    assert_eq!(body["authorized"], false);
+}
+
+#[tokio::test]
+async fn test_s1_entity_provider_allows_real_owner() {
+    // Setup: doc-1 is owned by "user-sub" in the entity store
+    let entity_provider = InMemoryEntityProvider::new();
+    entity_provider.set_owner("doc-1", "user-sub");
+
+    let config = Config::test_default();
+    let (app, state) = build_test_app_with_entity_provider(
+        config,
+        true,
+        Some(AnyEntityProvider::Memory(entity_provider)),
+    );
+
+    let claims = test_claims("user-sub", "user@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-user".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-real", &tokens).await;
+
+    // Real owner writes their own resource — should succeed
+    let body = json!({
+        "action": "write:own",
+        "resource": {"id": "doc-1", "type": "document", "owner": "user-sub"}
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-real");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/authorize")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["authorized"], true);
+}
+
+#[tokio::test]
+async fn test_s1_entity_provider_untracked_resource() {
+    // Entity provider configured but resource "unknown-doc" not in store.
+    // Client-provided owner should be ignored (removed).
+    let entity_provider = InMemoryEntityProvider::new();
+    // Don't add "unknown-doc" to the store
+
+    let config = Config::test_default();
+    let (app, state) = build_test_app_with_entity_provider(
+        config,
+        true,
+        Some(AnyEntityProvider::Memory(entity_provider)),
+    );
+
+    let claims = test_claims("user-sub", "user@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-user".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-untrack", &tokens).await;
+
+    // User claims to own unknown-doc — entity provider removes the owner
+    // Since owner is removed, the forbid policy won't fire, and write:own
+    // permit policy still allows the action (no ownership enforcement for
+    // untracked resources).
+    let body = json!({
+        "action": "write:own",
+        "resource": {"id": "unknown-doc", "type": "document", "owner": "user-sub"}
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-untrack");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/authorize")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["authorized"], true);
+}
+
+#[tokio::test]
+async fn test_s1_no_entity_provider_backwards_compatible() {
+    // Without entity provider, client-provided owner is trusted (existing behavior)
+    let (app, state) = build_test_app(true);
+    let claims = test_claims("user-sub", "user@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at-user".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-compat", &tokens).await;
+
+    // User claims to own doc-1 — without entity provider, this is trusted
+    let body = json!({
+        "action": "write:own",
+        "resource": {"id": "doc-1", "type": "document", "owner": "user-sub"}
+    });
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-compat");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/authorize")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["authorized"], true);
 }

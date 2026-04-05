@@ -63,10 +63,15 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "pnpm": {
+    "overrides": {
+      "picomatch": ">=4.0.4"
+    }
+  },
   "devDependencies": {
-    "@cedar-policy/cedar-wasm": "^4.8.2",
-    "fast-check": "^4.5.3",
-    "jsdom": "^27.4.0",
-    "vitest": "^4.0.17"
+    "@cedar-policy/cedar-wasm": "^4.9.1",
+    "fast-check": "^4.6.0",
+    "jsdom": "^29.0.1",
+    "vitest": "^4.1.2"
   }
 }

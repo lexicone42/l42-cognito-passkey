@@ -12,6 +12,8 @@ use tracing_subscriber::{EnvFilter, fmt};
 use l42_token_handler::cedar::engine::CedarState;
 use l42_token_handler::cognito::jwt::JwksCache;
 use l42_token_handler::config::Config;
+use l42_token_handler::entity::AnyEntityProvider;
+use l42_token_handler::entity::dynamodb::DynamoDbEntityProvider;
 use l42_token_handler::session::AnyBackend;
 use l42_token_handler::session::memory::InMemoryBackend;
 use l42_token_handler::session::middleware::SessionLayer;
@@ -84,10 +86,28 @@ async fn main() {
         }
     };
 
-    // Session backend: DynamoDB for production, InMemory for dev
-    let session_backend: AnyBackend = if config.session_backend == "dynamodb" {
+    // Lambda + memory backend warning (issue #24)
+    if is_lambda && config.session_backend != "dynamodb" {
+        tracing::warn!(
+            "Running in Lambda with in-memory session backend — sessions will not persist \
+             across invocations. Set SESSION_BACKEND=dynamodb for production."
+        );
+    }
+
+    // DYNAMODB_TABLE set but not using DynamoDB backend — likely misconfiguration
+    if env::var("DYNAMODB_TABLE").is_ok() && config.session_backend != "dynamodb" {
+        tracing::warn!(
+            "DYNAMODB_TABLE is set but SESSION_BACKEND is not 'dynamodb' — \
+             the DynamoDB table '{}' will not be used for sessions.",
+            config.dynamodb_table
+        );
+    }
+
+    // Create DynamoDB client if any feature needs it (sessions or entity provider)
+    let needs_dynamo = config.session_backend == "dynamodb" || config.entity_table.is_some();
+    let dynamo_client = if needs_dynamo {
         let sdk_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
-        let dynamo_client = if config.dynamodb_endpoint.is_empty() {
+        let client = if config.dynamodb_endpoint.is_empty() {
             aws_sdk_dynamodb::Client::new(&sdk_config)
         } else {
             let dynamo_config = aws_sdk_dynamodb::config::Builder::from(&sdk_config)
@@ -95,17 +115,42 @@ async fn main() {
                 .build();
             aws_sdk_dynamodb::Client::from_conf(dynamo_config)
         };
+        Some(client)
+    } else {
+        None
+    };
+
+    // Session backend: DynamoDB for production, InMemory for dev
+    let session_backend: AnyBackend = if config.session_backend == "dynamodb" {
         tracing::info!(
             "Using DynamoDB session backend (table: {})",
             config.dynamodb_table
         );
         AnyBackend::DynamoDb(l42_token_handler::session::dynamodb::DynamoDbBackend::new(
-            dynamo_client,
+            dynamo_client.clone().unwrap(),
             config.dynamodb_table.clone(),
         ))
     } else {
         tracing::info!("Using in-memory session backend");
         AnyBackend::Memory(InMemoryBackend::new())
+    };
+
+    // Entity provider for trusted ownership lookups (closes S1 gap)
+    let entity_provider = if let Some(ref table) = config.entity_table {
+        tracing::info!("Entity provider enabled (table: {})", table);
+        Some(AnyEntityProvider::DynamoDb(DynamoDbEntityProvider::new(
+            dynamo_client.unwrap(),
+            table.clone(),
+        )))
+    } else {
+        if cedar.is_some() {
+            tracing::warn!(
+                "Cedar authorization is enabled but no ENTITY_TABLE is configured — \
+                 resource.owner in authorization requests will be trusted from the client \
+                 (S1 security gap). Set ENTITY_TABLE to enable server-side ownership verification."
+            );
+        }
+        None
     };
 
     if let Some(ref token) = config.service_token
@@ -131,6 +176,7 @@ async fn main() {
         jwks_cache,
         cedar,
         session_layer,
+        entity_provider,
     });
 
     let app = create_app(state);

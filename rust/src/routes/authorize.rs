@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use std::sync::Arc;
 
 use crate::cognito::jwt::{decode_jwt_unverified, is_token_expired};
+use crate::entity::EntityProvider;
 use crate::error::AppError;
 use crate::ocsf;
 use crate::session::middleware::SessionHandle;
@@ -60,14 +61,49 @@ pub async fn authorize(
     let claims =
         decode_jwt_unverified(&tokens.id_token).map_err(|_| AppError::TokenDecodeFailed)?;
 
-    // Convert resource for OCSF
+    // Resolve resource ownership via entity provider (closes S1 gap).
+    // When an entity provider is configured, the server-side owner overrides
+    // whatever the client sent — preventing the ownership-spoofing attack.
+    let resolved_resource = match (&state.entity_provider, &body.resource) {
+        (Some(provider), Some(res)) if res.id.is_some() => {
+            let id = res.id.as_deref().unwrap();
+            let mut resolved = res.clone();
+            match provider.get_resource_owner(id).await {
+                Ok(Some(true_owner)) => {
+                    if res.owner.is_some() && res.owner.as_deref() != Some(&true_owner) {
+                        tracing::warn!(
+                            resource_id = %id,
+                            client_owner = ?res.owner,
+                            true_owner = %true_owner,
+                            "Client-supplied resource owner overridden by entity provider"
+                        );
+                    }
+                    resolved.owner = Some(true_owner);
+                }
+                Ok(None) => {
+                    // Resource not in entity store — remove client-provided owner
+                    // (no ownership enforcement for untracked resources)
+                    resolved.owner = None;
+                }
+                Err(e) => {
+                    tracing::error!(resource_id = %id, error = %e, "Entity lookup failed");
+                    // Fail-closed: remove untrusted client-provided owner
+                    resolved.owner = None;
+                }
+            }
+            Some(resolved)
+        }
+        _ => body.resource.clone(),
+    };
+
+    // Convert resource for OCSF (logs the original client request, not the resolved value)
     let resource_json = body
         .resource
         .as_ref()
         .map(|r| serde_json::to_value(r).unwrap());
 
-    // Evaluate
-    match cedar.authorize(&claims, &body.action, body.resource.as_ref(), None) {
+    // Evaluate with resolved resource
+    match cedar.authorize(&claims, &body.action, resolved_resource.as_ref(), None) {
         Ok(result) => {
             let decision = if result.authorized { "permit" } else { "deny" };
             let severity = if result.authorized {
