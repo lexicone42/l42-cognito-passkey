@@ -3101,6 +3101,45 @@ export async function fetchWithAuth(url, options = {}) {
     return response;
 }
 
+// ==================== TEST SUPPORT ====================
+
+/**
+ * Reset all module-level state for test isolation.
+ * ONLY for use in test suites — never call in production code.
+ * @private
+ */
+export function _resetForTesting() {
+    // Config
+    config = { ...DEFAULT_CONFIG };
+    _configured = false;
+
+    // Token cache
+    HandlerTokenStore._cache = null;
+    HandlerTokenStore._cacheExpiry = 0;
+    HandlerTokenStore._fetchPromise = null;
+
+    // Abort controllers
+    if (_conditionalAbortController) {
+        _conditionalAbortController.abort();
+    }
+    _conditionalAbortController = null;
+
+    // Rate limiting
+    _loginAttempts.clear();
+
+    // Listeners
+    authStateListeners.clear();
+    loginListeners.clear();
+    logoutListeners.clear();
+    sessionExpiredListeners.clear();
+
+    // Auto-refresh
+    stopAutoRefresh();
+
+    // Debug
+    _debugHistory.length = 0;
+}
+
 // ==================== DEFAULT EXPORT ====================
 
 export default {
