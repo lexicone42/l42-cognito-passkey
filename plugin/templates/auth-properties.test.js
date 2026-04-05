@@ -29,7 +29,14 @@ import {
     generateCodeChallenge,
     configure,
     setTokens,
+    clearTokens,
     isAuthenticated,
+    getUserEmail,
+    getUserGroups,
+    isAdmin,
+    isReadonly,
+    getAuthMethod,
+    logout,
     _resetForTesting
 } from '../../src/auth.js';
 
@@ -50,12 +57,14 @@ function createTestJwt(claims) {
 
 // isAdmin/isReadonly — the real auth.js versions read from internal state (getUserGroups).
 // These test versions take groups as a parameter to test the algorithm directly.
-function isAdmin(groups) {
+// Local versions take (groups) param for algorithm property testing.
+// The imported isAdmin/isReadonly from auth.js read groups from internal state.
+function isAdminAlgo(groups) {
     const lower = groups.map(g => g.toLowerCase());
     return lower.includes('admin') || lower.includes('admins') || lower.includes('administrators');
 }
 
-function isReadonly(groups) {
+function isReadonlyAlgo(groups) {
     const lower = groups.map(g => g.toLowerCase());
     const hasReadonly = lower.includes('readonly') || lower.includes('read-only') ||
                         lower.includes('viewer') || lower.includes('viewers');
@@ -206,8 +215,8 @@ describe('PROPERTY: isAdmin / isReadonly Mutual Exclusion', () => {
     it('isAdmin and isReadonly are never both true', () => {
         fc.assert(
             fc.property(userGroupsArb, (groups) => {
-                const admin = isAdmin(groups);
-                const readonly = isReadonly(groups);
+                const admin = isAdminAlgo(groups);
+                const readonly = isReadonlyAlgo(groups);
 
                 // Mutual exclusion: cannot be both admin and readonly
                 expect(admin && readonly).toBe(false);
@@ -220,8 +229,8 @@ describe('PROPERTY: isAdmin / isReadonly Mutual Exclusion', () => {
     it('isReadonly is true only when readonly group present AND no admin group', () => {
         fc.assert(
             fc.property(userGroupsArb, (groups) => {
-                const readonly = isReadonly(groups);
-                const admin = isAdmin(groups);
+                const readonly = isReadonlyAlgo(groups);
+                const admin = isAdminAlgo(groups);
                 const lower = groups.map(g => g.toLowerCase());
                 const hasReadonlyGroup = lower.includes('readonly') || lower.includes('read-only') ||
                                           lower.includes('viewer') || lower.includes('viewers');
@@ -244,8 +253,8 @@ describe('PROPERTY: isAdmin / isReadonly Mutual Exclusion', () => {
                 fc.constantFrom('readonly', 'read-only', 'viewer', 'viewers'),
                 (adminGroup, readonlyGroup) => {
                     const groups = [adminGroup, readonlyGroup];
-                    expect(isAdmin(groups)).toBe(true);
-                    expect(isReadonly(groups)).toBe(false);
+                    expect(isAdminAlgo(groups)).toBe(true);
+                    expect(isReadonlyAlgo(groups)).toBe(false);
                     return true;
                 }
             ),
@@ -259,9 +268,9 @@ describe('PROPERTY: isAdmin / isReadonly Mutual Exclusion', () => {
                 fc.constantFrom('admin', 'admins', 'administrators'),
                 (adminAlias) => {
                     // Various case combinations
-                    expect(isAdmin([adminAlias.toUpperCase()])).toBe(true);
-                    expect(isAdmin([adminAlias.charAt(0).toUpperCase() + adminAlias.slice(1)])).toBe(true);
-                    expect(isAdmin([adminAlias.toLowerCase()])).toBe(true);
+                    expect(isAdminAlgo([adminAlias.toUpperCase()])).toBe(true);
+                    expect(isAdminAlgo([adminAlias.charAt(0).toUpperCase() + adminAlias.slice(1)])).toBe(true);
+                    expect(isAdminAlgo([adminAlias.toLowerCase()])).toBe(true);
                     return true;
                 }
             ),
@@ -457,24 +466,24 @@ describe('EDGE CASES: Auth Property Regressions', () => {
     });
 
     it('isAdmin handles all known aliases', () => {
-        expect(isAdmin(['admin'])).toBe(true);
-        expect(isAdmin(['admins'])).toBe(true);
-        expect(isAdmin(['administrators'])).toBe(true);
-        expect(isAdmin(['Admin'])).toBe(true);
-        expect(isAdmin(['ADMIN'])).toBe(true);
-        expect(isAdmin(['user'])).toBe(false);
-        expect(isAdmin([])).toBe(false);
+        expect(isAdminAlgo(['admin'])).toBe(true);
+        expect(isAdminAlgo(['admins'])).toBe(true);
+        expect(isAdminAlgo(['administrators'])).toBe(true);
+        expect(isAdminAlgo(['Admin'])).toBe(true);
+        expect(isAdminAlgo(['ADMIN'])).toBe(true);
+        expect(isAdminAlgo(['user'])).toBe(false);
+        expect(isAdminAlgo([])).toBe(false);
     });
 
     it('isReadonly handles all known aliases', () => {
-        expect(isReadonly(['readonly'])).toBe(true);
-        expect(isReadonly(['read-only'])).toBe(true);
-        expect(isReadonly(['viewer'])).toBe(true);
-        expect(isReadonly(['viewers'])).toBe(true);
-        expect(isReadonly(['Readonly'])).toBe(true);
-        expect(isReadonly(['VIEWER'])).toBe(true);
-        expect(isReadonly(['user'])).toBe(false);
-        expect(isReadonly([])).toBe(false);
+        expect(isReadonlyAlgo(['readonly'])).toBe(true);
+        expect(isReadonlyAlgo(['read-only'])).toBe(true);
+        expect(isReadonlyAlgo(['viewer'])).toBe(true);
+        expect(isReadonlyAlgo(['viewers'])).toBe(true);
+        expect(isReadonlyAlgo(['Readonly'])).toBe(true);
+        expect(isReadonlyAlgo(['VIEWER'])).toBe(true);
+        expect(isReadonlyAlgo(['user'])).toBe(false);
+        expect(isReadonlyAlgo([])).toBe(false);
     });
 });
 
@@ -893,6 +902,133 @@ describe('PROPERTY: Real auth.js isAuthenticated invariants', () => {
                 }
             ),
             { numRuns: 50 }
+        );
+    });
+});
+
+// ============================================================================
+// PROPERTY: Real auth.js data roundtrip invariants
+// ============================================================================
+
+describe('PROPERTY: Real auth.js data roundtrip', () => {
+    beforeEach(() => {
+        _resetForTesting();
+        configure({
+            clientId: 'test-client',
+            cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
+            cognitoRegion: 'us-west-2',
+            tokenEndpoint: '/auth/token',
+            refreshEndpoint: '/auth/refresh',
+            logoutEndpoint: '/auth/logout',
+            sessionEndpoint: '/auth/session'
+        });
+    });
+
+    it('getUserEmail returns the email from setTokens for any valid email', () => {
+        fc.assert(
+            fc.property(fc.emailAddress(), (email) => {
+                const exp = Math.floor(Date.now() / 1000) + 3600;
+                setTokens({
+                    access_token: createTestJwt({ sub: 'u', client_id: 'test-client', exp }),
+                    id_token: createTestJwt({
+                        sub: 'u', email,
+                        aud: 'test-client',
+                        iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_t',
+                        exp
+                    })
+                });
+                return getUserEmail() === email;
+            }),
+            { numRuns: 100 }
+        );
+    });
+
+    it('getUserGroups returns the groups from setTokens', () => {
+        fc.assert(
+            fc.property(
+                fc.array(cognitoGroupArb, { minLength: 1, maxLength: 4 }),
+                (groups) => {
+                    const exp = Math.floor(Date.now() / 1000) + 3600;
+                    setTokens({
+                        access_token: createTestJwt({ sub: 'u', client_id: 'test-client', exp }),
+                        id_token: createTestJwt({
+                            sub: 'u', 'cognito:groups': groups,
+                            aud: 'test-client',
+                            iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_t',
+                            exp
+                        })
+                    });
+                    const retrieved = getUserGroups();
+                    // Same groups, same order
+                    return JSON.stringify(retrieved) === JSON.stringify(groups);
+                }
+            ),
+            { numRuns: 100 }
+        );
+    });
+
+    it('getAuthMethod returns the auth_method from setTokens', () => {
+        fc.assert(
+            fc.property(authMethodArb, (method) => {
+                const exp = Math.floor(Date.now() / 1000) + 3600;
+                setTokens({
+                    access_token: createTestJwt({ sub: 'u', client_id: 'test-client', exp }),
+                    id_token: createTestJwt({
+                        sub: 'u', aud: 'test-client',
+                        iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_t',
+                        exp
+                    }),
+                    auth_method: method
+                });
+                return getAuthMethod() === method;
+            }),
+            { numRuns: 50 }
+        );
+    });
+
+    it('isAdmin and isReadonly are never both true (real auth.js)', () => {
+        fc.assert(
+            fc.property(userGroupsArb, (groups) => {
+                const exp = Math.floor(Date.now() / 1000) + 3600;
+                setTokens({
+                    access_token: createTestJwt({ sub: 'u', client_id: 'test-client', exp }),
+                    id_token: createTestJwt({
+                        sub: 'u', 'cognito:groups': groups,
+                        aud: 'test-client',
+                        iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_t',
+                        exp
+                    })
+                });
+                return !(isAdmin() && isReadonly());
+            }),
+            { numRuns: 200 }
+        );
+    });
+
+    it('clearTokens always makes isAuthenticated false for any prior state', () => {
+        fc.assert(
+            fc.property(
+                fc.string({ minLength: 1, maxLength: 20 }),
+                fc.emailAddress(),
+                userGroupsArb,
+                authMethodArb,
+                (sub, email, groups, method) => {
+                    const exp = Math.floor(Date.now() / 1000) + 3600;
+                    setTokens({
+                        access_token: createTestJwt({ sub, client_id: 'test-client', exp }),
+                        id_token: createTestJwt({
+                            sub, email, 'cognito:groups': groups,
+                            aud: 'test-client',
+                            iss: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_t',
+                            exp
+                        }),
+                        auth_method: method
+                    });
+                    clearTokens();
+                    return isAuthenticated() === false;
+                }
+            ),
+            { numRuns: 100 }
         );
     });
 });

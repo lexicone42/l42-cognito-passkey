@@ -303,8 +303,8 @@ Each template has an accompanying test file:
 - `plugin/templates/admin-panel-pattern.test.js`
 - `plugin/templates/rbac-roles.property.test.js` (22 property-based tests)
 - `plugin/templates/version-consistency.test.js`
-- `plugin/templates/auto-refresh.test.js` (35 auto-refresh, fetchWithAuth, CSRF tests)
-- `plugin/templates/auth-properties.test.js` (48 auth property-based tests)
+- `plugin/templates/auto-refresh.test.js` (27 auto-refresh, fetchWithAuth, CSRF tests)
+- `plugin/templates/auth-properties.test.js` (53 auth property-based tests)
 - `plugin/templates/debug-diagnostics.test.js` (29 debug logging & diagnostics tests)
 - `plugin/templates/conditional-ui.test.js` (32 conditional UI / passkey autofill tests)
 - `plugin/templates/conditional-create.test.js` (23 conditional create / passkey upgrade tests)
