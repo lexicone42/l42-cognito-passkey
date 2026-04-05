@@ -1,6 +1,12 @@
 /**
  * L42 Cognito Passkey - Auto-Refresh, fetchWithAuth, and Session Expiry Tests (v0.9.0)
  *
+ * NOTE: Uses re-implemented functions (not real auth.js imports).
+ * Reason: These tests need to control server responses at different URLs
+ * (/auth/token vs /auth/refresh vs user API calls) with different timing.
+ * Converting requires a URL-routing fetch mock infrastructure that
+ * distinguishes token fetch, refresh, and application requests.
+ *
  * Tests:
  * - startAutoRefresh / stopAutoRefresh / isAutoRefreshActive
  * - Visibility API integration (pause on hidden tab)

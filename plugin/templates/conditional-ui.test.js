@@ -1,6 +1,12 @@
 /**
  * L42 Cognito Passkey - Conditional UI / Passkey Autofill Tests (v0.12.0)
  *
+ * NOTE: Uses re-implemented functions (not real auth.js imports).
+ * Reason: Tests require mocking navigator.credentials.get() with
+ * conditional mediation, AbortController integration, and Cognito
+ * API responses. The mock infrastructure simulates the full WebAuthn
+ * + Cognito challenge flow.
+ *
  * Tests:
  * - loginWithConditionalUI() with email (Mode A — single biometric prompt)
  * - loginWithConditionalUI() without email (Mode B — discovery flow)

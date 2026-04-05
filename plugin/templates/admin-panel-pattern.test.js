@@ -1,6 +1,11 @@
 /**
  * L42 Cognito Passkey - Admin Panel Pattern Tests
  *
+ * NOTE: Uses mock auth module (not real auth.js imports).
+ * Reason: Tests verify the admin panel UI integration pattern — how admin
+ * pages should check roles, display user info, and handle admin actions.
+ * The mock simulates the auth API surface, not auth internals.
+ *
  * Tests for admin panel functionality including:
  * - Access control (admin-only)
  * - User management operations

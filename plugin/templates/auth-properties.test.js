@@ -8,7 +8,7 @@
  * Properties tested:
  * 1. Token expiry: isTokenExpired → shouldRefreshToken (implication)
  * 2. isAdmin / isReadonly mutual exclusion
- * 3. Cookie domain safety with PUBLIC_SUFFIXES
+ * 3. (Removed: cookie domain tests — getCookieDomain removed in v0.15.0)
  * 4. OAuth state uniqueness (no collisions)
  * 5. UI_ONLY_hasRole singular/plural normalization consistency
  * 6. UNSAFE_decodeJwtPayload roundtrip
@@ -21,14 +21,18 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fc from 'fast-check';
+import {
+    UNSAFE_decodeJwtPayload,
+    isTokenExpired,
+    shouldRefreshToken,
+    generateCodeVerifier,
+    generateCodeChallenge
+} from '../../src/auth.js';
 
 // ============================================================================
-// Extracted logic from auth.js (tested against the same algorithms)
+// Test helpers
 // ============================================================================
 
-/**
- * JWT encoding/decoding - mirrors auth.js UNSAFE_decodeJwtPayload
- */
 function createTestJwt(claims) {
     const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
@@ -37,84 +41,11 @@ function createTestJwt(claims) {
     return `${header}.${payload}.test-signature`;
 }
 
-function UNSAFE_decodeJwtPayload(token) {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(base64));
-}
+// isTokenExpired, shouldRefreshToken, UNSAFE_decodeJwtPayload, UI_ONLY_hasRole,
+// generateCodeVerifier, generateCodeChallenge imported from real auth.js above.
 
-/**
- * Token expiry logic - mirrors auth.js
- */
-function isTokenExpired(tokens) {
-    try {
-        return Date.now() >= UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000;
-    } catch {
-        return true;
-    }
-}
-
-const REFRESH_CONFIG = {
-    password: { cookieMaxAge: 86400, refreshBefore: 300000 },
-    passkey: { cookieMaxAge: 2592000, refreshBefore: 3600000 }
-};
-
-function shouldRefreshToken(tokens, { handlerMode = false } = {}) {
-    if (!tokens || !tokens.id_token) return false;
-    if (!handlerMode && !tokens.refresh_token) return false;
-    try {
-        const exp = UNSAFE_decodeJwtPayload(tokens.id_token).exp * 1000;
-        const authMethod = tokens.auth_method || 'password';
-        const refreshConfig = REFRESH_CONFIG[authMethod] || REFRESH_CONFIG.password;
-        return Date.now() >= (exp - refreshConfig.refreshBefore);
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Cookie domain logic - mirrors auth.js getCookieDomain
- */
-const PUBLIC_SUFFIXES = [
-    'co.uk', 'org.uk', 'me.uk', 'ltd.uk', 'plc.uk',
-    'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au',
-    'com.br', 'net.br', 'org.br',
-    'co.jp', 'or.jp', 'ne.jp', 'ac.jp',
-    'co.nz', 'org.nz', 'net.nz',
-    'co.za', 'org.za', 'net.za',
-    'co.in', 'org.in', 'net.in',
-    'com.hk', 'org.hk', 'edu.hk',
-    'com.sg', 'org.sg', 'edu.sg',
-    'com.de',
-    'com.cn', 'net.cn', 'org.cn',
-    'com.tw', 'org.tw',
-    'com.mx', 'org.mx',
-    'com.ar', 'org.ar',
-    'co.kr', 'or.kr'
-];
-
-function getCookieDomain(hostname) {
-    if (hostname === 'localhost' || hostname === '127.0.0.1') return null;
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return null;
-
-    const parts = hostname.split('.');
-    const lastTwo = parts.slice(-2).join('.');
-
-    if (PUBLIC_SUFFIXES.includes(lastTwo)) {
-        if (parts.length < 3) return null;
-        return '.' + parts.slice(-3).join('.');
-    }
-
-    if (parts.length >= 2) {
-        return '.' + parts.slice(-2).join('.');
-    }
-
-    return null;
-}
-
-/**
- * isAdmin / isReadonly logic - mirrors auth.js
- */
+// isAdmin/isReadonly — the real auth.js versions read from internal state (getUserGroups).
+// These test versions take groups as a parameter to test the algorithm directly.
 function isAdmin(groups) {
     const lower = groups.map(g => g.toLowerCase());
     return lower.includes('admin') || lower.includes('admins') || lower.includes('administrators');
@@ -128,9 +59,9 @@ function isReadonly(groups) {
     return hasReadonly && !hasAdmin;
 }
 
-/**
- * UI_ONLY_hasRole logic - mirrors auth.js
- */
+// UI_ONLY_hasRole — the real auth.js version takes (role) and reads groups internally.
+// This test version takes (groups, role) to test the normalization algorithm directly
+// with property-based inputs. The algorithm is the same; the interface differs.
 function UI_ONLY_hasRole(groups, requiredRole) {
     const normalizedGroups = groups.map(g => g.toLowerCase());
     const normalizedRole = requiredRole.toLowerCase();
@@ -139,9 +70,7 @@ function UI_ONLY_hasRole(groups, requiredRole) {
            normalizedGroups.includes(normalizedRole.replace(/s$/, ''));
 }
 
-/**
- * OAuth state generation - mirrors auth.js
- */
+// generateOAuthState is private — tested as algorithm
 function generateOAuthState() {
     const array = new Uint8Array(32);
     crypto.getRandomValues(array);
@@ -180,12 +109,7 @@ const roleNameArb = fc.constantFrom(
     'reviewer', 'moderator'
 );
 
-/** Arbitrary for valid-looking hostnames */
-const hostnamePartArb = fc.stringMatching(/^[a-z0-9]{1,10}$/);
-
-const standardTldArb = fc.constantFrom('com', 'org', 'net', 'io', 'dev', 'app');
-
-const ccTldSuffixArb = fc.constantFrom(...PUBLIC_SUFFIXES);
+// Cookie domain arbitraries removed — getCookieDomain was removed from auth.js in v0.15.0
 
 // ============================================================================
 // PROPERTY: Token Expiry / shouldRefreshToken Relationship
@@ -212,38 +136,21 @@ describe('PROPERTY: Token Expiry Invariants', () => {
         );
     });
 
-    it('shouldRefreshToken is false when no refresh_token in standard mode', () => {
-        fc.assert(
-            fc.property(expArb, authMethodArb, (exp, authMethod) => {
-                const tokens = {
-                    id_token: createTestJwt({ sub: 'user1', exp }),
-                    access_token: createTestJwt({ sub: 'user1', exp }),
-                    // No refresh_token
-                    auth_method: authMethod
-                };
+    // "standard mode" tests removed — only handler mode exists since v0.15.0.
+    // shouldRefreshToken no longer checks for refresh_token (server holds it).
 
-                // Without refresh_token in non-handler mode, cannot refresh
-                expect(shouldRefreshToken(tokens, { handlerMode: false })).toBe(false);
-                return true;
-            }),
-            { numRuns: 100 }
-        );
-    });
-
-    it('shouldRefreshToken is true in handler mode even without refresh_token (if near expiry)', () => {
+    it('shouldRefreshToken works without client-side refresh_token (handler mode)', () => {
         fc.assert(
             fc.property(authMethodArb, (authMethod) => {
-                const refreshConfig = REFRESH_CONFIG[authMethod] || REFRESH_CONFIG.password;
-                // Create token that expires just inside the refresh window
-                const exp = Math.floor(Date.now() / 1000) + Math.floor(refreshConfig.refreshBefore / 2000);
+                // Token near expiry, no client-side refresh_token
+                const exp = Math.floor(Date.now() / 1000) + 60; // 1 minute
                 const tokens = {
                     id_token: createTestJwt({ sub: 'user1', exp }),
                     access_token: createTestJwt({ sub: 'user1', exp }),
-                    // No refresh_token, but handler mode
                     auth_method: authMethod
                 };
-
-                expect(shouldRefreshToken(tokens, { handlerMode: true })).toBe(true);
+                // Handler mode: server holds refresh_token, client doesn't need it
+                expect(shouldRefreshToken(tokens)).toBe(true);
                 return true;
             }),
             { numRuns: 50 }
@@ -359,124 +266,8 @@ describe('PROPERTY: isAdmin / isReadonly Mutual Exclusion', () => {
     });
 });
 
-// ============================================================================
-// PROPERTY: Cookie Domain Safety
-// ============================================================================
-
-describe('PROPERTY: Cookie Domain Safety', () => {
-    it('never returns a PUBLIC_SUFFIX as the cookie domain', () => {
-        fc.assert(
-            fc.property(
-                hostnamePartArb,
-                ccTldSuffixArb,
-                (sub, suffix) => {
-                    const hostname = `${sub}.${suffix}`;
-                    const domain = getCookieDomain(hostname);
-
-                    if (domain !== null) {
-                        // The domain without leading dot should not be a public suffix
-                        const domainWithoutDot = domain.replace(/^\./, '');
-                        expect(PUBLIC_SUFFIXES).not.toContain(domainWithoutDot);
-                    }
-                    return true;
-                }
-            ),
-            { numRuns: 200 }
-        );
-    });
-
-    it('ccTLD domains get 3-part cookie domain', () => {
-        fc.assert(
-            fc.property(
-                hostnamePartArb,
-                hostnamePartArb,
-                ccTldSuffixArb,
-                (sub1, sub2, suffix) => {
-                    const hostname = `${sub1}.${sub2}.${suffix}`;
-                    const domain = getCookieDomain(hostname);
-
-                    if (domain !== null) {
-                        // Should be .sub2.suffix (3 parts)
-                        const parts = domain.replace(/^\./, '').split('.');
-                        expect(parts.length).toBe(suffix.split('.').length + 1);
-                    }
-                    return true;
-                }
-            ),
-            { numRuns: 200 }
-        );
-    });
-
-    it('standard TLD domains get 2-part cookie domain', () => {
-        fc.assert(
-            fc.property(
-                hostnamePartArb,
-                hostnamePartArb,
-                standardTldArb,
-                (sub, domain, tld) => {
-                    const hostname = `${sub}.${domain}.${tld}`;
-                    const cookieDomain = getCookieDomain(hostname);
-
-                    if (cookieDomain !== null) {
-                        // Should be .domain.tld (2 parts)
-                        const parts = cookieDomain.replace(/^\./, '').split('.');
-                        expect(parts.length).toBe(2);
-                    }
-                    return true;
-                }
-            ),
-            { numRuns: 200 }
-        );
-    });
-
-    it('cookie domain always starts with a dot', () => {
-        fc.assert(
-            fc.property(
-                hostnamePartArb,
-                hostnamePartArb,
-                standardTldArb,
-                (sub, domain, tld) => {
-                    const hostname = `${sub}.${domain}.${tld}`;
-                    const cookieDomain = getCookieDomain(hostname);
-
-                    if (cookieDomain !== null) {
-                        expect(cookieDomain.startsWith('.')).toBe(true);
-                    }
-                    return true;
-                }
-            ),
-            { numRuns: 100 }
-        );
-    });
-
-    it('localhost and 127.0.0.1 always return null', () => {
-        expect(getCookieDomain('localhost')).toBeNull();
-        expect(getCookieDomain('127.0.0.1')).toBeNull();
-    });
-
-    it('IP addresses return null', () => {
-        fc.assert(
-            fc.property(
-                fc.integer({ min: 1, max: 255 }),
-                fc.integer({ min: 0, max: 255 }),
-                fc.integer({ min: 0, max: 255 }),
-                fc.integer({ min: 0, max: 255 }),
-                (a, b, c, d) => {
-                    const ip = `${a}.${b}.${c}.${d}`;
-                    expect(getCookieDomain(ip)).toBeNull();
-                    return true;
-                }
-            ),
-            { numRuns: 50 }
-        );
-    });
-
-    it('bare public suffixes return null (cannot set domain cookie)', () => {
-        for (const suffix of PUBLIC_SUFFIXES) {
-            expect(getCookieDomain(suffix)).toBeNull();
-        }
-    });
-});
+// Cookie Domain Safety tests removed — getCookieDomain() and PUBLIC_SUFFIXES
+// were removed from auth.js in v0.15.0 (handler-only mode, server handles cookies).
 
 // ============================================================================
 // PROPERTY: OAuth State Uniqueness
@@ -649,21 +440,7 @@ describe('EDGE CASES: Auth Property Regressions', () => {
         expect(isTokenExpired({ id_token: 'no-dots' })).toBe(true);
     });
 
-    it('getCookieDomain handles edge case domains', () => {
-        // Single-part hostname
-        expect(getCookieDomain('localhost')).toBeNull();
-
-        // Public suffix without subdomain
-        expect(getCookieDomain('co.uk')).toBeNull();
-
-        // Deeply nested subdomain
-        const domain = getCookieDomain('a.b.c.d.example.com');
-        expect(domain).toBe('.example.com');
-
-        // ccTLD with proper subdomain
-        const ukDomain = getCookieDomain('app.example.co.uk');
-        expect(ukDomain).toBe('.example.co.uk');
-    });
+    // getCookieDomain edge case test removed — function removed in v0.15.0
 
     it('UI_ONLY_hasRole with edge case inputs', () => {
         // Role ending in 's' that is not a plural
@@ -701,29 +478,23 @@ describe('EDGE CASES: Auth Property Regressions', () => {
 // SHARP-EDGES: Token Validation Missing Claims (S2)
 // ============================================================================
 
-/**
- * Mirrors auth.js validateTokenClaims() — must match exactly.
- * Tests the invariant that tokens missing critical claims should NOT pass.
- */
+// validateTokenClaims is private in auth.js — tested through isAuthenticated()
+// in token-validation.test.js. This section tests the same invariants using
+// a local mirror (the function takes a config parameter, unlike the real one).
 function validateTokenClaims(tokens, testConfig) {
     if (!tokens || !tokens.id_token) return false;
-
     try {
         const claims = UNSAFE_decodeJwtPayload(tokens.id_token);
-
         if (claims.iss) {
             const expectedIssPrefix = 'https://cognito-idp.' + testConfig.cognitoRegion + '.amazonaws.com/';
             if (!claims.iss.startsWith(expectedIssPrefix)) return false;
         }
-
         const tokenClientId = claims.aud || claims.client_id;
         if (!tokenClientId) return false;
         if (tokenClientId !== testConfig.clientId) return false;
-
         if (!claims.exp || typeof claims.exp !== 'number') return false;
         const maxReasonableExp = Date.now() / 1000 + (30 * 24 * 60 * 60);
         if (claims.exp > maxReasonableExp) return false;
-
         return true;
     } catch {
         return false;
@@ -897,34 +668,7 @@ describe('SHARP-EDGE: Rate Limiting Config Boundaries (S3)', () => {
 // PROPERTY: PKCE (Proof Key for Code Exchange) Invariants
 // ============================================================================
 
-/**
- * Mirrors auth.js generateCodeVerifier — 48 random bytes → base64url (no padding).
- * RFC 7636 §4.1: code_verifier = high-entropy cryptographic random string
- * using unreserved characters [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~",
- * with length between 43 and 128 characters.
- */
-function generateCodeVerifier() {
-    const array = new Uint8Array(48);
-    crypto.getRandomValues(array);
-    return btoa(String.fromCharCode(...array))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=/g, '');
-}
-
-/**
- * Mirrors auth.js generateCodeChallenge — SHA-256(verifier) → base64url (no padding).
- * RFC 7636 §4.2: code_challenge = BASE64URL(SHA256(code_verifier))
- */
-async function generateCodeChallenge(verifier) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(verifier);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return btoa(String.fromCharCode(...new Uint8Array(hash)))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=/g, '');
-}
+// generateCodeVerifier and generateCodeChallenge imported from real auth.js above.
 
 /** Base64url alphabet regex — no +, /, or = characters */
 const BASE64URL_RE = /^[A-Za-z0-9\-_]+$/;

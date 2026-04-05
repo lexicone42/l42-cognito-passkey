@@ -1,6 +1,10 @@
 /**
  * L42 Cognito Passkey - Conditional Create / Passkey Upgrade Tests (v0.12.0)
  *
+ * NOTE: Uses re-implemented functions (not real auth.js imports).
+ * Reason: Tests require mocking navigator.credentials.create() with
+ * conditional create mediation and Cognito registration API responses.
+ *
  * Tests:
  * - upgradeToPasskey() success flow
  * - Silent failure (returns false, doesn't throw)

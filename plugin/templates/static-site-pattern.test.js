@@ -1,6 +1,11 @@
 /**
  * L42 Cognito Passkey - Static Site Pattern Tests
  *
+ * NOTE: Uses mock auth module (not real auth.js imports).
+ * Reason: Tests verify the UI integration pattern — how a static site
+ * should wire up auth state to DOM elements. The mock simulates the auth
+ * API surface; the test validates the integration pattern, not auth internals.
+ *
  * Unit tests for the static site authentication pattern.
  * Uses a mock auth module to test UI behavior without real Cognito calls.
  *
