@@ -62,7 +62,7 @@ export function createMockAuth({
             if (password === 'correct-password') {
                 _authenticated = true;
                 _email = inputEmail;
-                _listeners.forEach(cb => cb(true));
+                _listeners.forEach(cb => { cb(true); });
                 return { success: true };
             }
             throw new Error('Invalid credentials');
@@ -70,7 +70,7 @@ export function createMockAuth({
         loginWithPasskey: vi.fn(async (inputEmail) => {
             _authenticated = true;
             _email = inputEmail;
-            _listeners.forEach(cb => cb(true));
+            _listeners.forEach(cb => { cb(true); });
             return { success: true };
         }),
         loginWithHostedUI: vi.fn((emailHint) => {
@@ -80,13 +80,13 @@ export function createMockAuth({
         // Logout
         logout: vi.fn(() => {
             _authenticated = false;
-            _listeners.forEach(cb => cb(false));
+            _listeners.forEach(cb => { cb(false); });
         }),
 
         // OAuth callback
         exchangeCodeForTokens: vi.fn(async () => {
             _authenticated = true;
-            _listeners.forEach(cb => cb(true));
+            _listeners.forEach(cb => { cb(true); });
             return { success: true };
         }),
 
@@ -102,7 +102,7 @@ export function createMockAuth({
         // Test helpers (not part of real auth module)
         _setAuthenticated: (val) => {
             _authenticated = val;
-            _listeners.forEach(cb => cb(val));
+            _listeners.forEach(cb => { cb(val); });
         },
         _setGroups: (newGroups) => {
             _groups = newGroups;

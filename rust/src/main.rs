@@ -41,6 +41,14 @@ async fn main() {
 
     let config = Config::from_env().expect("Failed to load configuration");
 
+    // Fail-fast on weak session secret
+    if config.session_secret.len() < 32 {
+        panic!(
+            "SESSION_SECRET must be at least 32 characters — \
+             short secrets weaken HMAC session cookie signing."
+        );
+    }
+
     // Security configuration warnings
     if !config.session_https_only && config.frontend_url.starts_with("https://") {
         tracing::warn!(
@@ -49,10 +57,11 @@ async fn main() {
         );
     }
     if config.callback_use_origin && config.callback_allowed_origins.is_empty() {
-        tracing::warn!(
+        panic!(
             "CALLBACK_USE_ORIGIN is true but CALLBACK_ALLOWED_ORIGINS is empty — \
-             any X-Forwarded-Host will be accepted. Set CALLBACK_ALLOWED_ORIGINS to restrict \
-             allowed origins (comma-separated, e.g. 'https://app1.example.com,https://app2.example.com')."
+             this allows open redirects via X-Forwarded-Host injection. \
+             Set CALLBACK_ALLOWED_ORIGINS (comma-separated, e.g. \
+             'https://app1.example.com,https://app2.example.com')."
         );
     }
 

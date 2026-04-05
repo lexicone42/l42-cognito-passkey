@@ -87,8 +87,9 @@ pub async fn authorize(
                 }
                 Err(e) => {
                     tracing::error!(resource_id = %id, error = %e, "Entity lookup failed");
-                    // Fail-closed: remove untrusted client-provided owner
-                    resolved.owner = None;
+                    // Fail-closed: deny the request entirely rather than proceeding
+                    // without ownership verification.
+                    return Err(AppError::Internal("Entity lookup failed".into()));
                 }
             }
             Some(resolved)

@@ -133,7 +133,7 @@ mod tests {
             // We'll override the methods that build URLs.
             cognito_domain: url.to_string(),
             cognito_region: "us-west-2".into(),
-            session_secret: "test-secret".into(),
+            session_secret: "test-secret-key-at-least-32-chars!".into(),
             frontend_url: "http://localhost:3000".into(),
             port: 3001,
             session_backend: "memory".into(),

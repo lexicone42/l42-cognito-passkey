@@ -133,7 +133,7 @@ impl Config {
             cognito_user_pool_id: "us-west-2_test123".into(),
             cognito_domain: "test.auth.us-west-2.amazoncognito.com".into(),
             cognito_region: "us-west-2".into(),
-            session_secret: "test-secret-key".into(),
+            session_secret: "test-secret-key-at-least-32-chars!".into(),
             frontend_url: "http://localhost:3000".into(),
             port: 3001,
             session_backend: "memory".into(),

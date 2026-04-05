@@ -59,7 +59,8 @@ pub fn create_app(state: Arc<AppState>) -> Router {
             axum::http::header::CONTENT_TYPE,
             axum::http::header::AUTHORIZATION,
             axum::http::HeaderName::from_static("x-l42-csrf"),
-            axum::http::HeaderName::from_static("x-service-token"),
+            // x-service-token intentionally NOT in CORS allowed headers —
+            // service tokens are for backend-to-backend requests only, not browsers.
         ])
         .allow_credentials(true);
 

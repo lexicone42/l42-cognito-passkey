@@ -1,0 +1,54 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
+	"assist": { "actions": { "source": { "organizeImports": "off" } } },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"correctness": {
+				"noUnusedVariables": "warn",
+				"noUnusedImports": "warn",
+				"noInnerDeclarations": "off"
+			},
+			"suspicious": {
+				"noExplicitAny": "off",
+				"noVar": "off"
+			},
+			"style": {
+				"useConst": "off",
+				"noParameterAssign": "off",
+				"useDefaultParameterLast": "off",
+				"useTemplate": "off"
+			},
+			"complexity": {
+				"noForEach": "off",
+				"noStaticOnlyClass": "off",
+				"noArguments": "off"
+			}
+		}
+	},
+	"formatter": {
+		"enabled": false
+	},
+	"overrides": [
+		{
+			"includes": ["**/plugin/templates/**/*.test.js"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExportsInTest": "off"
+					}
+				}
+			}
+		}
+	],
+	"files": {
+		"includes": [
+			"**/src/**/*.js",
+			"**/plugin/**/*.js",
+			"!**/dist/**",
+			"!**/node_modules/**",
+			"!**/examples/**"
+		]
+	}
+}

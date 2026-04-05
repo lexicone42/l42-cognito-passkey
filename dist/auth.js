@@ -419,7 +419,9 @@ function logSecurityEvent({
     };
 
     // Remove undefined fields
-    Object.keys(event).forEach(key => event[key] === undefined && delete event[key]);
+    for (var key of Object.keys(event)) {
+        if (event[key] === undefined) delete event[key];
+    }
 
     if (logger === 'console') {
         console.log('[L42-AUTH-OCSF]', JSON.stringify(event));
@@ -1801,9 +1803,12 @@ export async function loginWithConditionalUI(options = {}) {
     _conditionalAbortController = controller;
 
     // Merge user signal with internal controller
-    var signal = options.signal
-        ? AbortSignal.any([options.signal, controller.signal])
-        : controller.signal;
+    var signal;
+    if (options.signal && typeof AbortSignal.any === 'function') {
+        signal = AbortSignal.any([options.signal, controller.signal]);
+    } else {
+        signal = controller.signal;
+    }
 
     var rpId = config.relyingPartyId || window.location.hostname;
 
@@ -1889,7 +1894,7 @@ export async function loginWithConditionalUI(options = {}) {
         // Mode B: Discovery flow — local challenge, then re-auth
         try {
             var challenge = crypto.getRandomValues(new Uint8Array(32));
-            var credential = await navigator.credentials.get({
+            var discoveryCredential = await navigator.credentials.get({
                 publicKey: {
                     challenge: challenge.buffer,
                     rpId: rpId,
@@ -1903,7 +1908,7 @@ export async function loginWithConditionalUI(options = {}) {
             _conditionalAbortController = null;
 
             // Extract username from userHandle
-            var userHandle = credential.response.userHandle;
+            var userHandle = discoveryCredential.response.userHandle;
             if (!userHandle || userHandle.byteLength === 0) {
                 throw new Error('No user handle returned — credential may not be discoverable');
             }
@@ -2148,7 +2153,7 @@ export async function exchangeCodeForTokens(code, state) {
  *
  * @returns {void|Promise<void>}
  */
-export function logout() {
+export async function logout() {
     abortConditionalRequest();
     debugLog('auth', 'logout');
     const email = getUserEmail();
@@ -2156,8 +2161,8 @@ export function logout() {
     // Clear local cache first (immediate UI update)
     clearTokens();
 
-    // Call server endpoint in background
-    return logoutViaHandler(email);
+    // Call server endpoint to destroy server session
+    await logoutViaHandler(email);
 }
 
 /**

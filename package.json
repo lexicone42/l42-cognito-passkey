@@ -25,7 +25,7 @@
   "scripts": {
     "test": "vitest run plugin/templates/",
     "test:watch": "vitest plugin/templates/",
-    "lint": "echo \"No linter configured yet\"",
+    "lint": "biome lint src/ plugin/",
     "validate-docs": "node scripts/validate-docs.js",
     "check-dist": "node scripts/check-dist-sync.js",
     "sync-dist": "node scripts/check-dist-sync.js --fix",
@@ -69,6 +69,7 @@
     }
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
     "@cedar-policy/cedar-wasm": "^4.9.1",
     "fast-check": "^4.6.0",
     "jsdom": "^29.0.1",
