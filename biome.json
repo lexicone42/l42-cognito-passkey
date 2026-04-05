@@ -18,12 +18,15 @@
 				"useConst": "off",
 				"noParameterAssign": "off",
 				"useDefaultParameterLast": "off",
-				"useTemplate": "off"
+				"useTemplate": "off",
+				"useExponentiationOperator": "off"
 			},
 			"complexity": {
 				"noForEach": "off",
 				"noStaticOnlyClass": "off",
-				"noArguments": "off"
+				"noArguments": "off",
+				"useOptionalChain": "off",
+				"useArrowFunction": "off"
 			}
 		}
 	},

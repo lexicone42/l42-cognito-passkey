@@ -953,26 +953,7 @@ export function shouldRefreshToken(tokens) {
     }
 }
 
-/**
- * Detect auth method from token claims (for migration from older versions).
- * @param {Object} tokens - Tokens object
- * @returns {string} Detected auth method ('password' or 'passkey')
- */
-function detectAuthMethod(tokens) {
-    if (tokens.auth_method) return tokens.auth_method;
 
-    try {
-        const claims = UNSAFE_decodeJwtPayload(tokens.id_token);
-        const amr = claims.amr || [];
-        if (amr.includes('webauthn') || amr.includes('mfa')) {
-            return 'passkey';
-        }
-    } catch {
-        // Ignore decode errors
-    }
-
-    return 'password';
-}
 
 /**
  * Refresh tokens using Cognito refresh token flow.
@@ -3091,7 +3072,7 @@ export async function fetchWithAuth(url, options = {}) {
                     'Authorization': `Bearer ${freshTokens.access_token}`
                 }
             });
-        } catch (e) {
+        } catch {
             clearTokens();
             notifySessionExpired('Server returned 401 and refresh failed');
             throw new Error('Session expired. Please log in again.');
