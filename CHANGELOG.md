@@ -4,7 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [0.21.1] - 2026-04-05
 
-_Release notes pending._
+### Fixed
+
+- **Doc/version drift** — synced stale version references and test counts across
+  `CLAUDE.md`, `plugin/CLAUDE.md`, and `docs/release.md`.
+
+### Changed
+
+- Test-count bookkeeping updated to 694 vitest + 164 cargo.
 
 ## [0.21.0] - 2026-04-05
 

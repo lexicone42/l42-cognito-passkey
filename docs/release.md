@@ -4,7 +4,7 @@ Release process and version upgrade guide.
 
 ## Current Version
 
-**0.21.0** — 694 vitest + 164 cargo tests
+**0.21.1** — 713 vitest + 164 cargo tests
 
 ## Release Process
 
@@ -112,14 +112,34 @@ The v1.0 security hardening (completed in v0.19.0) addressed:
 - **CALLBACK_ALLOWED_ORIGINS**: Validates `X-Forwarded-Host` when multi-origin enabled
 - **Startup security warnings**: HTTPS_ONLY mismatch detection
 
+### Design-review hardening (post-0.21.1)
+
+A seven-lens design review drove a round of pre-1.0 fixes:
+
+- **`SessionBackend::save/delete` return `Result`** — persistence failures no
+  longer masquerade as a successful login/logout (500, no phantom cookie).
+- **`AuthError` taxonomy** — stable `.code` on every failure; internal
+  message-sniffing removed; WebAuthn cancellation no longer counts as a failed
+  login attempt.
+- **Sync auth-state no longer false-negatives on a timer** — `getCached()`
+  returns last-known state; JWT `exp` is the validity authority. New `hydrate()`
+  for cold page loads.
+- **Refresh token never persists client-side** — stripped after the server
+  session is created; login broadcasts state only after persistence succeeds.
+- **S1 strict ownership** (`ENTITY_STRICT_OWNERSHIP`) — `:own` actions on
+  untracked resources fail closed instead of sailing past the Cedar forbid.
+- **Backend-owned OAuth flow** (`/auth/login` + `loginEndpoint`) — `state`
+  validated server-side, PKCE verifier supplied at exchange.
+- **Release pipeline** — placeholder notes are never published; existing
+  releases are updated in place; `sync-version.js` fails loudly on drift.
+
 ### Remaining for v1.0
 
-- TypeScript definitions sync (`auth.d.ts`)
-- Final documentation consolidation
+- TypeScript definitions parity check (`auth.d.ts` ↔ exports)
+- Curate the public export surface for a 1.0 freeze
 
 ### Post-v1.0 Roadmap
 
-- EntityProvider for trusted ownership (closes S1 gap)
 - FIDO MDS integration (AAGUID → authenticator metadata)
 - Semgrep rules for integration feedback
 - CDK stack for Rust Lambda deployment

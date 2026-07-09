@@ -15,6 +15,7 @@ pub async fn exchange_code_for_tokens(
     config: &Config,
     code: &str,
     redirect_uri: &str,
+    code_verifier: Option<&str>,
 ) -> Result<HashMap<String, Value>, CognitoError> {
     let mut params = vec![
         ("grant_type", "authorization_code".to_string()),
@@ -25,6 +26,12 @@ pub async fn exchange_code_for_tokens(
 
     if !config.cognito_client_secret.is_empty() {
         params.push(("client_secret", config.cognito_client_secret.clone()));
+    }
+
+    // PKCE: send the verifier when the authorize request carried a challenge
+    // (backend-initiated flow). Cognito returns invalid_grant otherwise.
+    if let Some(verifier) = code_verifier {
+        params.push(("code_verifier", verifier.to_string()));
     }
 
     let resp = http_client
@@ -123,16 +130,14 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_config_with_url(server_url: &str) -> Config {
-        // Parse the server URL to extract the host:port for the domain
-        let url = server_url.strip_prefix("http://").unwrap_or(server_url);
         Config {
             cognito_client_id: "test-client-id".into(),
             cognito_client_secret: String::new(),
             cognito_user_pool_id: "us-west-2_test123".into(),
-            // wiremock uses http, but our config builds https URLs.
-            // We'll override the methods that build URLs.
-            cognito_domain: url.to_string(),
+            cognito_domain: "test.auth.us-west-2.amazoncognito.com".into(),
             cognito_region: "us-west-2".into(),
+            // COGNITO_ENDPOINT override points the real URL builders at wiremock.
+            cognito_endpoint: server_url.to_string(),
             session_secret: "test-secret-key-at-least-32-chars!".into(),
             frontend_url: "http://localhost:3000".into(),
             port: 3001,
@@ -149,17 +154,17 @@ mod tests {
             service_token: None,
             additional_audience: Vec::new(),
             entity_table: None,
+            entity_strict_ownership: false,
         }
     }
 
-    // Note: wiremock tests use the mock server URL directly rather than going
-    // through Config's derived URLs, because Config builds https:// URLs but
-    // wiremock serves http://. Full integration tests in Phase 4 will test
-    // the real URL construction.
+    // These tests exercise the REAL client functions by pointing Config's URL
+    // builders at wiremock via the COGNITO_ENDPOINT override (`cognito_endpoint`).
 
     #[tokio::test]
     async fn test_exchange_code_success() {
         let server = MockServer::start().await;
+        let config = test_config_with_url(&server.uri());
 
         Mock::given(method("POST"))
             .and(path("/oauth2/token"))
@@ -172,28 +177,54 @@ mod tests {
             .await;
 
         let client = reqwest::Client::new();
-        // Call directly with the mock URL
-        let resp = client
-            .post(format!("{}/oauth2/token", server.uri()))
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("client_id", "test-client-id"),
-                ("code", "auth-code-123"),
-                ("redirect_uri", "http://localhost:3000/auth/callback"),
-            ])
-            .send()
-            .await
-            .unwrap();
+        // Call the REAL function under test.
+        let tokens = exchange_code_for_tokens(
+            &client,
+            &config,
+            "auth-code-123",
+            "http://localhost:3000/auth/callback",
+            Some("verifier-abc"),
+        )
+        .await
+        .expect("exchange should succeed");
 
-        let tokens: HashMap<String, Value> = resp.json().await.unwrap();
         assert_eq!(tokens["access_token"], "at-new");
         assert_eq!(tokens["id_token"], "it-new");
         assert_eq!(tokens["refresh_token"], "rt-new");
     }
 
     #[tokio::test]
-    async fn test_cognito_request_success() {
+    async fn test_exchange_code_sends_verifier() {
+        use wiremock::matchers::body_string_contains;
         let server = MockServer::start().await;
+        let config = test_config_with_url(&server.uri());
+
+        // Assert the PKCE verifier is actually included in the form body.
+        Mock::given(method("POST"))
+            .and(path("/oauth2/token"))
+            .and(body_string_contains("code_verifier=verifier-abc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at", "id_token": "it"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let result = exchange_code_for_tokens(
+            &client,
+            &config,
+            "code",
+            "http://localhost/cb",
+            Some("verifier-abc"),
+        )
+        .await;
+        assert!(result.is_ok(), "verifier must be sent so the mock matches");
+    }
+
+    #[tokio::test]
+    async fn test_refresh_tokens_success() {
+        let server = MockServer::start().await;
+        let config = test_config_with_url(&server.uri());
 
         Mock::given(method("POST"))
             .and(header(
@@ -210,31 +241,17 @@ mod tests {
             .await;
 
         let client = reqwest::Client::new();
-        let body = serde_json::json!({
-            "AuthFlow": "REFRESH_TOKEN_AUTH",
-            "ClientId": "test-client-id",
-            "AuthParameters": {"REFRESH_TOKEN": "rt-123"}
-        });
-
-        let resp = client
-            .post(format!("{}/", server.uri()))
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .header(
-                "X-Amz-Target",
-                "AWSCognitoIdentityProviderService.InitiateAuth",
-            )
-            .json(&body)
-            .send()
+        // Call the REAL refresh_tokens function.
+        let data = refresh_tokens(&client, &config, "rt-123")
             .await
-            .unwrap();
-
-        let data: Value = resp.json().await.unwrap();
+            .expect("refresh should succeed");
         assert_eq!(data["AuthenticationResult"]["AccessToken"], "at-refreshed");
     }
 
     #[tokio::test]
-    async fn test_cognito_request_error_type() {
+    async fn test_refresh_tokens_error_maps_to_cognito_error() {
         let server = MockServer::start().await;
+        let config = test_config_with_url(&server.uri());
 
         Mock::given(method("POST"))
             .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
@@ -245,20 +262,44 @@ mod tests {
             .await;
 
         let client = reqwest::Client::new();
-        // Build a config that points to the mock server
-        let _config = test_config_with_url(&server.uri());
-
-        // Call directly against mock server to test error parsing
-        let resp = client
-            .post(format!("{}/", server.uri()))
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .json(&serde_json::json!({"test": true}))
-            .send()
+        let err = refresh_tokens(&client, &config, "rt-revoked")
             .await
-            .unwrap();
+            .expect_err("revoked refresh token must be an error");
+        match err {
+            CognitoError::CognitoError(msg) => {
+                assert!(msg.contains("revoked"), "got: {msg}");
+            }
+            other => panic!("expected CognitoError, got {other:?}"),
+        }
+    }
 
-        let data: Value = resp.json().await.unwrap();
-        assert!(data.get("__type").is_some());
-        assert_eq!(data["message"], "Refresh Token has been revoked");
+    #[tokio::test]
+    async fn test_refresh_omitting_refresh_token_is_rotation_signal() {
+        // Cognito omits RefreshToken from a refresh response unless it rotated.
+        // The refresh handler must preserve the old one in that case (v0.21
+        // rotation-preservation fix). This test pins the wire behavior the
+        // handler depends on: a refresh response with no RefreshToken field.
+        let server = MockServer::start().await;
+        let config = test_config_with_url(&server.uri());
+
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "AuthenticationResult": {
+                    "AccessToken": "at2",
+                    "IdToken": "it2"
+                    // no RefreshToken -> caller keeps the existing one
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let data = refresh_tokens(&client, &config, "rt-keep").await.unwrap();
+        let result = &data["AuthenticationResult"];
+        assert_eq!(result["AccessToken"], "at2");
+        assert!(
+            result.get("RefreshToken").is_none(),
+            "Cognito omits RefreshToken when it did not rotate"
+        );
     }
 }

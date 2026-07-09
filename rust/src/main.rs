@@ -82,8 +82,15 @@ async fn main() {
                     Some(state)
                 }
                 Err(e) => {
-                    tracing::error!("Cedar init failed (running without authorization): {}", e);
-                    None
+                    // Schema/policies are present but invalid — this is a
+                    // misconfiguration, not an intentional no-Cedar deployment.
+                    // Fail fast rather than booting an authorizer that returns
+                    // 503 on every request for the life of the process.
+                    panic!(
+                        "Cedar schema/policies exist but failed to load: {e}. \
+                         Fix the schema/policies, or remove them to run without \
+                         authorization."
+                    );
                 }
             }
         } else {
@@ -161,6 +168,21 @@ async fn main() {
         }
         None
     };
+
+    // Strict ownership: report the posture so a deployer sees which mode is live.
+    if config.entity_strict_ownership {
+        tracing::info!(
+            "ENTITY_STRICT_OWNERSHIP enabled — `:own` actions are denied unless the \
+             entity provider positively confirms ownership."
+        );
+    } else if cedar.is_some() {
+        tracing::warn!(
+            "ENTITY_STRICT_OWNERSHIP is off — `:own` actions on resources the entity \
+             provider does not track (or when no provider is set) fall through to Cedar \
+             without server-side ownership proof. Set ENTITY_STRICT_OWNERSHIP=true to \
+             fail closed. This will become the default at 1.0."
+        );
+    }
 
     if let Some(ref token) = config.service_token
         && token.len() < 32

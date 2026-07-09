@@ -32,6 +32,17 @@ pub struct Config {
     /// When set, the `/auth/authorize` endpoint queries this table to verify
     /// `resource.owner` instead of trusting the client-provided value.
     pub entity_table: Option<String>,
+    /// Strict ownership enforcement for `:own` actions. When true, an `:own`
+    /// action is denied unless the entity provider can positively confirm the
+    /// principal owns the resource — untracked resources and requests with no
+    /// entity provider configured are denied rather than trusting the client.
+    /// Defaults to false for backward compatibility; will become the default
+    /// at 1.0. Env: `ENTITY_STRICT_OWNERSHIP`.
+    pub entity_strict_ownership: bool,
+    /// Override base URL for Cognito IDP + token endpoints (test only — points
+    /// the real `refresh_tokens`/`exchange_code_for_tokens` at a mock server).
+    /// Empty in production. Env: `COGNITO_ENDPOINT`.
+    pub cognito_endpoint: String,
 }
 
 impl Config {
@@ -97,6 +108,10 @@ impl Config {
                 .filter(|s| !s.is_empty())
                 .collect(),
             entity_table: env::var("ENTITY_TABLE").ok().filter(|s| !s.is_empty()),
+            entity_strict_ownership: env::var("ENTITY_STRICT_OWNERSHIP")
+                .map(|v| v == "true" || v == "1" || v == "True")
+                .unwrap_or(false),
+            cognito_endpoint: env::var("COGNITO_ENDPOINT").unwrap_or_default(),
         })
     }
 
@@ -115,11 +130,17 @@ impl Config {
 
     /// Cognito IDP endpoint for InitiateAuth etc.
     pub fn cognito_idp_url(&self) -> String {
+        if !self.cognito_endpoint.is_empty() {
+            return format!("{}/", self.cognito_endpoint.trim_end_matches('/'));
+        }
         format!("https://cognito-idp.{}.amazonaws.com/", self.cognito_region)
     }
 
     /// Cognito OAuth2 token endpoint.
     pub fn cognito_token_url(&self) -> String {
+        if !self.cognito_endpoint.is_empty() {
+            return format!("{}/oauth2/token", self.cognito_endpoint.trim_end_matches('/'));
+        }
         format!("https://{}/oauth2/token", self.cognito_domain)
     }
 }
@@ -149,6 +170,8 @@ impl Config {
             service_token: None,
             additional_audience: Vec::new(),
             entity_table: None,
+            entity_strict_ownership: false,
+            cognito_endpoint: String::new(),
         }
     }
 }
@@ -192,6 +215,7 @@ mod tests {
         assert_eq!(cfg.cookie_domain, None);
         assert_eq!(cfg.auth_path_prefix, "/auth");
         assert_eq!(cfg.entity_table, None);
+        assert!(!cfg.entity_strict_ownership);
     }
 
     #[test]

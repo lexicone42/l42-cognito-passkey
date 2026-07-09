@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API documentation for L42 Cognito Passkey (0.20.0).
+Complete API documentation for L42 Cognito Passkey (0.21.1).
 
 ## Configuration
 
@@ -72,7 +72,7 @@ Returns `boolean` — whether `configure()` has been called.
 
 ### VERSION
 
-Library version string (`'0.20.0'`).
+Library version string (`'0.21.1'`).
 
 ## Authentication State
 

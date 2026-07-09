@@ -12,7 +12,7 @@ use aws_sdk_dynamodb::Client;
 use aws_sdk_dynamodb::types::AttributeValue;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{SessionBackend, SessionData};
+use super::{SessionBackend, SessionData, SessionError};
 
 const MAX_AGE_SECS: u64 = 30 * 24 * 3600; // 30 days
 
@@ -73,23 +73,19 @@ impl SessionBackend for DynamoDbBackend {
         serde_json::from_str(data_json).ok()
     }
 
-    async fn save(&self, session_id: &str, data: &SessionData) {
+    async fn save(&self, session_id: &str, data: &SessionData) -> Result<(), SessionError> {
         let now = now_secs();
         let ttl = now + MAX_AGE_SECS;
-        let data_json = match serde_json::to_string(data) {
-            Ok(j) => j,
-            Err(e) => {
-                tracing::error!("Failed to serialize session data: {}", e);
-                return;
-            }
-        };
+        let data_json = serde_json::to_string(data).map_err(|e| {
+            tracing::error!("Failed to serialize session data: {}", e);
+            SessionError(format!("serialize session: {e}"))
+        })?;
 
         // Use UpdateItem with if_not_exists to preserve original created_at.
         // PutItem would overwrite created_at on every save, making the 30-day
         // TTL reset on each write (effectively "30 days since last activity"
         // instead of "30 days since creation").
-        let _ = self
-            .client
+        self.client
             .update_item()
             .table_name(&self.table_name)
             .key("session_id", AttributeValue::S(session_id.to_string()))
@@ -105,12 +101,13 @@ impl SessionBackend for DynamoDbBackend {
             .await
             .map_err(|e| {
                 tracing::error!("Failed to save session {}: {}", session_id, e);
-            });
+                SessionError(format!("dynamodb save: {e}"))
+            })?;
+        Ok(())
     }
 
-    async fn delete(&self, session_id: &str) {
-        let _ = self
-            .client
+    async fn delete(&self, session_id: &str) -> Result<(), SessionError> {
+        self.client
             .delete_item()
             .table_name(&self.table_name)
             .key("session_id", AttributeValue::S(session_id.to_string()))
@@ -118,6 +115,8 @@ impl SessionBackend for DynamoDbBackend {
             .await
             .map_err(|e| {
                 tracing::error!("Failed to delete session {}: {}", session_id, e);
-            });
+                SessionError(format!("dynamodb delete: {e}"))
+            })?;
+        Ok(())
     }
 }

@@ -30,6 +30,17 @@ pub struct SessionHandle {
     pub id: String,
     pub data: Arc<Mutex<SessionData>>,
     pub destroyed: Arc<Mutex<bool>>,
+    /// When set, the middleware issues a fresh session ID (deleting the old
+    /// record) before saving — used to prevent session fixation at login.
+    pub rotate: Arc<Mutex<bool>>,
+}
+
+impl SessionHandle {
+    /// Request a new session ID on the way out (session-fixation defense).
+    /// Call this from a login handler after authenticating.
+    pub async fn rotate_id(&self) {
+        *self.rotate.lock().await = true;
+    }
 }
 
 /// Extract SessionHandle from request extensions (put there by session middleware).
@@ -56,6 +67,7 @@ impl SessionHandle {
             id,
             data: Arc::new(Mutex::new(data)),
             destroyed: Arc::new(Mutex::new(false)),
+            rotate: Arc::new(Mutex::new(false)),
         }
     }
 }
@@ -156,8 +168,20 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
     let domain = layer.cookie_domain.as_deref();
 
     if destroyed {
-        layer.backend.delete(&session_id).await;
+        // Always clear the browser cookie so the client is locally logged out,
+        // but if the server-side delete failed the session record may still be
+        // live — surface that as a 500 rather than a phantom-successful logout.
         let cookie = make_delete_cookie(&layer.secret, &session_id, layer.https_only, domain);
+        let delete_result = layer.backend.delete(&session_id).await;
+        if let Err(e) = delete_result {
+            tracing::error!("Session delete failed for {}: {}", session_id, e);
+            let mut err = error_response(
+                "Logout could not fully complete: server session may still be active",
+            );
+            err.headers_mut()
+                .append(header::SET_COOKIE, cookie.parse().unwrap());
+            return err;
+        }
         response
             .headers_mut()
             .append(header::SET_COOKIE, cookie.parse().unwrap());
@@ -165,14 +189,49 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
         // Only persist when the handler actually modified session data.
         // Without this check, every unauthenticated request (including GET /health)
         // would create an empty session in the backend + set a cookie.
-        layer.backend.save(&session_id, &current_data).await;
-        let cookie = make_set_cookie(&layer.secret, &session_id, layer.https_only, domain);
+        //
+        // Session-fixation defense: if the handler asked to rotate (login), issue
+        // a brand-new session ID and delete the pre-login record, so an ID an
+        // attacker may have planted before login can't be reused afterward.
+        let rotate = *handle.rotate.lock().await;
+        let save_id = if rotate {
+            generate_session_id()
+        } else {
+            session_id.clone()
+        };
+
+        // If the save fails, do NOT set the cookie — a cookie for a session that
+        // was never durably written would make the next request a silent 401.
+        // Return 500 so the client's error path engages instead.
+        if let Err(e) = layer.backend.save(&save_id, &current_data).await {
+            tracing::error!("Session save failed for {}: {}", save_id, e);
+            return error_response("Session could not be persisted");
+        }
+        if rotate && save_id != session_id {
+            // Best-effort cleanup of the old record; a failure here doesn't
+            // compromise the new session, so we log rather than fail the login.
+            if let Err(e) = layer.backend.delete(&session_id).await {
+                tracing::warn!("Old session cleanup failed for {}: {}", session_id, e);
+            }
+        }
+        let cookie = make_set_cookie(&layer.secret, &save_id, layer.https_only, domain);
         response
             .headers_mut()
             .append(header::SET_COOKIE, cookie.parse().unwrap());
     }
 
     response
+}
+
+/// Build a 500 response for a session persistence failure. The body mirrors the
+/// shape of other `AppError` JSON bodies (`{"error": ...}`).
+fn error_response(message: &str) -> Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        axum::Json(serde_json::json!({ "error": message })),
+    )
+        .into_response()
 }
 
 fn generate_session_id() -> String {

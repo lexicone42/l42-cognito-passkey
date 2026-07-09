@@ -6,7 +6,7 @@
 use dashmap::DashMap;
 use std::time::{Duration, Instant};
 
-use super::{SessionBackend, SessionData};
+use super::{SessionBackend, SessionData, SessionError};
 
 /// In-memory session store.
 ///
@@ -62,7 +62,7 @@ impl SessionBackend for InMemoryBackend {
         Some(data.clone())
     }
 
-    async fn save(&self, session_id: &str, data: &SessionData) {
+    async fn save(&self, session_id: &str, data: &SessionData) -> Result<(), SessionError> {
         let created = self
             .store
             .get(session_id)
@@ -71,10 +71,32 @@ impl SessionBackend for InMemoryBackend {
 
         self.store
             .insert(session_id.to_string(), (data.clone(), created));
+        Ok(())
     }
 
-    async fn delete(&self, session_id: &str) {
+    async fn delete(&self, session_id: &str) -> Result<(), SessionError> {
         self.store.remove(session_id);
+        Ok(())
+    }
+}
+
+/// Test double whose `save`/`delete` always fail. Public and `#[doc(hidden)]`
+/// so integration tests (a separate crate, compiled without `cfg(test)`) can
+/// exercise the middleware's persistence-failure path. Not for production use.
+#[doc(hidden)]
+pub struct FailingBackend;
+
+impl SessionBackend for FailingBackend {
+    async fn load(&self, _session_id: &str) -> Option<SessionData> {
+        None
+    }
+
+    async fn save(&self, _session_id: &str, _data: &SessionData) -> Result<(), SessionError> {
+        Err(SessionError("simulated save failure".into()))
+    }
+
+    async fn delete(&self, _session_id: &str) -> Result<(), SessionError> {
+        Err(SessionError("simulated delete failure".into()))
     }
 }
 
@@ -89,7 +111,7 @@ mod tests {
         let mut data = SessionData::new();
         data.set("key", serde_json::json!("value"));
 
-        backend.save("s1", &data).await;
+        backend.save("s1", &data).await.unwrap();
         let loaded = backend.load("s1").await;
 
         assert!(loaded.is_some());
@@ -107,17 +129,17 @@ mod tests {
         let backend = InMemoryBackend::new();
         let data = SessionData::new();
 
-        backend.save("s1", &data).await;
+        backend.save("s1", &data).await.unwrap();
         assert!(backend.load("s1").await.is_some());
 
-        backend.delete("s1").await;
+        backend.delete("s1").await.unwrap();
         assert!(backend.load("s1").await.is_none());
     }
 
     #[tokio::test]
     async fn test_delete_nonexistent_is_noop() {
         let backend = InMemoryBackend::new();
-        backend.delete("nonexistent").await; // Should not panic
+        backend.delete("nonexistent").await.unwrap(); // Should succeed, not panic
     }
 
     #[tokio::test]
@@ -126,12 +148,12 @@ mod tests {
         let mut data = SessionData::new();
         data.set("v", serde_json::json!(1));
 
-        backend.save("s1", &data).await;
+        backend.save("s1", &data).await.unwrap();
         let created1 = backend.store.get("s1").unwrap().value().1;
 
         // Update the data
         data.set("v", serde_json::json!(2));
-        backend.save("s1", &data).await;
+        backend.save("s1", &data).await.unwrap();
         let created2 = backend.store.get("s1").unwrap().value().1;
 
         // Creation time should be preserved
@@ -148,7 +170,7 @@ mod tests {
         let backend = InMemoryBackend::with_max_age(Duration::from_secs(0));
         let data = SessionData::new();
 
-        backend.save("s1", &data).await;
+        backend.save("s1", &data).await.unwrap();
 
         // Tiny sleep to ensure the instant has elapsed
         tokio::time::sleep(Duration::from_millis(1)).await;
@@ -166,8 +188,8 @@ mod tests {
         let mut data_b = SessionData::new();
         data_b.set("user", serde_json::json!("bob"));
 
-        backend.save("session-a", &data_a).await;
-        backend.save("session-b", &data_b).await;
+        backend.save("session-a", &data_a).await.unwrap();
+        backend.save("session-b", &data_b).await.unwrap();
 
         assert_eq!(
             backend
@@ -189,7 +211,7 @@ mod tests {
         );
 
         // Deleting one doesn't affect the other
-        backend.delete("session-a").await;
+        backend.delete("session-a").await.unwrap();
         assert!(backend.load("session-a").await.is_none());
         assert!(backend.load("session-b").await.is_some());
     }
