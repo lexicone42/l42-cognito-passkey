@@ -65,14 +65,17 @@
   },
   "pnpm": {
     "overrides": {
-      "picomatch": ">=4.0.4"
+      "picomatch": ">=4.0.4",
+      "vite": "7.3.6",
+      "esbuild": ">=0.28.1"
     }
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.10",
-    "@cedar-policy/cedar-wasm": "^4.9.1",
-    "fast-check": "^4.6.0",
-    "jsdom": "^29.0.1",
-    "vitest": "^4.1.2"
+    "@biomejs/biome": "^2.5.3",
+    "@cedar-policy/cedar-wasm": "^4.11.2",
+    "fast-check": "^4.9.0",
+    "jsdom": "^29.1.1",
+    "vite": "7.3.6",
+    "vitest": "^4.1.10"
   }
 }
