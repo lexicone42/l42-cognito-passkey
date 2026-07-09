@@ -39,6 +39,10 @@ pub struct Config {
     /// Defaults to false for backward compatibility; will become the default
     /// at 1.0. Env: `ENTITY_STRICT_OWNERSHIP`.
     pub entity_strict_ownership: bool,
+    /// Override base URL for Cognito IDP + token endpoints (test only — points
+    /// the real `refresh_tokens`/`exchange_code_for_tokens` at a mock server).
+    /// Empty in production. Env: `COGNITO_ENDPOINT`.
+    pub cognito_endpoint: String,
 }
 
 impl Config {
@@ -107,6 +111,7 @@ impl Config {
             entity_strict_ownership: env::var("ENTITY_STRICT_OWNERSHIP")
                 .map(|v| v == "true" || v == "1" || v == "True")
                 .unwrap_or(false),
+            cognito_endpoint: env::var("COGNITO_ENDPOINT").unwrap_or_default(),
         })
     }
 
@@ -125,11 +130,17 @@ impl Config {
 
     /// Cognito IDP endpoint for InitiateAuth etc.
     pub fn cognito_idp_url(&self) -> String {
+        if !self.cognito_endpoint.is_empty() {
+            return format!("{}/", self.cognito_endpoint.trim_end_matches('/'));
+        }
         format!("https://cognito-idp.{}.amazonaws.com/", self.cognito_region)
     }
 
     /// Cognito OAuth2 token endpoint.
     pub fn cognito_token_url(&self) -> String {
+        if !self.cognito_endpoint.is_empty() {
+            return format!("{}/oauth2/token", self.cognito_endpoint.trim_end_matches('/'));
+        }
         format!("https://{}/oauth2/token", self.cognito_domain)
     }
 }
@@ -160,6 +171,7 @@ impl Config {
             additional_audience: Vec::new(),
             entity_table: None,
             entity_strict_ownership: false,
+            cognito_endpoint: String::new(),
         }
     }
 }
