@@ -10,8 +10,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use ciborium::Value as CborValue;
 use common::{
-    TestKeys, build_test_app, build_test_app_with_config, build_test_app_with_entity_provider,
-    expired_claims, post_with_service_token, request_with_service_token, test_claims,
+    TestKeys, build_test_app, build_test_app_failing_backend, build_test_app_with_config,
+    build_test_app_with_entity_provider, expired_claims, post_with_service_token,
+    request_with_service_token, test_claims,
 };
 use l42_token_handler::config::Config;
 use l42_token_handler::entity::AnyEntityProvider;
@@ -38,7 +39,12 @@ async fn seed_session(
 ) {
     let mut data = SessionData::new();
     data.set("tokens", serde_json::to_value(tokens).unwrap());
-    state.session_layer.backend.save(session_id, &data).await;
+    state
+        .session_layer
+        .backend
+        .save(session_id, &data)
+        .await
+        .unwrap();
 }
 
 /// Build a request with session cookie.
@@ -249,6 +255,33 @@ async fn test_logout_destroys_session() {
     use l42_token_handler::session::SessionBackend;
     let loaded = state.session_layer.backend.load("sid-logout").await;
     assert!(loaded.is_none());
+}
+
+#[tokio::test]
+async fn test_logout_delete_failure_returns_500_and_clears_cookie() {
+    // When the session backend fails to delete on logout, the middleware must
+    // NOT report success — the server-side session (with live tokens) may still
+    // exist. It returns 500 but still clears the browser cookie so the client
+    // is at least locally logged out.
+    let (app, state) = build_test_app_failing_backend();
+
+    let req = request_with_session_and_csrf(
+        "POST",
+        "/auth/logout",
+        "sid-logout-fail",
+        &state.config.session_secret,
+    );
+    let resp = app.oneshot(req).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    // Browser cookie is still cleared (Max-Age=0)
+    let set_cookie = resp
+        .headers()
+        .get("set-cookie")
+        .expect("delete cookie must still be set")
+        .to_str()
+        .unwrap();
+    assert!(set_cookie.contains("Max-Age=0"));
 }
 
 #[tokio::test]

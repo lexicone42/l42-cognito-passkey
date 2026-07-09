@@ -47,6 +47,15 @@ impl SessionData {
     }
 }
 
+/// A session persistence failure (write/delete). Mirrors `EntityLookupError`.
+///
+/// The middleware turns a save failure into a 500 *without* a `Set-Cookie`, and
+/// a delete failure into a 500 that still clears the browser cookie — so a
+/// failed persist can never masquerade as a successful login/logout.
+#[derive(Debug, thiserror::Error)]
+#[error("Session store error: {0}")]
+pub struct SessionError(pub String);
+
 // We can't use the async_trait crate macro directly on a trait definition
 // inside a module without the dependency, so we define the trait with
 // standard async fn in trait (stabilized in Rust 1.75).
@@ -54,6 +63,11 @@ impl SessionData {
 /// Pluggable session storage backend.
 ///
 /// Implementations must be `Send + Sync` for use in Axum's async handlers.
+///
+/// `save`/`delete` return `Result` so a fallible backend (DynamoDB) can report
+/// a persistence failure instead of silently swallowing it — the middleware
+/// depends on this to avoid setting a session cookie for a session that was
+/// never actually written.
 pub trait SessionBackend: Send + Sync {
     /// Load session data by ID. Returns `None` if not found or expired.
     fn load(
@@ -61,15 +75,18 @@ pub trait SessionBackend: Send + Sync {
         session_id: &str,
     ) -> impl std::future::Future<Output = Option<SessionData>> + Send;
 
-    /// Save session data.
+    /// Save session data. `Err` means the write did not durably persist.
     fn save(
         &self,
         session_id: &str,
         data: &SessionData,
-    ) -> impl std::future::Future<Output = ()> + Send;
+    ) -> impl std::future::Future<Output = Result<(), SessionError>> + Send;
 
-    /// Delete a session.
-    fn delete(&self, session_id: &str) -> impl std::future::Future<Output = ()> + Send;
+    /// Delete a session. `Err` means the record may still exist server-side.
+    fn delete(
+        &self,
+        session_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), SessionError>> + Send;
 }
 
 /// Type-erased session backend supporting both InMemory and DynamoDB.
@@ -79,6 +96,10 @@ pub trait SessionBackend: Send + Sync {
 pub enum AnyBackend {
     Memory(memory::InMemoryBackend),
     DynamoDb(dynamodb::DynamoDbBackend),
+    /// Test double whose writes always fail — used by integration tests to
+    /// exercise the middleware's persistence-failure path. Not for production.
+    #[doc(hidden)]
+    Failing(memory::FailingBackend),
 }
 
 impl SessionBackend for AnyBackend {
@@ -86,20 +107,23 @@ impl SessionBackend for AnyBackend {
         match self {
             AnyBackend::Memory(b) => b.load(session_id).await,
             AnyBackend::DynamoDb(b) => b.load(session_id).await,
+            AnyBackend::Failing(b) => b.load(session_id).await,
         }
     }
 
-    async fn save(&self, session_id: &str, data: &SessionData) {
+    async fn save(&self, session_id: &str, data: &SessionData) -> Result<(), SessionError> {
         match self {
             AnyBackend::Memory(b) => b.save(session_id, data).await,
             AnyBackend::DynamoDb(b) => b.save(session_id, data).await,
+            AnyBackend::Failing(b) => b.save(session_id, data).await,
         }
     }
 
-    async fn delete(&self, session_id: &str) {
+    async fn delete(&self, session_id: &str) -> Result<(), SessionError> {
         match self {
             AnyBackend::Memory(b) => b.delete(session_id).await,
             AnyBackend::DynamoDb(b) => b.delete(session_id).await,
+            AnyBackend::Failing(b) => b.delete(session_id).await,
         }
     }
 }

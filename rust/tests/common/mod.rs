@@ -249,6 +249,37 @@ pub fn build_test_app_with_entity_provider(
     (app, state)
 }
 
+/// Build a test app whose session backend always fails to save/delete.
+/// Used to verify the middleware returns 500 (and no success cookie) instead
+/// of silently reporting a phantom login/logout.
+pub fn build_test_app_failing_backend() -> (axum::Router, Arc<AppState>) {
+    let config = Config::test_default();
+    let http_client = reqwest::Client::new();
+    let jwks_cache = Arc::new(JwksCache::new(http_client.clone()));
+
+    let session_backend =
+        AnyBackend::Failing(l42_token_handler::session::memory::FailingBackend);
+    let session_layer = Arc::new(SessionLayer {
+        backend: Arc::new(session_backend),
+        secret: config.session_secret.clone(),
+        https_only: config.session_https_only,
+        cookie_domain: config.cookie_domain.clone(),
+        service_token: config.service_token.clone(),
+    });
+
+    let state = Arc::new(AppState {
+        config,
+        http_client,
+        jwks_cache,
+        cedar: None,
+        session_layer,
+        entity_provider: None,
+    });
+
+    let app = create_app(state.clone());
+    (app, state)
+}
+
 /// Build a request with X-Service-Token header.
 pub fn request_with_service_token(
     method: &str,
