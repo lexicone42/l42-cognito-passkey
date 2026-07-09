@@ -64,6 +64,15 @@ pub async fn authorize(
     // Resolve resource ownership via entity provider (closes S1 gap).
     // When an entity provider is configured, the server-side owner overrides
     // whatever the client sent — preventing the ownership-spoofing attack.
+    //
+    // In strict mode (config.entity_strict_ownership), an `:own` action is
+    // denied unless the provider positively confirms the owner. This closes the
+    // fail-open hole where an untracked resource (no owner attribute) sails past
+    // the Cedar `forbid ... resource.owner != principal` policy: an attacker can
+    // simply reference a resource ID that was never seeded into the table.
+    let strict = state.config.entity_strict_ownership;
+    let is_own_action = body.action.ends_with(":own");
+
     let resolved_resource = match (&state.entity_provider, &body.resource) {
         (Some(provider), Some(res)) if res.id.is_some() => {
             let id = res.id.as_deref().unwrap();
@@ -81,8 +90,16 @@ pub async fn authorize(
                     resolved.owner = Some(true_owner);
                 }
                 Ok(None) => {
-                    // Resource not in entity store — remove client-provided owner
-                    // (no ownership enforcement for untracked resources)
+                    if strict && is_own_action {
+                        return deny_strict_ownership(
+                            &body.action,
+                            resource_json_of(&body),
+                            email.as_deref(),
+                            "untracked resource: ownership cannot be confirmed",
+                        );
+                    }
+                    // Lenient: resource not in entity store — remove client-provided
+                    // owner (no ownership enforcement for untracked resources).
                     resolved.owner = None;
                 }
                 Err(e) => {
@@ -94,7 +111,19 @@ pub async fn authorize(
             }
             Some(resolved)
         }
-        _ => body.resource.clone(),
+        _ => {
+            if strict && is_own_action {
+                // No entity provider (or no resource id) means ownership cannot be
+                // verified server-side; strict mode refuses to trust the client.
+                return deny_strict_ownership(
+                    &body.action,
+                    resource_json_of(&body),
+                    email.as_deref(),
+                    "no entity provider: ownership cannot be verified",
+                );
+            }
+            body.resource.clone()
+        }
     };
 
     // Convert resource for OCSF (logs the original client request, not the resolved value)
@@ -150,4 +179,39 @@ pub async fn authorize(
             Err(AppError::AuthorizationError(e.to_string()))
         }
     }
+}
+
+/// Serialize the request's resource for OCSF logging (logs the client-sent value).
+fn resource_json_of(body: &AuthorizeRequest) -> Option<serde_json::Value> {
+    body.resource
+        .as_ref()
+        .map(|r| serde_json::to_value(r).unwrap())
+}
+
+/// Produce a FORBIDDEN deny for strict-ownership enforcement, emitting an OCSF
+/// authorization event so the refusal is auditable.
+fn deny_strict_ownership(
+    action: &str,
+    resource_json: Option<serde_json::Value>,
+    email: Option<&str>,
+    reason: &str,
+) -> Result<(StatusCode, Json<AuthorizeResponse>), AppError> {
+    let full_reason = format!("strict ownership: {reason}");
+    ocsf::authorization_event(
+        action,
+        resource_json.as_ref(),
+        "deny",
+        &full_reason,
+        ocsf::SEVERITY_MEDIUM,
+        email,
+    );
+    Ok((
+        StatusCode::FORBIDDEN,
+        Json(AuthorizeResponse {
+            authorized: false,
+            reason: full_reason,
+            diagnostics: Some(serde_json::json!({})),
+            error: None,
+        }),
+    ))
 }

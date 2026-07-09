@@ -149,6 +149,7 @@ mod tests {
             service_token: None,
             additional_audience: Vec::new(),
             entity_table: None,
+            entity_strict_ownership: false,
         }
     }
 

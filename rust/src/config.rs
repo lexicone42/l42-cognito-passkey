@@ -32,6 +32,13 @@ pub struct Config {
     /// When set, the `/auth/authorize` endpoint queries this table to verify
     /// `resource.owner` instead of trusting the client-provided value.
     pub entity_table: Option<String>,
+    /// Strict ownership enforcement for `:own` actions. When true, an `:own`
+    /// action is denied unless the entity provider can positively confirm the
+    /// principal owns the resource — untracked resources and requests with no
+    /// entity provider configured are denied rather than trusting the client.
+    /// Defaults to false for backward compatibility; will become the default
+    /// at 1.0. Env: `ENTITY_STRICT_OWNERSHIP`.
+    pub entity_strict_ownership: bool,
 }
 
 impl Config {
@@ -97,6 +104,9 @@ impl Config {
                 .filter(|s| !s.is_empty())
                 .collect(),
             entity_table: env::var("ENTITY_TABLE").ok().filter(|s| !s.is_empty()),
+            entity_strict_ownership: env::var("ENTITY_STRICT_OWNERSHIP")
+                .map(|v| v == "true" || v == "1" || v == "True")
+                .unwrap_or(false),
         })
     }
 
@@ -149,6 +159,7 @@ impl Config {
             service_token: None,
             additional_audience: Vec::new(),
             entity_table: None,
+            entity_strict_ownership: false,
         }
     }
 }
@@ -192,6 +203,7 @@ mod tests {
         assert_eq!(cfg.cookie_domain, None);
         assert_eq!(cfg.auth_path_prefix, "/auth");
         assert_eq!(cfg.entity_table, None);
+        assert!(!cfg.entity_strict_ownership);
     }
 
     #[test]

@@ -1454,3 +1454,180 @@ async fn test_s1_no_entity_provider_backwards_compatible() {
     let body = body_json(resp).await;
     assert_eq!(body["authorized"], true);
 }
+
+// ───── S1 strict ownership mode ─────
+
+/// Helper: authorize request builder for a seeded session.
+fn authorize_req(secret: &str, sid: &str, body: &serde_json::Value) -> Request<Body> {
+    let signed = sign_session_id(secret.as_bytes(), sid);
+    Request::builder()
+        .method("POST")
+        .uri("/auth/authorize")
+        .header("Content-Type", "application/json")
+        .header("X-L42-CSRF", "1")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::from(serde_json::to_string(body).unwrap()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_s1_strict_denies_untracked_own_resource() {
+    // Strict mode: a :own action on a resource the provider does not track is
+    // denied — closes the fail-open hole where an untracked resource sails past
+    // the Cedar forbid policy.
+    let entity_provider = InMemoryEntityProvider::new();
+    entity_provider.set_owner("doc-1", "user-sub"); // only doc-1 is tracked
+
+    let mut config = Config::test_default();
+    config.entity_strict_ownership = true;
+    let (app, state) = build_test_app_with_entity_provider(
+        config,
+        true,
+        Some(AnyEntityProvider::Memory(entity_provider)),
+    );
+
+    let claims = test_claims("user-sub", "user@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-strict-untracked", &tokens).await;
+
+    // doc-999 is NOT in the entity store
+    let body = json!({
+        "action": "write:own",
+        "resource": {"id": "doc-999", "type": "document", "owner": "user-sub"}
+    });
+    let resp = app
+        .oneshot(authorize_req(
+            &state.config.session_secret,
+            "sid-strict-untracked",
+            &body,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_json(resp).await;
+    assert_eq!(body["authorized"], false);
+    assert!(
+        body["reason"].as_str().unwrap().contains("strict ownership"),
+        "reason should indicate strict-ownership denial, got {:?}",
+        body["reason"]
+    );
+}
+
+#[tokio::test]
+async fn test_s1_strict_allows_tracked_own_resource() {
+    // Strict mode still allows a :own action when the provider confirms ownership.
+    let entity_provider = InMemoryEntityProvider::new();
+    entity_provider.set_owner("doc-1", "user-sub");
+
+    let mut config = Config::test_default();
+    config.entity_strict_ownership = true;
+    let (app, state) = build_test_app_with_entity_provider(
+        config,
+        true,
+        Some(AnyEntityProvider::Memory(entity_provider)),
+    );
+
+    let claims = test_claims("user-sub", "user@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-strict-ok", &tokens).await;
+
+    let body = json!({
+        "action": "write:own",
+        "resource": {"id": "doc-1", "type": "document", "owner": "user-sub"}
+    });
+    let resp = app
+        .oneshot(authorize_req(
+            &state.config.session_secret,
+            "sid-strict-ok",
+            &body,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(body_json(resp).await["authorized"], true);
+}
+
+#[tokio::test]
+async fn test_s1_strict_denies_own_action_without_provider() {
+    // Strict mode with no entity provider: a :own action cannot be verified
+    // server-side, so it is denied rather than trusting the client.
+    let mut config = Config::test_default();
+    config.entity_strict_ownership = true;
+    let (app, state) = build_test_app_with_entity_provider(config, true, None);
+
+    let claims = test_claims("user-sub", "user@example.com", &["users"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-strict-noprov", &tokens).await;
+
+    let body = json!({
+        "action": "write:own",
+        "resource": {"id": "doc-1", "type": "document", "owner": "user-sub"}
+    });
+    let resp = app
+        .oneshot(authorize_req(
+            &state.config.session_secret,
+            "sid-strict-noprov",
+            &body,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(body_json(resp).await["authorized"], false);
+}
+
+#[tokio::test]
+async fn test_s1_strict_does_not_affect_all_actions() {
+    // Strict mode only gates `:own` actions; an `:all` (admin) action is
+    // unaffected and still evaluated by Cedar normally.
+    let mut config = Config::test_default();
+    config.entity_strict_ownership = true;
+    let (app, state) = build_test_app_with_entity_provider(config, true, None);
+
+    let claims = test_claims("admin-sub", "admin@example.com", &["admin"]);
+    let id_token = TestKeys::make_unsigned_jwt(&claims);
+    let tokens = SessionTokens {
+        access_token: "at".into(),
+        id_token,
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-strict-all", &tokens).await;
+
+    // admin write:all on an untracked resource — strict mode does not gate :all
+    let body = json!({
+        "action": "write:all",
+        "resource": {"id": "doc-999", "type": "document"}
+    });
+    let resp = app
+        .oneshot(authorize_req(
+            &state.config.session_secret,
+            "sid-strict-all",
+            &body,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(body_json(resp).await["authorized"], true);
+}
