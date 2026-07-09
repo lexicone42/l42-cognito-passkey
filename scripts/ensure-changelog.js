@@ -31,7 +31,9 @@ if (changelog.includes(versionHeader)) {
   process.exit(0);
 }
 
-// Insert placeholder after the file header line
+// Insert placeholder after the file header line. This stub only satisfies the
+// version-consistency test; create-release.js REFUSES to publish it, so a
+// release with pending notes never reaches GitHub with placeholder text.
 const today = new Date().toISOString().slice(0, 10);
 const placeholder = `${versionHeader} - ${today}\n\n_Release notes pending._\n`;
 
@@ -41,4 +43,8 @@ const updatedChangelog = changelog.replace(
 );
 
 fs.writeFileSync(changelogPath, updatedChangelog);
-console.log(`  Added CHANGELOG.md placeholder for ${version}`);
+console.warn(
+  `\n  ⚠ No CHANGELOG.md entry for ${version} — inserted a placeholder.\n` +
+  `    The GitHub release will NOT publish until you fill it in and run:\n` +
+  `      node scripts/create-release.js\n`
+);

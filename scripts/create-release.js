@@ -59,31 +59,49 @@ try {
   process.exit(0); // Don't fail the release if gh isn't available
 }
 
-// Check if release already exists
-try {
-  execFileSync('gh', ['release', 'view', tag], { stdio: 'ignore' });
-  console.log(`✓ GitHub release ${tag} already exists — skipping`);
-  process.exit(0);
-} catch {
-  // Release doesn't exist yet — create it
-}
-
+const PLACEHOLDER = '_Release notes pending._';
 const notes = extractChangelog(version);
 
-console.log(`Creating GitHub release ${tag}...`);
+// Never publish the placeholder. If the changelog wasn't filled in, refuse to
+// create/update the release with garbage — the maintainer fills CHANGELOG.md and
+// re-runs `node scripts/create-release.js`. (Historically the placeholder was
+// published verbatim and the fill-in commit never reached the release.)
+if (notes.includes(PLACEHOLDER) || notes === `Release ${tag}`) {
+  console.error(`⚠ CHANGELOG.md has no real notes for ${version} (found placeholder).`);
+  console.error('  Fill in the changelog entry, then run:');
+  console.error(`  node scripts/create-release.js`);
+  process.exit(0); // Don't fail the release process; just don't publish garbage.
+}
+
+// If the release already exists, UPDATE its notes (so a later "fill in changelog"
+// commit propagates to the published release instead of being stranded).
+let exists = false;
+try {
+  execFileSync('gh', ['release', 'view', tag], { stdio: 'ignore' });
+  exists = true;
+} catch {
+  // Release doesn't exist yet.
+}
 
 try {
-  const result = execFileSync('gh', [
-    'release', 'create', tag,
-    '--title', tag,
-    '--notes', notes
-  ], { encoding: 'utf8', cwd: ROOT });
-
-  console.log(`✓ GitHub release created: ${result.trim()}`);
+  if (exists) {
+    console.log(`Updating existing GitHub release ${tag} with current notes...`);
+    execFileSync('gh', ['release', 'edit', tag, '--notes', notes], {
+      encoding: 'utf8',
+      cwd: ROOT,
+    });
+    console.log(`✓ GitHub release ${tag} notes updated`);
+  } else {
+    console.log(`Creating GitHub release ${tag}...`);
+    const result = execFileSync(
+      'gh',
+      ['release', 'create', tag, '--title', tag, '--notes', notes],
+      { encoding: 'utf8', cwd: ROOT }
+    );
+    console.log(`✓ GitHub release created: ${result.trim()}`);
+  }
 } catch (err) {
-  console.error(`⚠ Failed to create GitHub release: ${err.message}`);
-  console.log('  You can create it manually:');
-  console.log(`  gh release create ${tag} --title "${tag}"`);
-  // Don't fail the release process
+  console.error(`⚠ Failed to create/update GitHub release: ${err.message}`);
+  console.log(`  Manual: gh release create ${tag} --title "${tag}" --notes-file CHANGELOG.md`);
   process.exit(0);
 }
