@@ -14,6 +14,82 @@
 
 export const VERSION = '0.21.1';
 
+// ==================== ERROR TAXONOMY ====================
+
+/**
+ * Stable error codes for programmatic handling. Match on `error.code` rather
+ * than message text — messages are for humans and may change; codes are the
+ * contract.
+ */
+export const AuthErrorCode = {
+    /** configure() was never called (or clientId/cognitoDomain missing). */
+    NOT_CONFIGURED: 'NOT_CONFIGURED',
+    /** Invalid argument passed to configure(). */
+    INVALID_CONFIG: 'INVALID_CONFIG',
+    /** A network/fetch failure reaching the backend or Cognito. */
+    NETWORK: 'NETWORK',
+    /** The server session expired or refresh failed; the user must log in again. */
+    SESSION_EXPIRED: 'SESSION_EXPIRED',
+    /** Cognito requires an additional challenge (MFA/SMS/etc). `details.challengeName` carries it. */
+    MFA_REQUIRED: 'MFA_REQUIRED',
+    /** Cognito temporarily locked the account after too many failed attempts. */
+    LOCKED_OUT: 'LOCKED_OUT',
+    /** The user dismissed/aborted the WebAuthn prompt — NOT a credential failure. */
+    USER_CANCELLED: 'USER_CANCELLED',
+    /** A credential was rejected by the server (AAGUID/device policy) or Cognito. */
+    CREDENTIAL_REJECTED: 'CREDENTIAL_REJECTED',
+    /** Client-side rate limiting is throttling further attempts. */
+    RATE_LIMITED: 'RATE_LIMITED',
+    /** No passkey registered / passkey auth not available for this user. */
+    PASSKEY_NOT_AVAILABLE: 'PASSKEY_NOT_AVAILABLE',
+    /** OAuth state did not match — possible CSRF or interrupted flow. */
+    OAUTH_STATE_MISMATCH: 'OAUTH_STATE_MISMATCH',
+    /** OAuth token exchange with Cognito failed. */
+    TOKEN_EXCHANGE_FAILED: 'TOKEN_EXCHANGE_FAILED',
+    /** An operation requiring authentication was called while logged out. */
+    NOT_AUTHENTICATED: 'NOT_AUTHENTICATED',
+    /** Authentication failed for an unspecified reason (bad credentials, etc). */
+    AUTH_FAILED: 'AUTH_FAILED',
+    /** Anything not otherwise classified. */
+    UNKNOWN: 'UNKNOWN',
+};
+
+/**
+ * Error thrown by this library. Carries a stable `.code` (see `AuthErrorCode`)
+ * so callers can branch on failure kind without matching message strings.
+ *
+ * Extends the built-in `Error`, so existing `catch (e) { e.message }` code keeps
+ * working — `.code` is purely additive.
+ *
+ * @property {string} code - One of `AuthErrorCode`.
+ * @property {*} [cause] - The underlying error, if any (e.g. a DOMException).
+ * @property {Object} [details] - Code-specific extra data (e.g. `{ challengeName }`).
+ */
+export class AuthError extends Error {
+    constructor(code, message, options = {}) {
+        super(message);
+        this.name = 'AuthError';
+        this.code = code || AuthErrorCode.UNKNOWN;
+        if (options.cause !== undefined) this.cause = options.cause;
+        if (options.details !== undefined) this.details = options.details;
+    }
+}
+
+/** True if `e` is an AuthError with the given code. */
+function isAuthErrorCode(e, code) {
+    return e instanceof AuthError && e.code === code;
+}
+
+/**
+ * Classify a raw WebAuthn/DOMException. Returns USER_CANCELLED for the
+ * user-dismissed-the-prompt cases (NotAllowedError, AbortError) so callers can
+ * distinguish "user changed their mind" from "credentials rejected", and so the
+ * library doesn't punish a cancellation as a failed login attempt.
+ */
+function isUserCancellation(e) {
+    return e && (e.name === 'NotAllowedError' || e.name === 'AbortError');
+}
+
 // ==================== CONFIGURATION ====================
 
 const DEFAULT_CONFIG = /*#__PURE__*/ {
@@ -277,7 +353,11 @@ async function _validateCredential(credentialResponse) {
         try { body = await response.json(); } catch (_) { /* ignore parse errors */ }
         var reason = body.reason || 'Credential rejected by server';
         debugLog('passkey', 'validateCredential:rejected', { status: response.status, reason: reason });
-        throw new Error('Credential validation failed: ' + reason);
+        throw new AuthError(
+            AuthErrorCode.CREDENTIAL_REJECTED,
+            'Credential validation failed: ' + reason,
+            { details: { status: response.status, reason: reason } }
+        );
     }
 
     debugLog('passkey', 'validateCredential:accepted');
@@ -591,7 +671,8 @@ function requireConfig() {
     autoConfigureFromWindow();
 
     if (!_configured) {
-        throw new Error(
+        throw new AuthError(
+            AuthErrorCode.NOT_CONFIGURED,
             'Auth not configured. Call configure() first or set window.L42_AUTH_CONFIG.\n' +
             'Example: configure({ clientId: "xxx", cognitoDomain: "xxx.auth.region.amazoncognito.com" })'
         );
@@ -652,10 +733,10 @@ export function configure(options = {}) {
 
     // Validate required fields
     if (!newConfig.clientId || typeof newConfig.clientId !== 'string') {
-        throw new Error('configure() requires clientId: must be a non-empty string');
+        throw new AuthError(AuthErrorCode.INVALID_CONFIG, 'configure() requires clientId: must be a non-empty string');
     }
     if (!newConfig.cognitoDomain || typeof newConfig.cognitoDomain !== 'string') {
-        throw new Error('configure() requires cognitoDomain: must be a non-empty string');
+        throw new AuthError(AuthErrorCode.INVALID_CONFIG, 'configure() requires cognitoDomain: must be a non-empty string');
     }
     // Validate cognitoDomain format to prevent open redirect attacks
     // Format: custom-prefix.auth.region.amazoncognito.com OR custom domain
@@ -665,22 +746,24 @@ export function configure(options = {}) {
         !cognitoDomain.includes('..') &&
         !cognitoDomain.includes('://');
     if (!isAmazonCognito && !isValidCustomDomain) {
-        throw new Error(
+        throw new AuthError(
+            AuthErrorCode.INVALID_CONFIG,
             'Invalid cognitoDomain format.\n' +
             'Expected: "your-app.auth.region.amazoncognito.com" or a valid custom domain.\n' +
             'Do not include protocol (https://).'
         );
     }
     if (!newConfig.cognitoRegion || typeof newConfig.cognitoRegion !== 'string') {
-        throw new Error('Invalid cognitoRegion: must be a non-empty string');
+        throw new AuthError(AuthErrorCode.INVALID_CONFIG, 'Invalid cognitoRegion: must be a non-empty string');
     }
     if (!newConfig.tokenKey || typeof newConfig.tokenKey !== 'string') {
-        throw new Error('Invalid tokenKey: must be a non-empty string');
+        throw new AuthError(AuthErrorCode.INVALID_CONFIG, 'Invalid tokenKey: must be a non-empty string');
     }
 
     // Reject deprecated tokenStorage values (removed in v0.15.0)
     if (newConfig.tokenStorage && newConfig.tokenStorage !== 'handler') {
-        throw new Error(
+        throw new AuthError(
+            AuthErrorCode.INVALID_CONFIG,
             `tokenStorage "${newConfig.tokenStorage}" was removed in v0.15.0.\n` +
             'Only handler mode is supported. See docs/architecture.md for details.'
         );
@@ -690,7 +773,8 @@ export function configure(options = {}) {
     const requiredEndpoints = ['tokenEndpoint', 'refreshEndpoint', 'logoutEndpoint'];
     const missing = requiredEndpoints.filter(ep => !newConfig[ep]);
     if (missing.length > 0) {
-        throw new Error(
+        throw new AuthError(
+            AuthErrorCode.INVALID_CONFIG,
             `configure() requires handler endpoints: ${missing.join(', ')}.\n` +
             'Example: configure({\n' +
             '    clientId: "xxx",\n' +
@@ -720,7 +804,8 @@ export function configure(options = {}) {
 
             // HTTPS required for non-localhost (prevents token interception)
             if (!isLocalhost && url.protocol !== 'https:') {
-                throw new Error(
+                throw new AuthError(
+                    AuthErrorCode.INVALID_CONFIG,
                     'Invalid redirectUri: HTTPS is required for non-localhost URLs.\n' +
                     'HTTP is only allowed for localhost development.'
                 );
@@ -733,15 +818,17 @@ export function configure(options = {}) {
                 const allowedList = newConfig.allowedDomains
                     ? newConfig.allowedDomains.join(', ')
                     : 'current domain (' + window.location.hostname + ')';
-                throw new Error(
+                throw new AuthError(
+                    AuthErrorCode.INVALID_CONFIG,
                     `Invalid redirectUri: domain '${hostname}' not allowed.\n` +
                     `Allowed: ${allowedList}\n` +
                     `Add it via configure({ allowedDomains: ['${hostname}'] }) or self-host the library.`
                 );
             }
         } catch (e) {
-            if (e.message.includes('Invalid redirectUri')) throw e;
-            throw new Error('Invalid redirectUri: must be a valid URL');
+            // Rethrow our own validation errors; wrap a raw URL parse failure.
+            if (e instanceof AuthError) throw e;
+            throw new AuthError(AuthErrorCode.INVALID_CONFIG, 'Invalid redirectUri: must be a valid URL');
         }
     }
 
@@ -1000,11 +1087,18 @@ async function refreshTokensViaHandler(email) {
                 user_email: email,
                 message: 'Handler refresh failed: session expired'
             });
-            throw new Error('Session expired. Please log in again.');
+            throw new AuthError(
+                AuthErrorCode.SESSION_EXPIRED,
+                'Session expired. Please log in again.'
+            );
         }
 
         if (!response.ok) {
-            throw new Error(`Token refresh failed: ${response.status}`);
+            throw new AuthError(
+                AuthErrorCode.NETWORK,
+                `Token refresh failed: ${response.status}`,
+                { details: { status: response.status } }
+            );
         }
 
         const data = await response.json();
@@ -1030,7 +1124,9 @@ async function refreshTokensViaHandler(email) {
 
         return newTokens;
     } catch (e) {
-        if (!e.message.includes('Session expired')) {
+        // Session-expiry is already logged above; wrap any other raw failure
+        // (e.g. a fetch TypeError) as a NETWORK AuthError so callers get a code.
+        if (!isAuthErrorCode(e, AuthErrorCode.SESSION_EXPIRED)) {
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,
                 activity_id: OCSF_AUTH_ACTIVITY.SERVICE_TICKET,
@@ -1040,6 +1136,9 @@ async function refreshTokensViaHandler(email) {
                 user_email: email,
                 message: 'Handler token refresh failed: ' + e.message
             });
+            if (!(e instanceof AuthError)) {
+                throw new AuthError(AuthErrorCode.NETWORK, e.message, { cause: e });
+            }
         }
         throw e;
     }
@@ -1447,11 +1546,19 @@ export async function loginWithPassword(email, password) {
                 auth_protocol: 'Password',
                 message: 'MFA challenge required: ' + res.ChallengeName
             });
-            throw new Error('Additional verification required: ' + res.ChallengeName);
+            // MFA_REQUIRED is not a failure — the caller must complete the
+            // challenge. `details.challengeName` is the machine-readable channel
+            // (integrators no longer have to parse it out of the message).
+            throw new AuthError(
+                AuthErrorCode.MFA_REQUIRED,
+                'Additional verification required: ' + res.ChallengeName,
+                { details: { challengeName: res.ChallengeName, session: res.Session } }
+            );
         }
-        throw new Error('Authentication failed');
+        throw new AuthError(AuthErrorCode.AUTH_FAILED, 'Authentication failed');
     } catch (e) {
-        if (!e.message.includes('Additional verification required')) {
+        const isMfa = isAuthErrorCode(e, AuthErrorCode.MFA_REQUIRED);
+        if (!isMfa) {
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,
                 activity_id: OCSF_AUTH_ACTIVITY.LOGON,
@@ -1465,7 +1572,7 @@ export async function loginWithPassword(email, password) {
             });
         }
         debugLog('auth', 'loginWithPassword:failed', { email, error: e.message });
-        if (!e.message.includes('Additional verification required')) {
+        if (!isMfa) {
             recordLoginFailure(email);
             if (detectCognitoLockout(e)) {
                 logSecurityEvent({
@@ -1479,7 +1586,11 @@ export async function loginWithPassword(email, password) {
                     auth_protocol: 'Password',
                     message: 'Cognito account lockout detected for ' + email
                 });
-                throw new Error('Account temporarily locked by Cognito. Please try again later or reset your password.');
+                throw new AuthError(
+                    AuthErrorCode.LOCKED_OUT,
+                    'Account temporarily locked by Cognito. Please try again later or reset your password.',
+                    { cause: e }
+                );
             }
         }
         throw e;
@@ -1647,7 +1758,10 @@ export async function loginWithPasskey(email) {
                 auth_protocol: 'WebAuthn/FIDO2',
                 message: 'Passkey not available for user'
             });
-            throw new Error('Passkey not available. Register one first or use password.');
+            throw new AuthError(
+                AuthErrorCode.PASSKEY_NOT_AVAILABLE,
+                'Passkey not available. Register one first or use password.'
+            );
         }
 
         // Step 2: Parse WebAuthn challenge
@@ -1718,16 +1832,19 @@ export async function loginWithPasskey(email) {
             resetLoginAttempts(email);
             return tokens;
         }
-        throw new Error('Passkey authentication failed');
+        throw new AuthError(AuthErrorCode.AUTH_FAILED, 'Passkey authentication failed');
     } catch (e) {
+        const notAvailable = isAuthErrorCode(e, AuthErrorCode.PASSKEY_NOT_AVAILABLE);
+        const cancelled = isUserCancellation(e);
+
         // Log failure (if not already logged above)
-        if (!e.message.includes('Passkey not available')) {
+        if (!notAvailable) {
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,
                 activity_id: OCSF_AUTH_ACTIVITY.LOGON,
                 activity_name: 'Logon',
                 status_id: OCSF_STATUS.FAILURE,
-                severity_id: e.name === 'NotAllowedError' ? OCSF_SEVERITY.LOW : OCSF_SEVERITY.MEDIUM,
+                severity_id: cancelled ? OCSF_SEVERITY.LOW : OCSF_SEVERITY.MEDIUM,
                 user_email: email,
                 auth_protocol_id: OCSF_AUTH_PROTOCOL.FIDO2,
                 auth_protocol: 'WebAuthn/FIDO2',
@@ -1735,7 +1852,19 @@ export async function loginWithPasskey(email) {
             });
         }
         debugLog('auth', 'loginWithPasskey:failed', { email, error: e.message });
-        if (!e.message.includes('Passkey not available')) {
+
+        // A user dismissing the passkey prompt is NOT a credential failure —
+        // don't count it toward rate-limiting, and give the caller a code they
+        // can distinguish from a real auth failure.
+        if (cancelled) {
+            throw new AuthError(
+                AuthErrorCode.USER_CANCELLED,
+                'Passkey prompt was cancelled',
+                { cause: e }
+            );
+        }
+
+        if (!notAvailable) {
             recordLoginFailure(email);
             if (detectCognitoLockout(e)) {
                 logSecurityEvent({
@@ -1749,7 +1878,11 @@ export async function loginWithPasskey(email) {
                     auth_protocol: 'WebAuthn/FIDO2',
                     message: 'Cognito account lockout detected for ' + email
                 });
-                throw new Error('Account temporarily locked by Cognito. Please try again later or reset your password.');
+                throw new AuthError(
+                    AuthErrorCode.LOCKED_OUT,
+                    'Account temporarily locked by Cognito. Please try again later or reset your password.',
+                    { cause: e }
+                );
             }
         }
         throw e;
@@ -2048,7 +2181,10 @@ export async function exchangeCodeForTokens(code, state) {
             auth_protocol: 'OAuth 2.0/OIDC',
             message: 'Invalid OAuth state - possible CSRF attack'
         });
-        throw new Error('Invalid OAuth state - possible CSRF attack');
+        throw new AuthError(
+            AuthErrorCode.OAUTH_STATE_MISMATCH,
+            'Invalid OAuth state - possible CSRF attack'
+        );
     }
 
     // PKCE: Retrieve and clear the code verifier
@@ -2064,7 +2200,10 @@ export async function exchangeCodeForTokens(code, state) {
             auth_protocol: 'OAuth 2.0/OIDC',
             message: 'Missing PKCE code verifier - OAuth flow may have been interrupted'
         });
-        throw new Error('Missing PKCE code verifier - OAuth flow may have been interrupted');
+        throw new AuthError(
+            AuthErrorCode.OAUTH_STATE_MISMATCH,
+            'Missing PKCE code verifier - OAuth flow may have been interrupted'
+        );
     }
 
     const res = await fetch('https://' + config.cognitoDomain + '/oauth2/token', {
@@ -2092,7 +2231,11 @@ export async function exchangeCodeForTokens(code, state) {
             message: 'Token exchange failed: ' + (errorText || res.status)
         });
         debugLog('auth', 'exchangeCodeForTokens:failed', { error: errorText || String(res.status) });
-        throw new Error('Token exchange failed: ' + (errorText || res.status));
+        throw new AuthError(
+            AuthErrorCode.TOKEN_EXCHANGE_FAILED,
+            'Token exchange failed: ' + (errorText || res.status),
+            { details: { status: res.status } }
+        );
     }
 
     const data = await res.json();
@@ -2360,7 +2503,7 @@ export async function getPasskeyCapabilities() {
  */
 export async function listPasskeys() {
     const tokens = await getTokens();
-    if (!tokens) throw new Error('Not authenticated');
+    if (!tokens) throw new AuthError(AuthErrorCode.NOT_AUTHENTICATED, 'Not authenticated');
     if (!hasAdminScope()) {
         throw new Error(
             'Admin scope required for passkey management.\n' +
@@ -2383,7 +2526,7 @@ export async function registerPasskey(options = {}) {
     const tokens = await getTokens();
     const email = getUserEmail();
 
-    if (!tokens) throw new Error('Not authenticated');
+    if (!tokens) throw new AuthError(AuthErrorCode.NOT_AUTHENTICATED, 'Not authenticated');
     if (!hasAdminScope()) {
         throw new Error(
             'Admin scope required for passkey management.\n' +
@@ -2603,7 +2746,7 @@ export async function deletePasskey(credentialId) {
     const tokens = await getTokens();
     const email = getUserEmail();
 
-    if (!tokens) throw new Error('Not authenticated');
+    if (!tokens) throw new AuthError(AuthErrorCode.NOT_AUTHENTICATED, 'Not authenticated');
     if (!hasAdminScope()) {
         throw new Error(
             'Admin scope required for passkey management.\n' +
@@ -2708,7 +2851,10 @@ export async function requireServerAuthorization(action, options = {}) {
 
         if (response.status === 401) {
             clearTokens();
-            throw new Error('Session expired. Please log in again.');
+            throw new AuthError(
+                AuthErrorCode.SESSION_EXPIRED,
+                'Session expired. Please log in again.'
+            );
         }
 
         if (response.status === 403) {
@@ -2922,8 +3068,9 @@ export function startAutoRefresh(options = {}) {
                 }
             }
         } catch (e) {
-            // Handler mode: server returned error
-            if (e.message && (e.message.includes('401') || e.message.includes('Session expired'))) {
+            // Handler mode: server returned error. Match on the stable code
+            // (SESSION_EXPIRED) rather than message text.
+            if (isAuthErrorCode(e, AuthErrorCode.SESSION_EXPIRED)) {
                 clearTokens();
                 notifySessionExpired(e.message);
                 stopAutoRefresh();
@@ -3048,7 +3195,10 @@ export async function fetchWithAuth(url, options = {}) {
 
     const tokens = await ensureValidTokens();
     if (!tokens) {
-        throw new Error('Not authenticated. Call login first.');
+        throw new AuthError(
+            AuthErrorCode.NOT_AUTHENTICATED,
+            'Not authenticated. Call login first.'
+        );
     }
 
     const response = await fetch(url, {
@@ -3075,7 +3225,10 @@ export async function fetchWithAuth(url, options = {}) {
         } catch {
             clearTokens();
             notifySessionExpired('Server returned 401 and refresh failed');
-            throw new Error('Session expired. Please log in again.');
+            throw new AuthError(
+                AuthErrorCode.SESSION_EXPIRED,
+                'Session expired. Please log in again.'
+            );
         }
     }
 
@@ -3125,6 +3278,8 @@ export function _resetForTesting() {
 
 export default {
     VERSION,
+    AuthError,
+    AuthErrorCode,
     configure,
     isConfigured,
     getTokens,
