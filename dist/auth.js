@@ -309,10 +309,39 @@ async function _persistHandlerSession(tokens) {
     if (!response.ok) {
         const msg = `Session persist failed: ${response.status}`;
         debugLog('token', 'persistHandlerSession:failed', { status: response.status });
-        throw new Error(msg);
+        throw new AuthError(AuthErrorCode.NETWORK, msg, { details: { status: response.status } });
     }
 
     debugLog('token', 'persistHandlerSession:success');
+}
+
+/**
+ * Finalize a successful direct login (password/passkey/OAuth).
+ *
+ * Order matters for two guarantees:
+ *  1. Persist the server session FIRST. It needs the refresh token, and if it
+ *     fails we throw before caching/broadcasting — so a persist failure can't
+ *     leave a half-logged-in UI (onAuthStateChange never fires for a session
+ *     that doesn't exist server-side).
+ *  2. Cache + broadcast a SANITIZED token set with no refresh_token. The refresh
+ *     token is handed to the server and then discarded client-side — it never
+ *     enters the cache, the onLogin listeners, or the function's return value.
+ *
+ * @param {Object} tokens - Full Cognito token set (incl. refresh_token).
+ * @param {string} method - Auth method for listeners ('password'|'passkey'|'oauth').
+ * @returns {Promise<Object>} The sanitized client token set (no refresh_token).
+ * @private
+ */
+async function finalizeLogin(tokens, method) {
+    await _persistHandlerSession(tokens);
+    const clientTokens = {
+        access_token: tokens.access_token,
+        id_token: tokens.id_token,
+        auth_method: tokens.auth_method
+    };
+    setTokens(clientTokens);
+    notifyLogin(clientTokens, method);
+    return clientTokens;
 }
 
 /**
@@ -1509,9 +1538,7 @@ export async function loginWithPassword(email, password) {
                 refresh_token: res.AuthenticationResult.RefreshToken,
                 auth_method: 'password'
             };
-            setTokens(tokens);
-            await _persistHandlerSession(tokens);
-            notifyLogin(tokens, 'password');
+            const clientTokens = await finalizeLogin(tokens, 'password');
 
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,
@@ -1533,7 +1560,7 @@ export async function loginWithPassword(email, password) {
                 upgradeToPasskey().catch(function() {});
             }
 
-            return tokens;
+            return clientTokens;
         } else if (res.ChallengeName) {
             logSecurityEvent({
                 class_uid: OCSF_CLASS.AUTHENTICATION,
@@ -1805,9 +1832,7 @@ export async function loginWithPasskey(email) {
                 refresh_token: authRes.AuthenticationResult.RefreshToken,
                 auth_method: 'passkey'
             };
-            setTokens(tokens);
-            await _persistHandlerSession(tokens);
-            notifyLogin(tokens, 'passkey');
+            const clientTokens = await finalizeLogin(tokens, 'passkey');
 
             var loginMeta = {};
             if (assertionResponse.authenticatorMetadata) {
@@ -1830,7 +1855,7 @@ export async function loginWithPasskey(email) {
 
             debugLog('auth', 'loginWithPasskey:success', { email });
             resetLoginAttempts(email);
-            return tokens;
+            return clientTokens;
         }
         throw new AuthError(AuthErrorCode.AUTH_FAILED, 'Passkey authentication failed');
     } catch (e) {
@@ -1977,9 +2002,7 @@ export async function loginWithConditionalUI(options = {}) {
                     refresh_token: authRes.AuthenticationResult.RefreshToken,
                     auth_method: 'passkey'
                 };
-                setTokens(tokens);
-                await _persistHandlerSession(tokens);
-                notifyLogin(tokens, 'passkey');
+                var clientTokens = await finalizeLogin(tokens, 'passkey');
 
                 logSecurityEvent({
                     class_uid: OCSF_CLASS.AUTHENTICATION,
@@ -1995,7 +2018,7 @@ export async function loginWithConditionalUI(options = {}) {
 
                 debugLog('auth', 'loginWithConditionalUI:success', { email: options.email, mode: 'email' });
                 resetLoginAttempts(options.email);
-                return tokens;
+                return clientTokens;
             }
             throw new Error('Conditional UI authentication failed');
         } catch (e) {
@@ -2245,12 +2268,10 @@ export async function exchangeCodeForTokens(code, state) {
         refresh_token: data.refresh_token,
         auth_method: 'oauth'
     };
-    setTokens(tokens);
-    await _persistHandlerSession(tokens);
-    notifyLogin(tokens, 'oauth');
+    const clientTokens = await finalizeLogin(tokens, 'oauth');
 
     // Extract email from the new token for logging
-    const claims = UNSAFE_decodeJwtPayload(tokens.id_token);
+    const claims = UNSAFE_decodeJwtPayload(clientTokens.id_token);
 
     logSecurityEvent({
         class_uid: OCSF_CLASS.AUTHENTICATION,
@@ -2265,7 +2286,7 @@ export async function exchangeCodeForTokens(code, state) {
     });
 
     debugLog('auth', 'exchangeCodeForTokens:success');
-    return tokens;
+    return clientTokens;
 }
 
 /**

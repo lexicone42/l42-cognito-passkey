@@ -109,7 +109,7 @@ All POST endpoints require `X-L42-CSRF: 1`. `auth.js` adds this automatically. C
 
 ### Security Invariants
 
-1. Refresh tokens never leave the server
+1. The refresh token never persists client-side. In direct login (password/passkey/OAuth) the browser briefly receives the full Cognito token set, hands the refresh token to the server (`POST /auth/session`), then discards it — it never enters the client cache, the `onLogin` listeners, or the login function's return value. The server never *returns* a refresh token (`GET /auth/token` strips it).
 2. Session cookie is HttpOnly
 3. CSRF header required on all POSTs (except `/auth/callback`)
 4. `/auth/session` verifies `id_token` signature against Cognito JWKS before storing
