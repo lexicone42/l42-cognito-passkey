@@ -372,10 +372,10 @@ async function finalizeLogin(tokens, method) {
  *
  * @param {Object} credentialResponse - The formatted credential from buildCredentialResponse()
  * @returns {Promise<void>}
- * @throws {Error} If the server rejects the credential (reason included in message)
- * @private
+ * @throws {AuthError} CREDENTIAL_REJECTED if the server rejects the credential.
+ * @private Exported (underscore-prefixed) for testing; not part of the stable API.
  */
-async function _validateCredential(credentialResponse) {
+export async function _validateCredential(credentialResponse) {
     if (!config.validateCredentialEndpoint) {
         return;
     }
@@ -2365,13 +2365,14 @@ export async function exchangeCodeForTokens(code, state) {
 }
 
 /**
- * Logout - clear tokens and end session.
+ * Logout — clear the local token cache and destroy the server session.
  *
- * In handler mode, this calls the logout endpoint to destroy the server session.
- * Returns a Promise in handler mode, void in other modes.
- * Existing sync calls continue to work (logout happens in background).
+ * This is **async**: it awaits the logout endpoint so the server session is
+ * actually destroyed before it resolves. `await logout()` before navigating, or
+ * the server-side logout may not complete. (The local cache is cleared
+ * synchronously first, so the UI reflects logout immediately either way.)
  *
- * @returns {void|Promise<void>}
+ * @returns {Promise<void>} Resolves once the server session is destroyed.
  */
 export async function logout() {
     abortConditionalRequest();

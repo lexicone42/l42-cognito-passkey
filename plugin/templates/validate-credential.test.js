@@ -10,45 +10,24 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fc from 'fast-check';
+import { configure, _validateCredential, _resetForTesting } from '../../src/auth.js';
 
 // ============================================================================
-// Simulated internals (mirrored from auth.js for testing)
+// Real auth.js _validateCredential (exported for testing)
 // ============================================================================
 
-let config = {
-    validateCredentialEndpoint: null,
-    debug: false
-};
-
-function debugLog() {}
-
-/**
- * _validateCredential implementation (mirrored from auth.js)
- */
-async function _validateCredential(credentialResponse) {
-    if (!config.validateCredentialEndpoint) {
-        return;
-    }
-
-    const response = await fetch(config.validateCredentialEndpoint, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-L42-CSRF': '1'
-        },
-        body: JSON.stringify({
-            attestation_object: credentialResponse.response.attestationObject,
-            client_data_json: credentialResponse.response.clientDataJSON
-        })
+/** Configure with the credential-validation endpoint set (or omitted). */
+function configureForTest(validateEndpoint) {
+    _resetForTesting();
+    configure({
+        clientId: 'test-client',
+        cognitoDomain: 'test.auth.us-west-2.amazoncognito.com',
+        tokenEndpoint: '/auth/token',
+        refreshEndpoint: '/auth/refresh',
+        logoutEndpoint: '/auth/logout',
+        sessionEndpoint: '/auth/session',
+        validateCredentialEndpoint: validateEndpoint || null
     });
-
-    if (!response.ok) {
-        var body = {};
-        try { body = await response.json(); } catch (_) { /* ignore parse errors */ }
-        var reason = body.reason || 'Credential rejected by server';
-        throw new Error('Credential validation failed: ' + reason);
-    }
 }
 
 // ============================================================================
@@ -86,7 +65,7 @@ function mockCredentialResponse(overrides = {}) {
 
 describe('_validateCredential', () => {
     beforeEach(() => {
-        config.validateCredentialEndpoint = null;
+        configureForTest();
         vi.restoreAllMocks();
     });
 
@@ -95,7 +74,7 @@ describe('_validateCredential', () => {
     });
 
     it('should skip validation when no endpoint is configured', async () => {
-        config.validateCredentialEndpoint = null;
+        configureForTest();
         const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
         await _validateCredential(mockCredentialResponse());
@@ -104,7 +83,7 @@ describe('_validateCredential', () => {
     });
 
     it('should send correct body and headers when endpoint is configured', async () => {
-        config.validateCredentialEndpoint = '/auth/validate-credential';
+        configureForTest('/auth/validate-credential');
 
         const cred = mockCredentialResponse();
         vi.spyOn(globalThis, 'fetch').mockResolvedValue({
@@ -129,7 +108,7 @@ describe('_validateCredential', () => {
     });
 
     it('should succeed silently on 200', async () => {
-        config.validateCredentialEndpoint = '/auth/validate-credential';
+        configureForTest('/auth/validate-credential');
 
         vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: true,
@@ -149,7 +128,7 @@ describe('_validateCredential', () => {
     });
 
     it('should throw on 403 with server reason', async () => {
-        config.validateCredentialEndpoint = '/auth/validate-credential';
+        configureForTest('/auth/validate-credential');
 
         vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: false,
@@ -165,7 +144,7 @@ describe('_validateCredential', () => {
     });
 
     it('should throw with default reason when server returns no reason', async () => {
-        config.validateCredentialEndpoint = '/auth/validate-credential';
+        configureForTest('/auth/validate-credential');
 
         vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: false,
@@ -178,7 +157,7 @@ describe('_validateCredential', () => {
     });
 
     it('should throw with default reason when response body is not JSON', async () => {
-        config.validateCredentialEndpoint = '/auth/validate-credential';
+        configureForTest('/auth/validate-credential');
 
         vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: false,
@@ -191,7 +170,7 @@ describe('_validateCredential', () => {
     });
 
     it('should throw on device-bound rejection', async () => {
-        config.validateCredentialEndpoint = '/auth/validate-credential';
+        configureForTest('/auth/validate-credential');
 
         vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: false,
@@ -217,7 +196,7 @@ describe('registerPasskey validation gate', () => {
     let navigatorCreateMock;
 
     beforeEach(() => {
-        config.validateCredentialEndpoint = '/auth/validate-credential';
+        configureForTest('/auth/validate-credential');
         vi.restoreAllMocks();
 
         cognitoRequestMock = vi.fn();
@@ -284,7 +263,7 @@ describe('registerPasskey validation gate', () => {
     });
 
     it('should skip validation and proceed when no endpoint configured', async () => {
-        config.validateCredentialEndpoint = null;
+        configureForTest();
         navigatorCreateMock.mockResolvedValue({});
 
         const fetchSpy = vi.spyOn(globalThis, 'fetch');
@@ -303,7 +282,7 @@ describe('registerPasskey validation gate', () => {
 
 describe('upgradeToPasskey validation gate', () => {
     beforeEach(() => {
-        config.validateCredentialEndpoint = '/auth/validate-credential';
+        configureForTest('/auth/validate-credential');
         vi.restoreAllMocks();
     });
 
@@ -352,7 +331,7 @@ describe('upgradeToPasskey validation gate', () => {
     });
 
     it('should return true when no endpoint configured (skip)', async () => {
-        config.validateCredentialEndpoint = null;
+        configureForTest();
         const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
         const result = await simulateUpgradeToPasskey();
