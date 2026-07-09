@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.22.0] - 2026-06-14
+
+A seven-lens design review drove this release — all 15 identified design-flaws are fixed. See PR #26 / issue #25.
+
+### Added
+
+- **`AuthError` + `AuthErrorCode`** — every failure now throws an `AuthError` with a stable `.code` (15 codes: `NOT_CONFIGURED`, `SESSION_EXPIRED`, `MFA_REQUIRED`, `USER_CANCELLED`, `CREDENTIAL_REJECTED`, `LOCKED_OUT`, etc.). Branch on `error.code`, not message text. MFA carries `error.details.challengeName`. Backward compatible — messages are unchanged, `.code` is additive.
+- **`hydrate()`** — await once at startup to populate the sync auth cache from the server session before the first `isAuthenticated()` check on a fresh page load.
+- **Backend-owned OAuth flow** — new `GET /auth/login` (Rust) owns OAuth `state` + PKCE: it stores them in the pre-login session, redirects to Cognito, and `/auth/callback` validates `state` (constant-time) and supplies the verifier at token exchange. Client: set `loginEndpoint: '/auth/login'`; `loginWithHostedUI()` redirects there. `plugin/templates/auth-success.html` is the landing page.
+- **`ENTITY_STRICT_OWNERSHIP`** (Rust) — when enabled, `:own` actions are denied unless the entity provider positively confirms ownership (closes the untracked-resource fail-open).
+- **`COGNITO_ENDPOINT`** (Rust) — overrides the Cognito IDP/token base URL (enables real integration tests against a mock server).
+
+### Changed
+
+- **`refresh_token` never persists client-side** — direct login (password/passkey/OAuth) now hands the refresh token to the server and discards it; it no longer enters the client cache, `onLogin` listeners, or the login return value. Login also persists the server session **before** broadcasting `onAuthStateChange`, so a persist failure can't leave a half-logged-in UI.
+- **Sync auth-state no longer false-negatives on a timer** — `isAuthenticated()` and the sync family return last-known state regardless of the cache TTL; the JWT's own `exp` is the validity authority. Fixes logged-in users flashing "logged out" on page load and mid-refresh-interval.
+- **`logout()` is documented as async** — `await logout()` before navigating so the server session is destroyed.
+
+### Fixed / Security
+
+- **`SessionBackend::save`/`delete` return `Result`** (Rust) — DynamoDB persistence failures no longer masquerade as a successful login/logout. A failed save returns 500 without a session cookie; a failed logout delete returns 500 while still clearing the browser cookie.
+- **Cedar init fail-fast** — present-but-invalid schema/policies panic at startup instead of booting an authorizer that returns 503 forever.
+- **Session-fixation defense** — the session ID is rotated on login (`/auth/session` and OAuth callback).
+- **Release pipeline** — placeholder release notes are never published; existing releases are updated in place; `sync-version.js` fails loudly when a version pattern drifts.
+
+### Types / Tests
+
+- `auth.d.ts` synced with all runtime exports; a parity test now fails if they drift.
+- Core login flows, the Cognito client (exchange/refresh), and the credential-validation gate are now tested against real code (were mocked/tautological).
+- 715 vitest + 176 cargo tests.
+
 ## [0.21.1] - 2026-04-05
 
 ### Fixed
