@@ -2,9 +2,9 @@
  * L42 Cognito Passkey - TypeScript Type Declarations
  *
  * Type declarations for the l42-cognito-passkey authentication library.
- * These types match the exports of src/auth.js (v0.18.0).
+ * These types match the exports of src/auth.js (v0.21.1).
  *
- * @version 0.18.0
+ * @version 0.21.1
  * @license Apache-2.0
  */
 
@@ -80,6 +80,13 @@ export interface AuthConfigOptions {
   validateCredentialEndpoint?: string;
   /** Backend OAuth callback URL (optional) */
   oauthCallbackUrl?: string;
+  /**
+   * Backend-initiated hosted-UI login endpoint (e.g. '/auth/login'). When set,
+   * loginWithHostedUI() redirects here and the backend owns OAuth state + PKCE.
+   * Required when oauthCallbackUrl is set (a client-generated PKCE challenge
+   * can't be completed by the backend).
+   */
+  loginEndpoint?: string;
   /** Token Handler cache TTL in milliseconds (default: 30000) */
   handlerCacheTtl?: number;
   /**
@@ -288,11 +295,54 @@ export interface LoginAttemptInfo {
 /** Library version string */
 export const VERSION: string;
 
+// -- Error taxonomy --
+
+/**
+ * Stable error codes on `AuthError.code`. Branch on these rather than message
+ * text — messages may change; codes are the contract.
+ */
+export const AuthErrorCode: {
+  readonly NOT_CONFIGURED: 'NOT_CONFIGURED';
+  readonly INVALID_CONFIG: 'INVALID_CONFIG';
+  readonly NETWORK: 'NETWORK';
+  readonly SESSION_EXPIRED: 'SESSION_EXPIRED';
+  readonly MFA_REQUIRED: 'MFA_REQUIRED';
+  readonly LOCKED_OUT: 'LOCKED_OUT';
+  readonly USER_CANCELLED: 'USER_CANCELLED';
+  readonly CREDENTIAL_REJECTED: 'CREDENTIAL_REJECTED';
+  readonly RATE_LIMITED: 'RATE_LIMITED';
+  readonly PASSKEY_NOT_AVAILABLE: 'PASSKEY_NOT_AVAILABLE';
+  readonly OAUTH_STATE_MISMATCH: 'OAUTH_STATE_MISMATCH';
+  readonly TOKEN_EXCHANGE_FAILED: 'TOKEN_EXCHANGE_FAILED';
+  readonly NOT_AUTHENTICATED: 'NOT_AUTHENTICATED';
+  readonly AUTH_FAILED: 'AUTH_FAILED';
+  readonly UNKNOWN: 'UNKNOWN';
+};
+
+/** A value of `AuthErrorCode`. */
+export type AuthErrorCodeValue = (typeof AuthErrorCode)[keyof typeof AuthErrorCode];
+
+/**
+ * Error thrown by the library. Extends `Error` with a stable `.code`.
+ * For MFA_REQUIRED, `details.challengeName` carries the Cognito challenge.
+ */
+export class AuthError extends Error {
+  constructor(
+    code: AuthErrorCodeValue,
+    message: string,
+    options?: { cause?: unknown; details?: Record<string, unknown> }
+  );
+  readonly name: 'AuthError';
+  code: AuthErrorCodeValue;
+  cause?: unknown;
+  details?: Record<string, unknown>;
+}
+
 // -- Configuration --
 
 /**
  * Configure the auth library. Must be called before using auth functions.
- * @throws {Error} If required configuration is invalid
+ * @throws {AuthError} INVALID_CONFIG if configuration is invalid.
  */
 export function configure(options: AuthConfigOptions): void;
 
@@ -308,6 +358,14 @@ export function isConfigured(): boolean;
  * Always returns a Promise — use `await getTokens()`.
  */
 export function getTokens(): Promise<TokenSet | null>;
+
+/**
+ * Hydrate the client token cache from the server session. Await once at startup
+ * before the first synchronous auth check on a fresh page load. Resolves `true`
+ * if an authenticated session was found, `false` otherwise (never throws for the
+ * not-authenticated case).
+ */
+export function hydrate(): Promise<boolean>;
 
 /**
  * Store tokens and set cookie for server-side validation.
@@ -485,6 +543,39 @@ export function isPlatformAuthenticatorAvailable(): Promise<boolean>;
  */
 export function getPasskeyCapabilities(): Promise<PasskeyCapabilities>;
 
+// -- Utilities --
+
+/** Parsed authenticator-data flags from a raw WebAuthn authenticatorData buffer. */
+export interface AuthenticatorMetadata {
+  userPresent: boolean;
+  userVerified: boolean;
+  backupEligible: boolean;
+  backupState: boolean;
+  attestedCredentialData: boolean;
+  extensionData: boolean;
+  signCount: number;
+  /** Present only when attested credential data (AT flag) is included. */
+  aaguid?: string;
+}
+
+/** Parse UP/UV/BE/BS/AT/ED flags, signCount, and AAGUID from raw authenticatorData. */
+export function parseAuthenticatorData(authData: ArrayBuffer): AuthenticatorMetadata | null;
+
+/** Format a 16-byte AAGUID as a UUID string. */
+export function formatAaguid(bytes: Uint8Array): string;
+
+/** Generate an RFC 7636 PKCE code verifier (64 base64url chars). */
+export function generateCodeVerifier(): string;
+
+/** Compute the PKCE code challenge BASE64URL(SHA-256(verifier)). */
+export function generateCodeChallenge(verifier: string): Promise<string>;
+
+/** Classify a Cognito error as an account lockout. */
+export function detectCognitoLockout(error: { message?: string; __type?: string; code?: string }): boolean;
+
+/** Exponential backoff delay (ms) for a given attempt index (with jitter). */
+export function getBackoffDelay(attempt: number): number;
+
 // -- Server-Side Authorization --
 
 /**
@@ -599,13 +690,24 @@ export function clearDebugHistory(): void;
  */
 export function getLoginAttemptInfo(email: string): LoginAttemptInfo | null;
 
+// -- Test-only helpers (underscore-prefixed; not part of the stable API) --
+
+/** @internal Reset all module-level state between tests. */
+export function _resetForTesting(): void;
+
+/** @internal Validate a credential against the server policy gate (exported for testing). */
+export function _validateCredential(credentialResponse: unknown): Promise<void>;
+
 // ==================== DEFAULT EXPORT ====================
 
 declare const auth: {
   VERSION: typeof VERSION;
+  AuthError: typeof AuthError;
+  AuthErrorCode: typeof AuthErrorCode;
   configure: typeof configure;
   isConfigured: typeof isConfigured;
   getTokens: typeof getTokens;
+  hydrate: typeof hydrate;
   setTokens: typeof setTokens;
   clearTokens: typeof clearTokens;
   UNSAFE_decodeJwtPayload: typeof UNSAFE_decodeJwtPayload;
@@ -651,6 +753,12 @@ declare const auth: {
   getDiagnostics: typeof getDiagnostics;
   clearDebugHistory: typeof clearDebugHistory;
   getLoginAttemptInfo: typeof getLoginAttemptInfo;
+  getBackoffDelay: typeof getBackoffDelay;
+  detectCognitoLockout: typeof detectCognitoLockout;
+  parseAuthenticatorData: typeof parseAuthenticatorData;
+  formatAaguid: typeof formatAaguid;
+  generateCodeVerifier: typeof generateCodeVerifier;
+  generateCodeChallenge: typeof generateCodeChallenge;
 };
 
 export default auth;

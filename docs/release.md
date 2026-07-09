@@ -4,7 +4,7 @@ Release process and version upgrade guide.
 
 ## Current Version
 
-**0.21.1** — 713 vitest + 164 cargo tests
+**0.21.1** — 715 vitest + 176 cargo tests
 
 ## Release Process
 
