@@ -1,6 +1,6 @@
 [package]
 name = "l42-token-handler"
-version = "0.21.1"
+version = "0.22.0"
 edition = "2024"
 description = "Rust Token Handler backend for l42-cognito-passkey"
 license = "Apache-2.0"
