@@ -82,8 +82,15 @@ async fn main() {
                     Some(state)
                 }
                 Err(e) => {
-                    tracing::error!("Cedar init failed (running without authorization): {}", e);
-                    None
+                    // Schema/policies are present but invalid — this is a
+                    // misconfiguration, not an intentional no-Cedar deployment.
+                    // Fail fast rather than booting an authorizer that returns
+                    // 503 on every request for the life of the process.
+                    panic!(
+                        "Cedar schema/policies exist but failed to load: {e}. \
+                         Fix the schema/policies, or remove them to run without \
+                         authorization."
+                    );
                 }
             }
         } else {

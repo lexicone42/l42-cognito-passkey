@@ -228,6 +228,8 @@ pub async fn oauth_callback(
                 data.remove(crate::routes::login::OAUTH_STATE_KEY);
                 data.remove(crate::routes::login::OAUTH_VERIFIER_KEY);
             }
+            // Rotate the session ID on login (session-fixation defense).
+            session.rotate_id().await;
 
             ocsf::authentication_event(
                 ocsf::ACTIVITY_AUTH_TICKET,

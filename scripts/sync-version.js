@@ -54,6 +54,15 @@ const updates = [
     }
   },
   {
+    file: 'rust/Cargo.toml',
+    optional: true,
+    patterns: [
+      // The [package] version line — keep the Rust backend aligned with the
+      // product so OCSF events (env!("CARGO_PKG_VERSION")) report the real version.
+      { regex: /^version = "[\d.]+(-[\w.]+)?"/m, replacement: `version = "${newVersion}"`, required: true }
+    ]
+  },
+  {
     file: 'plugin/CLAUDE.md',
     optional: true,
     patterns: [
