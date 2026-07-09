@@ -259,15 +259,32 @@ const HandlerTokenStore = {
     },
 
     /**
-     * Get cached tokens synchronously (for isAuthenticated checks).
-     * Returns cached value without fetching.
-     * @returns {Object|null} Cached tokens or null
+     * Get last-known cached tokens synchronously (for isAuthenticated and the
+     * other sync reads).
+     *
+     * Returns the cached tokens whether or not the cache TTL has lapsed —
+     * `_cacheExpiry` governs when the async `get()` re-fetches from the server,
+     * NOT whether the user is authenticated. Conflating the two made the whole
+     * sync family (isAuthenticated, getUserEmail, isAdmin, …) flip to
+     * "logged out" for ~half of every refresh interval and on any read between
+     * cache lapses (design review: "sync auth-state reports false negatives on
+     * a timer").
+     *
+     * Token *validity* is enforced downstream by the caller (isAuthenticated
+     * runs validateTokenClaims + isTokenExpired against the JWT's own `exp`), so
+     * returning stale-but-present tokens is safe: a genuinely expired JWT is
+     * still rejected, and a genuine logout/401 sets `_cache = null` here.
+     *
+     * @returns {Object|null} Last-known cached tokens, or null if never
+     *   populated / cleared / server said 401.
      */
     getCached() {
-        if (this._cache && Date.now() < this._cacheExpiry) {
-            return this._cache;
-        }
-        return null;
+        return this._cache;
+    },
+
+    /** True if the cache is within its re-fetch TTL (i.e. `get()` won't re-fetch). */
+    isFresh() {
+        return this._cache !== null && Date.now() < this._cacheExpiry;
     }
 };
 
@@ -902,6 +919,28 @@ function getTokensSync() {
 export function getTokens() {
     requireConfig();
     return getTokenStore().get(config.tokenKey);
+}
+
+/**
+ * Hydrate the client token cache from the server session.
+ *
+ * On a fresh page load the sync reads (`isAuthenticated()`, `getUserEmail()`,
+ * …) have no cached tokens yet and will report logged-out until something
+ * fetches. Call `await hydrate()` once at startup — typically before your first
+ * sync auth check — so those reads reflect the real session:
+ *
+ *   await hydrate();
+ *   if (isAuthenticated()) showApp(); else showLogin();
+ *
+ * Resolves to `true` if a valid session was found, `false` otherwise. Never
+ * throws for the not-authenticated case (a 401 resolves to `false`); genuine
+ * network errors still reject.
+ *
+ * @returns {Promise<boolean>} Whether an authenticated session was hydrated.
+ */
+export async function hydrate() {
+    await getTokens(); // populates the cache (or clears it on 401)
+    return isAuthenticated();
 }
 
 /**
@@ -3304,6 +3343,7 @@ export default {
     configure,
     isConfigured,
     getTokens,
+    hydrate,
     setTokens,
     clearTokens,
     UNSAFE_decodeJwtPayload,

@@ -20,6 +20,8 @@ import {
     clearTokens,
     getTokens,
     isAuthenticated,
+    getUserEmail,
+    hydrate,
     logout,
     _resetForTesting
 } from '../../src/auth.js';
@@ -52,8 +54,8 @@ function createTestJwt(claims) {
 }
 
 /** Mock tokens with valid JWT structure (passes validateTokenClaims). */
-function createMockTokens() {
-    const exp = Math.floor(Date.now() / 1000) + 3600;
+function createMockTokens(overrides = {}) {
+    const exp = overrides.exp || Math.floor(Date.now() / 1000) + 3600;
     return {
         access_token: createTestJwt({ sub: 'user1', client_id: 'test-client', exp }),
         id_token: createTestJwt({
@@ -568,13 +570,73 @@ describe('Handler Mode Cache TTL', () => {
         expect(fetch).toHaveBeenCalledTimes(2);
     });
 
-    it('isAuthenticated returns false after TTL expires without refresh', () => {
+    it('isAuthenticated stays true after cache TTL lapses while the JWT is still valid', () => {
+        // Cache TTL governs the async re-fetch cadence, NOT authentication.
+        // A logged-in user must not flip to "logged out" just because the 30s
+        // cache window elapsed (design review: sync false-negatives on a timer).
         configureForTest({ handlerCacheTtl: 1000 });
 
-        setTokens(createMockTokens());
+        setTokens(createMockTokens()); // JWT exp is ~1 hour out
         expect(isAuthenticated()).toBe(true);
 
-        vi.advanceTimersByTime(1500);
+        vi.advanceTimersByTime(1500); // well past the 1s cache TTL
+        expect(isAuthenticated()).toBe(true);
+    });
+
+    it('isAuthenticated goes false once the JWT itself expires', () => {
+        // The JWT's own exp is the real validity authority.
+        configureForTest({ handlerCacheTtl: 1000 });
+
+        // Token that expires 2 seconds from now
+        const soonExp = Math.floor(Date.now() / 1000) + 2;
+        setTokens(createMockTokens({ exp: soonExp }));
+        expect(isAuthenticated()).toBe(true);
+
+        vi.advanceTimersByTime(3000); // past the JWT exp
+        expect(isAuthenticated()).toBe(false);
+    });
+});
+
+// ============================================================================
+// hydrate() — cold page-load population of the sync cache
+// ============================================================================
+
+describe('hydrate()', () => {
+    beforeEach(() => {
+        _resetForTesting();
+        configureForTest();
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('populates the sync cache from the server session', async () => {
+        // Cold load: sync reads are logged-out until hydrate runs.
+        expect(isAuthenticated()).toBe(false);
+
+        const t = createMockTokens();
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true, status: 200,
+            json: () => Promise.resolve({
+                access_token: t.access_token,
+                id_token: t.id_token,
+                auth_method: 'handler'
+            })
+        });
+
+        const ok = await hydrate();
+
+        expect(ok).toBe(true);
+        // Sync reads now reflect the real session without another fetch
+        expect(isAuthenticated()).toBe(true);
+        expect(getUserEmail).toBeTypeOf('function');
+    });
+
+    it('resolves false when there is no server session (401)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+
+        const ok = await hydrate();
+
+        expect(ok).toBe(false);
         expect(isAuthenticated()).toBe(false);
     });
 });
