@@ -132,15 +132,17 @@
             } catch (error) {
                 console.error('[Auth Callback] Error:', error);
 
+                // Branch on the stable AuthError code, not message text.
                 let message = 'Authentication failed';
-                if (error.message) {
-                    if (error.message.includes('state') || error.message.includes('CSRF')) {
+                switch (error.code) {
+                    case 'OAUTH_STATE_MISMATCH':
                         message = 'Security validation failed. Please try again.';
-                    } else if (error.message.includes('configured')) {
+                        break;
+                    case 'NOT_CONFIGURED':
                         message = 'Auth not configured. Check L42_AUTH_CONFIG.';
-                    } else {
-                        message = error.message;
-                    }
+                        break;
+                    default:
+                        message = error.message || message;
                 }
 
                 showError(message);

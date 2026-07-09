@@ -111,6 +111,7 @@ const DEFAULT_CONFIG = /*#__PURE__*/ {
     sessionEndpoint: null,      // e.g., '/auth/session' - POST tokens after direct login (passkey/password)
     validateCredentialEndpoint: null, // e.g., '/auth/validate-credential' - pre-registration AAGUID/policy check
     oauthCallbackUrl: null,     // e.g., '/auth/callback' - Backend OAuth callback
+    loginEndpoint: null,        // e.g., '/auth/login' - Backend-initiated hosted-UI redirect (owns state+PKCE)
     // Token Handler cache TTL in milliseconds (default: 30 seconds)
     handlerCacheTtl: 30000,
     // Structured logging for OCSF/Security Lake integration
@@ -705,6 +706,10 @@ function autoConfigureFromWindow() {
             logoutEndpoint: windowConfig.logoutEndpoint,
             sessionEndpoint: windowConfig.sessionEndpoint,
             validateCredentialEndpoint: windowConfig.validateCredentialEndpoint,
+            oauthCallbackUrl: windowConfig.oauthCallbackUrl,
+            loginEndpoint: windowConfig.loginEndpoint,
+            handlerCacheTtl: windowConfig.handlerCacheTtl,
+            debug: windowConfig.debug,
         });
     }
 }
@@ -2180,11 +2185,23 @@ function getAndClearCodeVerifier() {
 
 /**
  * Redirect to Cognito Hosted UI for login.
- * Uses PKCE (Proof Key for Code Exchange) for enhanced security.
- * Use this for OAuth flow with full scopes (needed for passkey management).
  *
- * In handler mode, redirects to the backend callback URL (oauthCallbackUrl)
- * which handles the OAuth exchange server-side.
+ * Two flows, selected by config:
+ *
+ * 1. **Backend-owned** (`loginEndpoint` set — the recommended flow when the
+ *    backend also handles the callback via `oauthCallbackUrl`): redirect to the
+ *    backend's `/auth/login`. The backend generates and stores the OAuth `state`
+ *    and the PKCE verifier in the pre-login session, then redirects to Cognito.
+ *    It validates `state` and supplies the verifier at token exchange. The
+ *    client holds no OAuth secrets and the flow actually composes.
+ *
+ * 2. **Client-owned** (no `loginEndpoint`): the client generates `state` + a
+ *    PKCE challenge, redirects to Cognito directly, and completes the exchange
+ *    itself via `exchangeCodeForTokens()` on its own callback page.
+ *
+ * Do NOT set `oauthCallbackUrl` (backend callback) without also setting
+ * `loginEndpoint` — a client-generated PKCE challenge cannot be completed by the
+ * backend (it never receives the verifier), so Cognito rejects the exchange.
  *
  * @param {string} [email] - Optional email hint
  * @returns {Promise<void>}
@@ -2193,14 +2210,33 @@ export async function loginWithHostedUI(email) {
     requireConfig();
     abortConditionalRequest();
 
+    // Backend-owned flow: hand off to the backend login endpoint, which owns
+    // state + PKCE. Nothing to generate or store client-side.
+    if (config.loginEndpoint) {
+        const url = new URL(config.loginEndpoint, window.location.origin);
+        if (email) {
+            url.searchParams.set('email', email);
+        }
+        debugLog('auth', 'loginWithHostedUI:backend-redirect', { email: email || null });
+        window.location.href = url.toString();
+        return;
+    }
+
+    // Guard the known-broken combination early with an actionable message.
+    if (config.oauthCallbackUrl) {
+        throw new AuthError(
+            AuthErrorCode.INVALID_CONFIG,
+            'oauthCallbackUrl is set without loginEndpoint. A backend OAuth callback ' +
+            'cannot complete a client-generated PKCE challenge. Set loginEndpoint ' +
+            '(e.g. "/auth/login") so the backend owns state + PKCE.'
+        );
+    }
+
     const state = generateOAuthState();
     storeOAuthState(state);
+    const redirectUri = getRedirectUri();
 
-    // Use backend callback URL if configured, otherwise client-side callback
-    const redirectUri = config.oauthCallbackUrl || getRedirectUri();
-
-    // PKCE: Generate code verifier and challenge
-    // In handler mode, PKCE is handled by the backend, but we generate for client-side callback
+    // PKCE: Generate code verifier and challenge (client-owned flow)
     const codeVerifier = generateCodeVerifier();
     storeCodeVerifier(codeVerifier);
     const codeChallenge = await generateCodeChallenge(codeVerifier);

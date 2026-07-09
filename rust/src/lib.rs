@@ -90,6 +90,7 @@ pub fn create_app(state: Arc<AppState>) -> Router {
     // Auth routes without CSRF
     let open_auth_routes = Router::new()
         .route("/token", axum::routing::get(routes::token::get_token))
+        .route("/login", axum::routing::get(routes::login::login))
         .route(
             "/callback",
             axum::routing::get(routes::callback::oauth_callback),

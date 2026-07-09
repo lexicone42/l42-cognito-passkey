@@ -15,6 +15,7 @@ pub async fn exchange_code_for_tokens(
     config: &Config,
     code: &str,
     redirect_uri: &str,
+    code_verifier: Option<&str>,
 ) -> Result<HashMap<String, Value>, CognitoError> {
     let mut params = vec![
         ("grant_type", "authorization_code".to_string()),
@@ -25,6 +26,12 @@ pub async fn exchange_code_for_tokens(
 
     if !config.cognito_client_secret.is_empty() {
         params.push(("client_secret", config.cognito_client_secret.clone()));
+    }
+
+    // PKCE: send the verifier when the authorize request carried a challenge
+    // (backend-initiated flow). Cognito returns invalid_grant otherwise.
+    if let Some(verifier) = code_verifier {
+        params.push(("code_verifier", verifier.to_string()));
     }
 
     let resp = http_client

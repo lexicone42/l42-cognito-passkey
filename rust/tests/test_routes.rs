@@ -859,6 +859,67 @@ async fn test_callback_use_origin_scheme_fallback() {
     );
 }
 
+// ───── Backend-owned OAuth (GET /auth/login) + callback state validation ─────
+
+#[tokio::test]
+async fn test_login_endpoint_redirects_to_cognito_with_pkce() {
+    let (app, _state) = build_test_app(false);
+
+    let req = Request::builder()
+        .uri("/auth/login?email=user@example.com")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.contains("/oauth2/authorize?"), "got: {location}");
+    assert!(location.contains("code_challenge="), "must carry PKCE challenge");
+    assert!(location.contains("code_challenge_method=S256"));
+    assert!(location.contains("state="), "must carry state");
+    assert!(location.contains("login_hint=user%40example.com"));
+    // A session cookie is set so the callback can recover state + verifier
+    assert!(resp.headers().get("set-cookie").is_some());
+}
+
+#[tokio::test]
+async fn test_callback_rejects_mismatched_state() {
+    use l42_token_handler::session::{SessionBackend, SessionData};
+    let (app, state) = build_test_app(false);
+
+    // Seed a session carrying a stored OAuth state (as /auth/login would).
+    let mut data = SessionData::new();
+    data.set(
+        l42_token_handler::routes::login::OAUTH_STATE_KEY,
+        serde_json::json!("the-real-state"),
+    );
+    data.set(
+        l42_token_handler::routes::login::OAUTH_VERIFIER_KEY,
+        serde_json::json!("the-verifier"),
+    );
+    state
+        .session_layer
+        .backend
+        .save("sid-oauth", &data)
+        .await
+        .unwrap();
+
+    // Callback arrives with the WRONG state → must reject, not exchange.
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-oauth");
+    let req = Request::builder()
+        .uri("/auth/callback?code=abc&state=attacker-state")
+        .header("Cookie", format!("l42_session={}", signed))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        location.contains("error=Invalid+OAuth+state"),
+        "mismatched state must be rejected, got: {location}"
+    );
+}
+
 // ───── Custom Auth Path Prefix ─────
 
 #[tokio::test]

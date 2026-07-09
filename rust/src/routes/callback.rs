@@ -5,6 +5,7 @@ use axum::http::HeaderMap;
 use axum::response::Redirect;
 use serde::Deserialize;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 
 use crate::cognito::client;
 use crate::cognito::jwt::decode_jwt_unverified;
@@ -20,6 +21,34 @@ fn extract_host(headers: &HeaderMap) -> &str {
         .or_else(|| headers.get("host"))
         .and_then(|v| v.to_str().ok())
         .unwrap_or("localhost")
+}
+
+/// The `X-Forwarded-Proto` scheme, falling back to https/http per `session_https_only`.
+fn forwarded_scheme<'a>(config: &crate::config::Config, headers: &'a HeaderMap) -> &'a str {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| *s == "http" || *s == "https")
+        .unwrap_or(if config.session_https_only {
+            "https"
+        } else {
+            "http"
+        })
+}
+
+/// Compute this backend's public `/auth/callback` URL — the OAuth `redirect_uri`.
+///
+/// It MUST be byte-identical in the authorization request (built by the
+/// `/auth/login` endpoint) and in the token exchange here, or Cognito rejects
+/// the exchange. Both call this function so they can't drift.
+pub fn self_callback_url(config: &crate::config::Config, headers: &HeaderMap) -> String {
+    if !config.callback_use_origin && !config.frontend_url.is_empty() {
+        format!("{}{}/callback", config.frontend_url, config.auth_path_prefix)
+    } else {
+        let host = extract_host(headers);
+        let scheme = forwarded_scheme(config, headers);
+        format!("{}://{}{}/callback", scheme, host, config.auth_path_prefix)
+    }
 }
 
 /// Query parameters from Cognito OAuth redirect.
@@ -44,15 +73,7 @@ pub async fn oauth_callback(
     // distributions that redirect back to the correct origin after OAuth.
     let frontend: std::borrow::Cow<'_, str> = if state.config.callback_use_origin {
         let host = extract_host(&headers);
-        let scheme = headers
-            .get("x-forwarded-proto")
-            .and_then(|v| v.to_str().ok())
-            .filter(|s| *s == "http" || *s == "https")
-            .unwrap_or(if state.config.session_https_only {
-                "https"
-            } else {
-                "http"
-            });
+        let scheme = forwarded_scheme(&state.config, &headers);
         let origin = format!("{}://{}", scheme, host);
 
         // Validate origin against allowed list (prevents open redirect via header injection)
@@ -85,28 +106,49 @@ pub async fn oauth_callback(
         std::borrow::Cow::Borrowed(&state.config.frontend_url)
     };
 
-    // Build redirect_uri that must match the one used in the authorization request.
-    // When callback_use_origin is true, the origin is already derived from request
-    // headers above, so self_callback_url follows suit. Otherwise, prefer frontend_url
-    // (it matches Cognito config), falling back to request headers.
-    let self_callback_url =
-        if state.config.callback_use_origin || !state.config.frontend_url.is_empty() {
-            format!("{}{}/callback", frontend, state.config.auth_path_prefix)
-        } else {
-            let host = extract_host(&headers);
-            let scheme = headers
-                .get("x-forwarded-proto")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or(if state.config.session_https_only {
-                    "https"
-                } else {
-                    "http"
-                });
-            format!(
-                "{}://{}{}/callback",
-                scheme, host, state.config.auth_path_prefix
-            )
-        };
+    // redirect_uri must match the one used in the authorization request — both
+    // sides call self_callback_url so they can't drift.
+    let redirect_uri = self_callback_url(&state.config, &headers);
+
+    // Validate `state` against the value the /auth/login endpoint stored in this
+    // session, and take the stored PKCE verifier. Presence of a stored state
+    // means this login was backend-initiated: enforce CSRF + supply the verifier.
+    // Absence means a legacy client-initiated flow hit the backend callback —
+    // preserve backward-compatible behavior (no server-side state to check).
+    let (stored_state, stored_verifier) = {
+        let data = session.data.lock().await;
+        let s = data
+            .get(crate::routes::login::OAUTH_STATE_KEY)
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let v = data
+            .get(crate::routes::login::OAUTH_VERIFIER_KEY)
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        (s, v)
+    };
+
+    if let Some(ref expected) = stored_state {
+        let provided = params.state.as_deref().unwrap_or("");
+        let matches: bool = expected.as_bytes().ct_eq(provided.as_bytes()).into();
+        if !matches {
+            ocsf::authentication_event(
+                ocsf::ACTIVITY_AUTH_TICKET,
+                "Authentication Ticket",
+                ocsf::STATUS_FAILURE,
+                ocsf::SEVERITY_HIGH,
+                None,
+                ocsf::AUTH_PROTOCOL_OAUTH2,
+                "OAuth 2.0/OIDC",
+                "OAuth state mismatch — possible CSRF",
+            );
+            *session.destroyed.lock().await = true;
+            return Redirect::temporary(&format!(
+                "{}/login?error=Invalid+OAuth+state",
+                frontend
+            ));
+        }
+    }
 
     // Handle OAuth error from Cognito
     if let Some(ref error) = params.error {
@@ -145,11 +187,16 @@ pub async fn oauth_callback(
         }
     };
 
-    let redirect_uri = self_callback_url;
-
-    // Exchange code for tokens
-    match client::exchange_code_for_tokens(&state.http_client, &state.config, code, &redirect_uri)
-        .await
+    // Exchange code for tokens (with the stored PKCE verifier if this was a
+    // backend-initiated login).
+    match client::exchange_code_for_tokens(
+        &state.http_client,
+        &state.config,
+        code,
+        &redirect_uri,
+        stored_verifier.as_deref(),
+    )
+    .await
     {
         Ok(token_map) => {
             let access_token = token_map
@@ -168,7 +215,7 @@ pub async fn oauth_callback(
             // Extract email for OCSF (best-effort)
             let email = decode_jwt_unverified(id_token).ok().and_then(|c| c.email);
 
-            // Store in session
+            // Store tokens; drop the single-use OAuth state + verifier.
             let tokens = SessionTokens {
                 access_token: access_token.to_string(),
                 id_token: id_token.to_string(),
@@ -178,6 +225,8 @@ pub async fn oauth_callback(
             {
                 let mut data = session.data.lock().await;
                 data.set("tokens", serde_json::to_value(&tokens).unwrap());
+                data.remove(crate::routes::login::OAUTH_STATE_KEY);
+                data.remove(crate::routes::login::OAUTH_VERIFIER_KEY);
             }
 
             ocsf::authentication_event(

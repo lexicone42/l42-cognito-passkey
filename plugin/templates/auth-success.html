@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!--
+        Landing page for the BACKEND-OWNED OAuth flow.
+
+        When you use the backend login endpoint (loginEndpoint: "/auth/login")
+        and backend callback (oauthCallbackUrl: "/auth/callback"), the backend
+        completes the OAuth code exchange, validates state, stores the session in
+        an HttpOnly cookie, then redirects the browser HERE
+        (FRONTEND_URL/auth/success?state=...).
+
+        Unlike callback.html, this page does NOT call exchangeCodeForTokens — the
+        session already exists. It just hydrates the client cache from that
+        session and enters the app.
+
+        Replace {REGION} / {COGNITO_DOMAIN} / {CLIENT_ID} below.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline';
+        connect-src 'self' https://cognito-idp.{REGION}.amazonaws.com https://*.amazoncognito.com https://{COGNITO_DOMAIN};
+        frame-ancestors 'none';
+    ">
+    <meta name="robots" content="noindex,nofollow">
+    <title>Signing you in…</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'SF Mono', 'Consolas', monospace;
+            background: #1a1a2e; color: #eee;
+            min-height: 100vh; display: flex;
+            justify-content: center; align-items: center;
+        }
+        .container { text-align: center; max-width: 400px; padding: 2rem; }
+        .spinner {
+            width: 40px; height: 40px; border: 3px solid #333;
+            border-top-color: #e94560; border-radius: 50%;
+            animation: spin 1s linear infinite; margin: 0 auto 1.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status { color: #888; font-size: 0.9rem; }
+        .status.error { color: #f87171; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="loading">
+            <div class="spinner"></div>
+            <p class="status">Signing you in…</p>
+        </div>
+        <div id="error" class="hidden">
+            <p class="status error" id="error-message">Sign-in could not complete</p>
+            <p class="status" style="margin-top: 0.5rem;">Redirecting to login…</p>
+        </div>
+    </div>
+
+    <script>
+    window.L42_AUTH_CONFIG = {
+        clientId: '{CLIENT_ID}',
+        cognitoDomain: '{COGNITO_DOMAIN}',
+        cognitoRegion: '{REGION}',
+        tokenEndpoint: '/auth/token',
+        refreshEndpoint: '/auth/refresh',
+        logoutEndpoint: '/auth/logout',
+        sessionEndpoint: '/auth/session',
+        loginEndpoint: '/auth/login',
+        oauthCallbackUrl: '/auth/callback'
+    };
+    </script>
+
+    <script type="module">
+        import { configure, hydrate } from '/auth/auth.js';
+
+        const loading = document.getElementById('loading');
+        const errorBox = document.getElementById('error');
+        const errorMsg = document.getElementById('error-message');
+
+        function fail(message) {
+            loading.classList.add('hidden');
+            errorBox.classList.remove('hidden');
+            errorMsg.textContent = message || 'Sign-in could not complete';
+            setTimeout(() => { window.location.href = '/login'; }, 3000);
+        }
+
+        (async () => {
+            configure(window.L42_AUTH_CONFIG);
+            try {
+                // The backend already exchanged the code and set the session
+                // cookie; hydrate() reads it so the sync auth checks work.
+                const authed = await hydrate();
+                if (!authed) {
+                    fail('No active session found.');
+                    return;
+                }
+                const redirectTo = sessionStorage.getItem('l42_redirect_after_login') || '/';
+                sessionStorage.removeItem('l42_redirect_after_login');
+                window.location.href = redirectTo;
+            } catch (e) {
+                // e.code is a stable AuthErrorCode — branch on it, not the message.
+                fail(e && e.code === 'NETWORK' ? 'Network error. Please try again.' : (e && e.message));
+            }
+        })();
+    </script>
+</body>
+</html>

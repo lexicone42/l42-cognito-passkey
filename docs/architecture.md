@@ -96,12 +96,39 @@ The refresh token **never** leaves the server. Session cookies must be `HttpOnly
 | `/auth/session` | POST | Yes | Store tokens after passkey/password login |
 | `/auth/refresh` | POST | Yes | Refresh tokens via Cognito, return new tokens |
 | `/auth/logout` | POST | Yes | Destroy session, clear cookie |
-| `/auth/callback` | GET | No* | OAuth code exchange, store tokens, redirect |
+| `/auth/login` | GET | No* | Backend-owned hosted-UI start: generate + store `state`+PKCE, redirect to Cognito |
+| `/auth/callback` | GET | No* | OAuth code exchange, validate `state`, store tokens, redirect |
 | `/auth/authorize` | POST | Yes | Cedar policy evaluation |
 | `/auth/me` | GET | No | Return user info from session |
+| `/auth/validate-credential` | POST | Yes | Pre-registration AAGUID allowlist / device-bound check |
 | `/health` | GET | No | Liveness check |
 
-\* `/auth/callback` uses OAuth `state` for CSRF instead.
+\* `/auth/login` and `/auth/callback` use the OAuth `state` parameter (stored in
+the session by `/auth/login`, verified by `/auth/callback`) for CSRF.
+
+### Hosted-UI (OAuth) flow
+
+Two coherent shapes, selected by client config:
+
+**Backend-owned (recommended for Token Handler):** set `loginEndpoint: "/auth/login"`
+and `oauthCallbackUrl: "/auth/callback"`. `loginWithHostedUI()` redirects to
+`/auth/login`; the backend generates `state` + a PKCE verifier, stores both in the
+pre-login session cookie, and redirects to Cognito with the `code_challenge`.
+Cognito redirects back to `/auth/callback`, which validates `state` against the
+session, exchanges the code (sending the stored verifier + the confidential
+client secret), stores tokens, and redirects the browser to
+`FRONTEND_URL/auth/success?state=…`. Provide an `/auth/success` page — see
+`plugin/templates/auth-success.html` — which calls `hydrate()` and enters the app.
+The client never holds an OAuth secret.
+
+**Client-owned:** leave `loginEndpoint` unset. The client generates `state` + the
+PKCE challenge, redirects to Cognito directly, and completes the exchange itself
+via `exchangeCodeForTokens()` on its own callback page (`plugin/templates/callback.html`).
+
+> Do not set `oauthCallbackUrl` without `loginEndpoint`: a client-generated PKCE
+> challenge can't be completed by the backend (it never receives the verifier),
+> so Cognito rejects the exchange. `loginWithHostedUI()` throws
+> `AuthErrorCode.INVALID_CONFIG` for that combination.
 
 ### CSRF Protection
 
