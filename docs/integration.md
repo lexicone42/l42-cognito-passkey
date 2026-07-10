@@ -115,6 +115,36 @@ UserPoolClient:
       - https://your-domain.com/callback
     LogoutURLs:
       - https://your-domain.com/
+    # Recommended: rotate the refresh token on every refresh (see below).
+    RefreshTokenRotation:
+      Feature: ENABLED
+      RetryGracePeriodSeconds: 30
+```
+
+### Refresh Token Rotation (recommended)
+
+The Rust backend refreshes via Cognito's `GetTokensFromRefreshToken` API. When
+**refresh token rotation** is enabled on the app client, each refresh returns a
+**new** refresh token that supersedes the old one; the backend automatically
+persists it into the server session. Because the refresh token lives only
+server-side (in the DynamoDB session), rotation meaningfully reduces the blast
+radius if that store is ever compromised — a captured refresh token is
+single-use.
+
+- `Feature: ENABLED` turns rotation on. Still requires `ALLOW_REFRESH_TOKEN_AUTH`.
+- `RetryGracePeriodSeconds` (0–60) keeps the *previous* refresh token valid for a
+  short window so near-simultaneous refreshes (e.g. background auto-refresh racing
+  a user API call) don't both get rejected. **Set this to ≥ 10s** — with `0`, a
+  second concurrent refresh invalidates the session. `30` is a safe default.
+
+No client (`auth.js`) changes are needed — refresh is entirely server-side.
+
+To enable on an existing client via CLI:
+
+```bash
+aws cognito-idp update-user-pool-client \
+  --user-pool-id us-west-2_xxxxxxxxx --client-id xxxxxxxx \
+  --refresh-token-rotation Feature=ENABLED,RetryGracePeriodSeconds=30
 ```
 
 ### WebAuthn Configuration (boto3)
