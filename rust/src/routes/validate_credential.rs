@@ -27,12 +27,7 @@ pub async fn validate_credential(
     Json(body): Json<ValidateCredentialRequest>,
 ) -> Result<Json<ValidateCredentialResponse>, AppError> {
     // Require authenticated session
-    let data = session.data.lock().await;
-    let tokens: SessionTokens = data
-        .get("tokens")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .ok_or(AppError::NotAuthenticated)?;
-    drop(data);
+    let tokens: SessionTokens = session.tokens().await?;
 
     if is_token_expired(&tokens.id_token) {
         return Err(AppError::TokenExpired);

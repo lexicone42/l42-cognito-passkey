@@ -138,7 +138,6 @@ impl CedarState {
         claims: &Claims,
         action: &str,
         resource: Option<&ResourceDescriptor>,
-        _context: Option<&serde_json::Value>,
     ) -> Result<AuthorizeResult, CedarError> {
         // Build entities
         let entity_list =
@@ -244,15 +243,15 @@ mod tests {
         let state = init_real_cedar();
         let admin = claims("admin-user", &["admin"]);
 
-        let result = state.authorize(&admin, "read:content", None, None).unwrap();
+        let result = state.authorize(&admin, "read:content", None).unwrap();
         assert!(result.authorized);
 
         let result = state
-            .authorize(&admin, "admin:delete-user", None, None)
+            .authorize(&admin, "admin:delete-user", None)
             .unwrap();
         assert!(result.authorized);
 
-        let result = state.authorize(&admin, "write:all", None, None).unwrap();
+        let result = state.authorize(&admin, "write:all", None).unwrap();
         assert!(result.authorized);
     }
 
@@ -262,15 +261,15 @@ mod tests {
         let user = claims("user-sub", &["users"]);
 
         // Users can read:own and write:own
-        let result = state.authorize(&user, "read:own", None, None).unwrap();
+        let result = state.authorize(&user, "read:own", None).unwrap();
         assert!(result.authorized);
 
-        let result = state.authorize(&user, "write:own", None, None).unwrap();
+        let result = state.authorize(&user, "write:own", None).unwrap();
         assert!(result.authorized);
 
         // Users cannot admin:delete-user
         let result = state
-            .authorize(&user, "admin:delete-user", None, None)
+            .authorize(&user, "admin:delete-user", None)
             .unwrap();
         assert!(!result.authorized);
     }
@@ -287,7 +286,7 @@ mod tests {
             owner: Some("user-sub".into()),
         };
         let result = state
-            .authorize(&user, "write:own", Some(&own_resource), None)
+            .authorize(&user, "write:own", Some(&own_resource))
             .unwrap();
         assert!(
             result.authorized,
@@ -301,7 +300,7 @@ mod tests {
             owner: Some("other-user".into()),
         };
         let result = state
-            .authorize(&user, "write:own", Some(&other_resource), None)
+            .authorize(&user, "write:own", Some(&other_resource))
             .unwrap();
         assert!(
             !result.authorized,
@@ -321,7 +320,7 @@ mod tests {
             owner: Some("other-user".into()),
         };
         let result = state
-            .authorize(&admin, "write:all", Some(&other_resource), None)
+            .authorize(&admin, "write:all", Some(&other_resource))
             .unwrap();
         assert!(result.authorized);
     }
@@ -333,13 +332,13 @@ mod tests {
 
         // Readonly can read
         let result = state
-            .authorize(&viewer, "read:content", None, None)
+            .authorize(&viewer, "read:content", None)
             .unwrap();
         assert!(result.authorized);
 
         // Readonly cannot write
         let result = state
-            .authorize(&viewer, "write:content", None, None)
+            .authorize(&viewer, "write:content", None)
             .unwrap();
         assert!(!result.authorized);
     }
@@ -350,23 +349,23 @@ mod tests {
         let editor = claims("editor-sub", &["editors"]);
 
         let result = state
-            .authorize(&editor, "read:content", None, None)
+            .authorize(&editor, "read:content", None)
             .unwrap();
         assert!(result.authorized);
 
         let result = state
-            .authorize(&editor, "write:content", None, None)
+            .authorize(&editor, "write:content", None)
             .unwrap();
         assert!(result.authorized);
 
         let result = state
-            .authorize(&editor, "publish:content", None, None)
+            .authorize(&editor, "publish:content", None)
             .unwrap();
         assert!(result.authorized);
 
         // Editors cannot manage users
         let result = state
-            .authorize(&editor, "admin:manage", None, None)
+            .authorize(&editor, "admin:manage", None)
             .unwrap();
         assert!(!result.authorized);
     }
@@ -376,17 +375,17 @@ mod tests {
         let state = init_real_cedar();
         let dev = claims("dev-sub", &["developers"]);
 
-        let result = state.authorize(&dev, "api:read", None, None).unwrap();
+        let result = state.authorize(&dev, "api:read", None).unwrap();
         assert!(result.authorized);
 
-        let result = state.authorize(&dev, "read:logs", None, None).unwrap();
+        let result = state.authorize(&dev, "read:logs", None).unwrap();
         assert!(result.authorized);
 
-        let result = state.authorize(&dev, "debug:view", None, None).unwrap();
+        let result = state.authorize(&dev, "debug:view", None).unwrap();
         assert!(result.authorized);
 
         // Developers cannot admin
-        let result = state.authorize(&dev, "admin:manage", None, None).unwrap();
+        let result = state.authorize(&dev, "admin:manage", None).unwrap();
         assert!(!result.authorized);
     }
 
@@ -396,7 +395,7 @@ mod tests {
         let nobody = claims("nobody-sub", &[]);
 
         let result = state
-            .authorize(&nobody, "read:content", None, None)
+            .authorize(&nobody, "read:content", None)
             .unwrap();
         assert!(!result.authorized);
     }
@@ -469,7 +468,7 @@ mod tests {
         let state = gm_monster_engine();
         let gm = claims("gm-sub", &["gms"]);
         let result = state
-            .authorize(&gm, "view:monster", Some(&monster("goblin-1")), None)
+            .authorize(&gm, "view:monster", Some(&monster("goblin-1")))
             .unwrap();
         assert!(result.authorized, "a GM must be able to view a monster");
     }
@@ -479,7 +478,7 @@ mod tests {
         let state = gm_monster_engine();
         let player = claims("player-sub", &["users"]);
         let result = state
-            .authorize(&player, "view:monster", Some(&monster("goblin-1")), None)
+            .authorize(&player, "view:monster", Some(&monster("goblin-1")))
             .unwrap();
         assert!(
             !result.authorized,
@@ -499,7 +498,7 @@ mod tests {
             owner: None,
         };
         let result = state
-            .authorize(&gm, "view:monster", Some(&treasure), None)
+            .authorize(&gm, "view:monster", Some(&treasure))
             .unwrap();
         assert!(
             !result.authorized,

@@ -34,10 +34,7 @@ pub async fn create_session(
                 refresh_token: body.refresh_token,
                 auth_method: Some(body.auth_method),
             };
-            {
-                let mut data = session.data.lock().await;
-                data.set("tokens", serde_json::to_value(&tokens).unwrap());
-            }
+            session.set_tokens(&tokens).await;
             // Rotate the session ID on login (session-fixation defense).
             session.rotate_id().await;
 

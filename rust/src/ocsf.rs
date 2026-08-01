@@ -182,3 +182,70 @@ pub fn email_from_session(tokens: Option<&crate::types::SessionTokens>) -> Optio
     let claims = crate::cognito::jwt::decode_jwt_unverified(&tokens.id_token).ok()?;
     claims.email
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The (id, name) pairs are a wire contract for SIEM consumers — a mismatched
+    /// pair is silently wrong data. `logout.rs` once carried an inline copy of
+    /// this mapping that had drifted (reporting password logins as OAuth2), which
+    /// is why every caller must go through this function.
+    #[test]
+    fn test_auth_protocol_from_method_pairs() {
+        assert_eq!(
+            auth_protocol_from_method("passkey"),
+            (AUTH_PROTOCOL_FIDO2, "FIDO2/Passkey")
+        );
+        assert_eq!(
+            auth_protocol_from_method("password"),
+            (AUTH_PROTOCOL_PASSWORD, "Password")
+        );
+        assert_eq!(
+            auth_protocol_from_method("oauth"),
+            (AUTH_PROTOCOL_OAUTH2, "OAuth 2.0/OIDC")
+        );
+        // Unknown / absent auth_method must not masquerade as a real protocol.
+        assert_eq!(
+            auth_protocol_from_method(""),
+            (AUTH_PROTOCOL_UNKNOWN, "Unknown")
+        );
+        assert_eq!(
+            auth_protocol_from_method("nonsense"),
+            (AUTH_PROTOCOL_UNKNOWN, "Unknown")
+        );
+    }
+
+    #[test]
+    fn test_password_is_not_reported_as_oauth() {
+        // Regression guard for the exact drift found in logout.rs.
+        let (id, name) = auth_protocol_from_method("password");
+        assert_ne!(id, AUTH_PROTOCOL_OAUTH2);
+        assert_ne!(name, "OAuth 2.0/OIDC");
+    }
+
+    #[test]
+    fn test_severity_and_status_names_are_defined() {
+        assert_eq!(severity_name(SEVERITY_INFORMATIONAL), "Informational");
+        assert_eq!(severity_name(SEVERITY_HIGH), "High");
+        assert_eq!(status_name(STATUS_SUCCESS), "Success");
+        assert_eq!(status_name(STATUS_FAILURE), "Failure");
+    }
+
+    #[test]
+    fn test_emit_never_panics_on_odd_values() {
+        // emit() swallows serialization problems — a logging failure must never
+        // break an auth flow.
+        emit(&serde_json::json!({ "nested": { "deep": [1, 2, 3] }, "null": null }));
+        authentication_event(
+            ACTIVITY_LOGON,
+            "Logon",
+            STATUS_SUCCESS,
+            SEVERITY_INFORMATIONAL,
+            None,
+            AUTH_PROTOCOL_UNKNOWN,
+            "Unknown",
+            "",
+        );
+    }
+}

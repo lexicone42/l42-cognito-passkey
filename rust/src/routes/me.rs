@@ -10,11 +10,7 @@ use crate::types::{SessionTokens, UserInfoResponse};
 
 /// Return user info decoded from the session's ID token (unverified).
 pub async fn me(session: SessionHandle) -> Result<Json<UserInfoResponse>, AppError> {
-    let data = session.data.lock().await;
-    let tokens: SessionTokens = data
-        .get("tokens")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .ok_or(AppError::NotAuthenticated)?;
+    let tokens: SessionTokens = session.tokens().await?;
 
     let claims = decode_jwt_unverified(&tokens.id_token).map_err(|e| {
         ocsf::authentication_event(

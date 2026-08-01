@@ -24,12 +24,7 @@ pub async fn authorize(
     }
 
     // Get tokens from session
-    let tokens: SessionTokens = {
-        let data = session.data.lock().await;
-        data.get("tokens")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .ok_or(AppError::NotAuthenticated)?
-    };
+    let tokens: SessionTokens = session.tokens().await?;
 
     // Check expiry
     if is_token_expired(&tokens.id_token) {
@@ -133,7 +128,7 @@ pub async fn authorize(
         .map(|r| serde_json::to_value(r).unwrap());
 
     // Evaluate with resolved resource
-    match cedar.authorize(&claims, &body.action, resolved_resource.as_ref(), None) {
+    match cedar.authorize(&claims, &body.action, resolved_resource.as_ref()) {
         Ok(result) => {
             let decision = if result.authorized { "permit" } else { "deny" };
             let severity = if result.authorized {
