@@ -24,7 +24,6 @@ use tower_http::trace::TraceLayer;
 use crate::cedar::engine::CedarState;
 use crate::cognito::jwt::JwksCache;
 use crate::config::Config;
-use crate::session::AnyBackend;
 use crate::session::middleware::{SessionLayer, session_middleware};
 
 /// Shared application state available to all route handlers.
@@ -33,15 +32,15 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub jwks_cache: Arc<JwksCache>,
     pub cedar: Option<CedarState>,
-    pub session_layer: Arc<SessionLayer<AnyBackend>>,
+    pub session_layer: Arc<SessionLayer>,
     /// Entity provider for trusted resource ownership lookups (closes S1 gap).
     pub entity_provider: Option<entity::AnyEntityProvider>,
 }
 
 /// Build the Axum router with all middleware and routes.
 ///
-/// The router is generic over the session backend, but for now we
-/// only use `InMemoryBackend` (DynamoDB in Phase 5).
+/// The session backend is `AnyBackend` (enum dispatch over InMemory/DynamoDB),
+/// so the router itself needs no generic parameter.
 pub fn create_app(state: Arc<AppState>) -> Router {
     let session_layer = state.session_layer.clone();
 

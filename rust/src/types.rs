@@ -24,6 +24,11 @@ fn default_auth_method() -> String {
 pub struct AuthorizeRequest {
     pub action: String,
     pub resource: Option<ResourceDescriptor>,
+    /// Accepted for wire compatibility but **intentionally ignored** — Cedar is
+    /// always evaluated with an empty context (sharp-edge S5: client-supplied
+    /// context is untrusted and would let callers steer policy evaluation).
+    /// Kept as a field so existing clients that send it don't break; when Cedar
+    /// context is supported it will be built from trusted server-side sources.
     pub context: Option<HashMap<String, serde_json::Value>>,
 }
 

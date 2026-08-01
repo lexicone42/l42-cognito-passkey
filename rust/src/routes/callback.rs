@@ -94,7 +94,7 @@ pub async fn oauth_callback(
                 "OAuth 2.0/OIDC",
                 &format!("Callback origin rejected: {origin}"),
             );
-            *session.destroyed.lock().await = true;
+            session.destroy().await;
             return Redirect::temporary(&format!(
                 "{}/login?error=Invalid+callback+origin",
                 state.config.frontend_url
@@ -142,7 +142,7 @@ pub async fn oauth_callback(
                 "OAuth 2.0/OIDC",
                 "OAuth state mismatch — possible CSRF",
             );
-            *session.destroyed.lock().await = true;
+            session.destroy().await;
             return Redirect::temporary(&format!(
                 "{}/login?error=Invalid+OAuth+state",
                 frontend
@@ -166,7 +166,7 @@ pub async fn oauth_callback(
         );
 
         // Destroy session — no valid tokens, prevent stale empty session
-        *session.destroyed.lock().await = true;
+        session.destroy().await;
 
         return Redirect::temporary(&format!(
             "{}/login?error={}",
@@ -179,7 +179,7 @@ pub async fn oauth_callback(
     let code = match params.code {
         Some(ref c) if !c.is_empty() => c.as_str(),
         _ => {
-            *session.destroyed.lock().await = true;
+            session.destroy().await;
             return Redirect::temporary(&format!(
                 "{}/login?error=Missing+authorization+code",
                 frontend
@@ -225,6 +225,7 @@ pub async fn oauth_callback(
             {
                 let mut data = session.data.lock().await;
                 data.set("tokens", serde_json::to_value(&tokens).unwrap());
+                // Single-use OAuth values — drop after a successful exchange.
                 data.remove(crate::routes::login::OAUTH_STATE_KEY);
                 data.remove(crate::routes::login::OAUTH_VERIFIER_KEY);
             }
@@ -263,7 +264,7 @@ pub async fn oauth_callback(
             );
 
             // Destroy session — exchange failed, no valid tokens
-            *session.destroyed.lock().await = true;
+            session.destroy().await;
 
             Redirect::temporary(&format!("{}/login?error=Authentication+failed", frontend))
         }

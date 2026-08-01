@@ -10,11 +10,7 @@ use crate::types::{SessionTokens, TokenResponse};
 
 /// Return access + id tokens from session (never the refresh token).
 pub async fn get_token(session: SessionHandle) -> Result<Json<TokenResponse>, AppError> {
-    let data = session.data.lock().await;
-    let tokens: SessionTokens = data
-        .get("tokens")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .ok_or(AppError::NotAuthenticated)?;
+    let tokens: SessionTokens = session.tokens().await?;
 
     let email = ocsf::email_from_session(Some(&tokens));
 

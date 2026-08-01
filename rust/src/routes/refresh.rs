@@ -15,12 +15,7 @@ pub async fn refresh_tokens(
     State(state): State<Arc<crate::AppState>>,
     session: SessionHandle,
 ) -> Result<Json<TokenResponse>, AppError> {
-    let tokens: SessionTokens = {
-        let data = session.data.lock().await;
-        data.get("tokens")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .ok_or(AppError::NotAuthenticated)?
-    };
+    let tokens: SessionTokens = session.tokens().await?;
 
     let refresh_token = tokens
         .refresh_token
@@ -58,8 +53,7 @@ pub async fn refresh_tokens(
                         auth_method: tokens.auth_method.clone(),
                     };
 
-                    let mut data = session.data.lock().await;
-                    data.set("tokens", serde_json::to_value(&new_tokens).unwrap());
+                    session.set_tokens(&new_tokens).await;
 
                     ocsf::authentication_event(
                         ocsf::ACTIVITY_SERVICE_TICKET,
@@ -97,10 +91,7 @@ pub async fn refresh_tokens(
                 &format!("Token refresh failed: {}", e),
             );
 
-            let mut destroyed = session.destroyed.lock().await;
-            *destroyed = true;
-            let mut data = session.data.lock().await;
-            data.clear();
+            session.destroy().await;
 
             Err(AppError::RefreshFailed(e.to_string()))
         }

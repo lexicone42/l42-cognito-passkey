@@ -35,11 +35,55 @@ pub struct SessionHandle {
     pub rotate: Arc<Mutex<bool>>,
 }
 
+/// Session key holding the serialized `SessionTokens`.
+const TOKENS_KEY: &str = "tokens";
+
 impl SessionHandle {
     /// Request a new session ID on the way out (session-fixation defense).
     /// Call this from a login handler after authenticating.
     pub async fn rotate_id(&self) {
         *self.rotate.lock().await = true;
+    }
+
+    /// Read the session's tokens.
+    ///
+    /// Returns `NotAuthenticated` when absent. A *present but undeserializable*
+    /// value is a corrupt session rather than a logged-out one, so it is logged
+    /// at WARN before mapping to the same client-facing error — previously both
+    /// cases were silently indistinguishable (`.ok()` swallowed the parse error).
+    pub async fn tokens(&self) -> Result<crate::types::SessionTokens, crate::error::AppError> {
+        let data = self.data.lock().await;
+        match data.get(TOKENS_KEY) {
+            None => Err(crate::error::AppError::NotAuthenticated),
+            Some(raw) => serde_json::from_value(raw.clone()).map_err(|e| {
+                tracing::warn!(
+                    session_id = %self.id,
+                    error = %e,
+                    "Session contains a malformed `tokens` value — treating as unauthenticated"
+                );
+                crate::error::AppError::NotAuthenticated
+            }),
+        }
+    }
+
+    /// Read the session's tokens without failing when absent.
+    pub async fn tokens_opt(&self) -> Option<crate::types::SessionTokens> {
+        self.tokens().await.ok()
+    }
+
+    /// Write tokens into the session.
+    pub async fn set_tokens(&self, tokens: &crate::types::SessionTokens) {
+        let mut data = self.data.lock().await;
+        data.set(
+            TOKENS_KEY,
+            serde_json::to_value(tokens).expect("SessionTokens always serializes"),
+        );
+    }
+
+    /// Mark the session destroyed and clear its contents (logout / auth failure).
+    pub async fn destroy(&self) {
+        *self.destroyed.lock().await = true;
+        self.data.lock().await.clear();
     }
 }
 
@@ -78,8 +122,8 @@ impl SessionHandle {
 pub struct ServiceTokenAuth;
 
 /// Session middleware configuration.
-pub struct SessionLayer<B: SessionBackend> {
-    pub backend: Arc<B>,
+pub struct SessionLayer {
+    pub backend: Arc<super::AnyBackend>,
     pub secret: String,
     pub https_only: bool,
     pub cookie_domain: Option<String>,
@@ -87,8 +131,8 @@ pub struct SessionLayer<B: SessionBackend> {
 }
 
 /// Axum middleware function for session handling.
-pub async fn session_middleware<B: SessionBackend + 'static>(
-    layer: Arc<SessionLayer<B>>,
+pub async fn session_middleware(
+    layer: Arc<SessionLayer>,
     mut req: Request,
     next: Next,
 ) -> Response {
