@@ -94,21 +94,34 @@ pub async fn cognito_request(
     Ok(data)
 }
 
-/// Refresh tokens via Cognito InitiateAuth with REFRESH_TOKEN_AUTH flow.
+/// Refresh tokens via Cognito's `GetTokensFromRefreshToken` API.
+///
+/// This is the current refresh API (replacing the legacy
+/// `InitiateAuth`/`REFRESH_TOKEN_AUTH` flow) and is required to use **refresh
+/// token rotation**: when rotation is enabled on the app client, the response's
+/// `AuthenticationResult.RefreshToken` is a *new* refresh token that supersedes
+/// the one sent — the caller must persist it (the `/auth/refresh` handler
+/// already stores a returned RefreshToken back into the session). Without
+/// rotation enabled, the response omits `RefreshToken` and the caller keeps the
+/// existing one; this function behaves correctly either way.
+///
+/// The response shape (`AuthenticationResult` with Access/Id/optional Refresh)
+/// matches the old flow, so downstream parsing is unchanged.
 pub async fn refresh_tokens(
     http_client: &reqwest::Client,
     config: &Config,
     refresh_token: &str,
 ) -> Result<Value, CognitoError> {
-    let body = serde_json::json!({
-        "AuthFlow": "REFRESH_TOKEN_AUTH",
+    let mut body = serde_json::json!({
         "ClientId": config.cognito_client_id,
-        "AuthParameters": {
-            "REFRESH_TOKEN": refresh_token
-        }
+        "RefreshToken": refresh_token,
     });
+    // Confidential clients pass the secret directly (no SECRET_HASH needed).
+    if !config.cognito_client_secret.is_empty() {
+        body["ClientSecret"] = serde_json::Value::String(config.cognito_client_secret.clone());
+    }
 
-    cognito_request(http_client, config, "InitiateAuth", &body).await
+    cognito_request(http_client, config, "GetTokensFromRefreshToken", &body).await
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -126,7 +139,7 @@ pub enum CognitoError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{body_string_contains, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_config_with_url(server_url: &str) -> Config {
@@ -195,7 +208,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_exchange_code_sends_verifier() {
-        use wiremock::matchers::body_string_contains;
         let server = MockServer::start().await;
         let config = test_config_with_url(&server.uri());
 
@@ -229,8 +241,9 @@ mod tests {
         Mock::given(method("POST"))
             .and(header(
                 "X-Amz-Target",
-                "AWSCognitoIdentityProviderService.InitiateAuth",
+                "AWSCognitoIdentityProviderService.GetTokensFromRefreshToken",
             ))
+            .and(body_string_contains("\"RefreshToken\":\"rt-123\""))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "AuthenticationResult": {
                     "AccessToken": "at-refreshed",
@@ -246,6 +259,36 @@ mod tests {
             .await
             .expect("refresh should succeed");
         assert_eq!(data["AuthenticationResult"]["AccessToken"], "at-refreshed");
+    }
+
+    #[tokio::test]
+    async fn test_refresh_rotation_returns_new_refresh_token() {
+        // With rotation enabled, GetTokensFromRefreshToken returns a NEW
+        // RefreshToken that supersedes the one sent.
+        let server = MockServer::start().await;
+        let config = test_config_with_url(&server.uri());
+
+        Mock::given(method("POST"))
+            .and(header(
+                "X-Amz-Target",
+                "AWSCognitoIdentityProviderService.GetTokensFromRefreshToken",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "AuthenticationResult": {
+                    "AccessToken": "at-rotated",
+                    "IdToken": "it-rotated",
+                    "RefreshToken": "rt-ROTATED-new"
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let data = refresh_tokens(&client, &config, "rt-old").await.unwrap();
+        assert_eq!(
+            data["AuthenticationResult"]["RefreshToken"], "rt-ROTATED-new",
+            "rotation must surface the new refresh token so the handler persists it"
+        );
     }
 
     #[tokio::test]

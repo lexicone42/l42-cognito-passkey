@@ -227,6 +227,51 @@ forbid(
 
 4. Validate — Cedar validates policies against the schema at startup.
 
+### Gating a resource *type* by role
+
+A common need is "only role X may act on resources of type Y" — e.g. **only game
+masters may view monster resources**. Cedar is deny-by-default, so a single
+role-gated permit, guarded on `resource.resourceType`, is all you need; everyone
+who isn't in the role is denied automatically.
+
+1. Add the action to the schema:
+   ```json
+   "view:monster": {
+       "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] }
+   }
+   ```
+
+2. Add the policy (e.g. `cedar/policies/gm.cedar`):
+   ```cedar
+   @id("gm-view-monsters")
+   permit(
+       principal in App::UserGroup::"gms",
+       action == App::Action::"view:monster",
+       resource
+   ) when { resource.resourceType == "monster" };
+   ```
+
+3. Create a Cognito group named `gms` (or add a `gm`/`gms` → `gms` alias in
+   `cedar/groups.rs`), and put your game masters in it.
+
+4. From the client, authorize before serving the data:
+   ```javascript
+   const { authorized } = await auth.requireServerAuthorization('view:monster', {
+       resource: { id: monsterId, type: 'monster' }
+   });
+   if (authorized) renderMonster();
+   ```
+
+The `resourceType` guard is what confines the permit — a GM's `view:monster`
+grant does not extend to other resource types. See the worked example (GM allowed,
+non-GM denied, guard confines to `monster`) in `rust/src/cedar/engine.rs` tests
+(`test_gm_can_view_monster`, `test_non_gm_cannot_view_monster`,
+`test_gm_view_gated_to_monster_resource_type`).
+
+> Belt-and-suspenders: to also confine the *token* handed to a separate monster
+> API (so a leaked token can't be replayed against another API), see the RFC 8707
+> resource-indicators design note in `docs/rfc8707-resource-indicators.md`.
+
 ### Group Alias Resolution
 
 Cognito group names are resolved automatically:

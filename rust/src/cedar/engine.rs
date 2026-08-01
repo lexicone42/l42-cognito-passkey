@@ -409,4 +409,101 @@ mod tests {
         );
         assert!(result.is_err());
     }
+
+    // ───── Example: domain role gating a resource type (GM → monsters) ─────
+    //
+    // This shows how a deployer extends Cedar for their own domain WITHOUT
+    // touching the shipped schema/policies: add an action + a role-gated permit,
+    // and gate it on `resource.resourceType`. Here "only game masters may view
+    // monster resources." Cedar is deny-by-default, so nothing else is needed to
+    // deny everyone who isn't a GM. Mirror this in a real policy file + a Cognito
+    // group named `gms` (or add a `gm`→`gms` alias in cedar/groups.rs).
+
+    fn gm_monster_engine() -> CedarState {
+        let schema = serde_json::json!({
+            "App": {
+                "entityTypes": {
+                    "User": {
+                        "memberOfTypes": ["UserGroup"],
+                        "shape": { "type": "Record", "attributes": {
+                            "email": { "type": "String" },
+                            "sub": { "type": "String" }
+                        }}
+                    },
+                    "UserGroup": {},
+                    "Resource": {
+                        "shape": { "type": "Record", "attributes": {
+                            "owner": { "type": "Entity", "name": "User", "required": false },
+                            "resourceType": { "type": "String" }
+                        }}
+                    }
+                },
+                "actions": {
+                    "view:monster": {
+                        "appliesTo": { "principalTypes": ["User"], "resourceTypes": ["Resource"] }
+                    }
+                }
+            }
+        });
+        let policy = r#"
+            @id("gm-view-monsters")
+            permit(
+                principal in App::UserGroup::"gms",
+                action == App::Action::"view:monster",
+                resource
+            ) when { resource.resourceType == "monster" };
+        "#;
+        CedarState::from_raw(schema, policy).expect("gm/monster schema+policy should validate")
+    }
+
+    fn monster(id: &str) -> ResourceDescriptor {
+        ResourceDescriptor {
+            id: Some(id.into()),
+            resource_type: Some("monster".into()),
+            owner: None,
+        }
+    }
+
+    #[test]
+    fn test_gm_can_view_monster() {
+        let state = gm_monster_engine();
+        let gm = claims("gm-sub", &["gms"]);
+        let result = state
+            .authorize(&gm, "view:monster", Some(&monster("goblin-1")), None)
+            .unwrap();
+        assert!(result.authorized, "a GM must be able to view a monster");
+    }
+
+    #[test]
+    fn test_non_gm_cannot_view_monster() {
+        let state = gm_monster_engine();
+        let player = claims("player-sub", &["users"]);
+        let result = state
+            .authorize(&player, "view:monster", Some(&monster("goblin-1")), None)
+            .unwrap();
+        assert!(
+            !result.authorized,
+            "a non-GM must be denied by default (no permit applies)"
+        );
+    }
+
+    #[test]
+    fn test_gm_view_gated_to_monster_resource_type() {
+        // The `when { resourceType == "monster" }` guard means the GM permit does
+        // not extend to other resource types even for the same action.
+        let state = gm_monster_engine();
+        let gm = claims("gm-sub", &["gms"]);
+        let treasure = ResourceDescriptor {
+            id: Some("chest-1".into()),
+            resource_type: Some("treasure".into()),
+            owner: None,
+        };
+        let result = state
+            .authorize(&gm, "view:monster", Some(&treasure), None)
+            .unwrap();
+        assert!(
+            !result.authorized,
+            "the guard limits the permit to resourceType == monster"
+        );
+    }
 }
