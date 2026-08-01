@@ -27,6 +27,7 @@ The binary is dual-mode: detects `AWS_LAMBDA_RUNTIME_API` at startup and runs as
 | `COGNITO_CLIENT_SECRET` | No | For confidential clients |
 | `COGNITO_USER_POOL_ID` | Yes | User pool ID (e.g., `us-west-2_abc123`) |
 | `COGNITO_DOMAIN` | Yes | Cognito domain |
+| `COGNITO_REGION` | No | AWS region override. **Default: derived from the pool id prefix** (`us-east-1_X` → `us-east-1`). Only set this if it must differ from the pool's region — a wrong value 404s the JWKS URL and breaks all direct logins (a startup warning fires on mismatch). |
 | `SESSION_SECRET` | Yes | Random 32+ char string for HMAC signing |
 | `SESSION_BACKEND` | Yes | `memory` (dev) or `dynamodb` (prod) |
 | `DYNAMODB_TABLE` | Prod | DynamoDB table name |

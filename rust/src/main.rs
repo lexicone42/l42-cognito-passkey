@@ -49,6 +49,21 @@ async fn main() {
         );
     }
 
+    // Region/pool-id consistency (issue #28): an explicit COGNITO_REGION that
+    // disagrees with the region encoded in the pool id produces JWKS/issuer
+    // URLs that 404 — every direct login then fails with a generic 403 while
+    // hosted-UI keeps working. Warn loudly at startup instead of failing at
+    // first custom-page login.
+    if let Some((pool_region, configured)) = config.region_pool_mismatch() {
+        tracing::warn!(
+            "COGNITO_REGION is '{configured}' but the pool id '{}' encodes region \
+             '{pool_region}' — JWKS/issuer URLs will 404 and direct logins will fail \
+             with 403. Remove COGNITO_REGION to derive it from the pool id, or fix \
+             the value.",
+            config.cognito_user_pool_id
+        );
+    }
+
     // Security configuration warnings
     if !config.session_https_only && config.frontend_url.starts_with("https://") {
         tracing::warn!(

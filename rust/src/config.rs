@@ -51,12 +51,23 @@ impl Config {
     /// Required: `COGNITO_CLIENT_ID`, `COGNITO_USER_POOL_ID`, `COGNITO_DOMAIN`, `SESSION_SECRET`.
     /// All others have sensible defaults.
     pub fn from_env() -> Result<Self, ConfigError> {
+        // Check order matters for error messages: client id first (matches docs).
+        let cognito_client_id = required_env("COGNITO_CLIENT_ID")?;
+        let cognito_user_pool_id = required_env("COGNITO_USER_POOL_ID")?;
         Ok(Self {
-            cognito_client_id: required_env("COGNITO_CLIENT_ID")?,
+            cognito_client_id,
             cognito_client_secret: env::var("COGNITO_CLIENT_SECRET").unwrap_or_default(),
-            cognito_user_pool_id: required_env("COGNITO_USER_POOL_ID")?,
             cognito_domain: required_env("COGNITO_DOMAIN")?,
-            cognito_region: env::var("COGNITO_REGION").unwrap_or_else(|_| "us-west-2".into()),
+            // Region default is DERIVED from the pool id (issue #28): pool ids are
+            // always `<region>_<id>`, so a hardcoded default (us-west-2) silently
+            // produced a wrong JWKS/issuer URL for pools in any other region —
+            // hosted-UI login kept working while every direct login died with a
+            // generic 403. COGNITO_REGION remains as an explicit override.
+            cognito_region: env::var("COGNITO_REGION").unwrap_or_else(|_| {
+                derive_region_from_pool_id(&cognito_user_pool_id)
+                    .unwrap_or_else(|| "us-west-2".into())
+            }),
+            cognito_user_pool_id,
             session_secret: required_env("SESSION_SECRET")?,
             frontend_url: env::var("FRONTEND_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".into()),
@@ -142,6 +153,33 @@ impl Config {
             return format!("{}/oauth2/token", self.cognito_endpoint.trim_end_matches('/'));
         }
         format!("https://{}/oauth2/token", self.cognito_domain)
+    }
+
+    /// If the configured region disagrees with the region encoded in the pool
+    /// id, return `(pool_region, configured_region)`. Used for a startup
+    /// warning: with an explicit-but-wrong `COGNITO_REGION`, JWKS/issuer URLs
+    /// 404 and every direct login fails with a generic 403 (issue #28).
+    pub fn region_pool_mismatch(&self) -> Option<(String, String)> {
+        let pool_region = derive_region_from_pool_id(&self.cognito_user_pool_id)?;
+        if pool_region != self.cognito_region {
+            Some((pool_region, self.cognito_region.clone()))
+        } else {
+            None
+        }
+    }
+}
+
+/// Extract the AWS region from a Cognito user pool id (`<region>_<id>`).
+///
+/// Returns `None` when the prefix doesn't look like a region (no `-`), so
+/// degenerate values fall back to the caller's default rather than producing
+/// an obviously-broken URL.
+fn derive_region_from_pool_id(pool_id: &str) -> Option<String> {
+    let prefix = pool_id.split('_').next()?;
+    if !prefix.is_empty() && prefix.contains('-') {
+        Some(prefix.to_string())
+    } else {
+        None
     }
 }
 
@@ -259,5 +297,60 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("COGNITO_CLIENT_ID"));
+    }
+
+    // ── Region derivation from pool id (issue #28) ──
+
+    #[test]
+    fn test_derive_region_from_pool_id() {
+        assert_eq!(
+            derive_region_from_pool_id("us-east-1_AbC123"),
+            Some("us-east-1".into())
+        );
+        assert_eq!(
+            derive_region_from_pool_id("ap-southeast-2_Xy"),
+            Some("ap-southeast-2".into())
+        );
+        assert_eq!(
+            derive_region_from_pool_id("us-gov-west-1_Z9"),
+            Some("us-gov-west-1".into())
+        );
+        // Degenerate values (no region-shaped prefix) → None, caller falls back
+        assert_eq!(derive_region_from_pool_id("nounderscore"), None);
+        assert_eq!(derive_region_from_pool_id("test_pool"), None);
+        assert_eq!(derive_region_from_pool_id("_leading"), None);
+        assert_eq!(derive_region_from_pool_id(""), None);
+    }
+
+    #[test]
+    fn test_region_pool_mismatch_detected() {
+        let mut cfg = Config::test_default();
+        // test_default: pool "us-west-2_test123", region "us-west-2" → consistent
+        assert_eq!(cfg.region_pool_mismatch(), None);
+
+        // Explicit wrong region (the issue #28 field failure): pool in us-east-1,
+        // region configured (or defaulted pre-fix) to us-west-2.
+        cfg.cognito_user_pool_id = "us-east-1_AbC123".into();
+        assert_eq!(
+            cfg.region_pool_mismatch(),
+            Some(("us-east-1".into(), "us-west-2".into()))
+        );
+
+        // Degenerate pool id → no basis for a mismatch claim
+        cfg.cognito_user_pool_id = "weird".into();
+        assert_eq!(cfg.region_pool_mismatch(), None);
+    }
+
+    #[test]
+    fn test_jwks_url_uses_derived_region_shape() {
+        // The exact field-failure shape from issue #28: with the region matching
+        // the pool id, the JWKS URL is well-formed for the pool's real region.
+        let mut cfg = Config::test_default();
+        cfg.cognito_user_pool_id = "us-east-1_AbC123".into();
+        cfg.cognito_region = "us-east-1".into(); // what derivation now produces
+        assert_eq!(
+            cfg.jwks_url(),
+            "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_AbC123/.well-known/jwks.json"
+        );
     }
 }
