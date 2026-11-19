@@ -10,9 +10,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use ciborium::Value as CborValue;
 use common::{
-    TestKeys, build_test_app, build_test_app_failing_backend, build_test_app_with_config,
-    build_test_app_with_entity_provider, expired_claims, post_with_service_token,
-    request_with_service_token, test_claims,
+    TestKeys, build_test_app, build_test_app_failing_backend, build_test_app_unavailable_backend,
+    build_test_app_with_config, build_test_app_with_entity_provider, expired_claims,
+    post_with_service_token, request_with_service_token, test_claims,
 };
 use l42_token_handler::config::Config;
 use l42_token_handler::entity::AnyEntityProvider;
@@ -253,7 +253,12 @@ async fn test_logout_destroys_session() {
 
     // Session should be destroyed
     use l42_token_handler::session::SessionBackend;
-    let loaded = state.session_layer.backend.load("sid-logout").await;
+    let loaded = state
+        .session_layer
+        .backend
+        .load("sid-logout")
+        .await
+        .unwrap();
     assert!(loaded.is_none());
 }
 
@@ -874,7 +879,10 @@ async fn test_login_endpoint_redirects_to_cognito_with_pkce() {
     assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
     let location = resp.headers().get("location").unwrap().to_str().unwrap();
     assert!(location.contains("/oauth2/authorize?"), "got: {location}");
-    assert!(location.contains("code_challenge="), "must carry PKCE challenge");
+    assert!(
+        location.contains("code_challenge="),
+        "must carry PKCE challenge"
+    );
     assert!(location.contains("code_challenge_method=S256"));
     assert!(location.contains("state="), "must carry state");
     assert!(location.contains("login_hint=user%40example.com"));
@@ -918,6 +926,169 @@ async fn test_callback_rejects_mismatched_state() {
         location.contains("error=Invalid+OAuth+state"),
         "mismatched state must be rejected, got: {location}"
     );
+}
+
+#[tokio::test]
+async fn test_callback_without_stored_state_is_refused() {
+    // No pre-login session at all: nothing to check `state` against and no
+    // PKCE verifier. The exchange must not happen.
+    let (app, _state) = build_test_app(false);
+    let req = Request::builder()
+        .uri("/auth/callback?code=abc&state=whatever")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    assert_eq!(
+        location,
+        "http://localhost:3000/login?error=Login+session+expired"
+    );
+}
+
+#[tokio::test]
+async fn test_callback_client_initiated_flow_completes_only_when_opted_in() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/token"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "at", "id_token": TestKeys::make_unsigned_jwt(&test_claims("u1", "u@example.com", &["users"])),
+            "refresh_token": "rt"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut config = Config::test_default();
+    config.cognito_endpoint = server.uri();
+    config.oauth_allow_client_initiated = true;
+    let (app, _state) = build_test_app_with_config(config, false);
+
+    let req = Request::builder()
+        .uri("/auth/callback?code=abc")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        location.starts_with("http://localhost:3000/auth/success"),
+        "opted-in deployments still complete the legacy flow, got: {location}"
+    );
+    assert!(
+        resp.headers().get("set-cookie").is_some(),
+        "a session was created"
+    );
+}
+
+// ───── Host-locked cookie ─────
+
+#[tokio::test]
+async fn test_cookie_is_host_locked_when_https_and_no_domain() {
+    let mut config = Config::test_default();
+    config.session_https_only = true;
+    let (app, state) = build_test_app_with_config(config, false);
+
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let tokens = SessionTokens {
+        access_token: "at-host".into(),
+        id_token: TestKeys::make_unsigned_jwt(&claims),
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-host", &tokens).await;
+
+    // The browser presents the host-locked name.
+    let signed = sign_session_id(state.config.session_secret.as_bytes(), "sid-host");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/auth/logout")
+        .header("Cookie", format!("__Host-l42_session={signed}"))
+        .header("X-L42-CSRF", "1")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "the host-locked cookie is read"
+    );
+
+    let cookies: Vec<&str> = resp
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap())
+        .collect();
+    assert!(
+        cookies
+            .iter()
+            .any(|c| c.starts_with("__Host-l42_session=; Max-Age=0")
+                && c.contains("Secure")
+                && !c.contains("Domain=")),
+        "{cookies:?}"
+    );
+    assert!(
+        cookies
+            .iter()
+            .any(|c| c.starts_with("l42_session=; Max-Age=0")),
+        "the legacy cookie is cleared too: {cookies:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_plain_cookie_still_read_when_host_locked_is_active() {
+    // A user whose cookie predates the move to __Host- stays signed in.
+    let mut config = Config::test_default();
+    config.session_https_only = true;
+    let (app, state) = build_test_app_with_config(config, false);
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let tokens = SessionTokens {
+        access_token: "at-legacy".into(),
+        id_token: TestKeys::make_unsigned_jwt(&claims),
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-legacy", &tokens).await;
+    let req = request_with_session(
+        "GET",
+        "/auth/token",
+        "sid-legacy",
+        &state.config.session_secret,
+    );
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+// ───── Session store outage ─────
+
+#[tokio::test]
+async fn test_session_store_outage_is_503_not_a_logout() {
+    let (app, state) = build_test_app_unavailable_backend();
+
+    // With a cookie, the store is consulted and its failure is reported.
+    let req = request_with_session(
+        "GET",
+        "/auth/token",
+        "sid-any",
+        &state.config.session_secret,
+    );
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        resp.headers().get("set-cookie").is_none(),
+        "no anonymous session is handed out"
+    );
+    let body = body_json(resp).await;
+    assert_eq!(body["error"], "Session store unavailable");
+
+    // Without a cookie nothing is loaded, so the request proceeds as anonymous.
+    let req = Request::builder()
+        .uri("/auth/token")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
 // ───── Custom Auth Path Prefix ─────
@@ -1575,7 +1746,10 @@ async fn test_s1_strict_denies_untracked_own_resource() {
     let body = body_json(resp).await;
     assert_eq!(body["authorized"], false);
     assert!(
-        body["reason"].as_str().unwrap().contains("strict ownership"),
+        body["reason"]
+            .as_str()
+            .unwrap()
+            .contains("strict ownership"),
         "reason should indicate strict-ownership denial, got {:?}",
         body["reason"]
     );

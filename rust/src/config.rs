@@ -39,6 +39,13 @@ pub struct Config {
     /// Defaults to false for backward compatibility; will become the default
     /// at 1.0. Env: `ENTITY_STRICT_OWNERSHIP`.
     pub entity_strict_ownership: bool,
+    /// Let `/auth/callback` complete a login that did not start at
+    /// `/auth/login` (no stored `state`, no PKCE verifier). Off by default:
+    /// such a callback has no CSRF check and no PKCE, so it is rejected and
+    /// the browser is sent back to `/login?error=Login+session+expired`.
+    /// Only a deployment still running the client-owned hosted-UI flow
+    /// against this backend's callback should set `OAUTH_ALLOW_CLIENT_INITIATED=true`.
+    pub oauth_allow_client_initiated: bool,
     /// Override base URL for Cognito IDP + token endpoints (test only — points
     /// the real `refresh_tokens`/`exchange_code_for_tokens` at a mock server).
     /// Empty in production. Env: `COGNITO_ENDPOINT`.
@@ -119,6 +126,9 @@ impl Config {
                 .filter(|s| !s.is_empty())
                 .collect(),
             entity_table: env::var("ENTITY_TABLE").ok().filter(|s| !s.is_empty()),
+            oauth_allow_client_initiated: env::var("OAUTH_ALLOW_CLIENT_INITIATED")
+                .map(|v| v == "true")
+                .unwrap_or(false),
             entity_strict_ownership: env::var("ENTITY_STRICT_OWNERSHIP")
                 .map(|v| v == "true" || v == "1" || v == "True")
                 .unwrap_or(false),
@@ -134,8 +144,17 @@ impl Config {
         )
     }
 
-    /// JWKS endpoint URL.
+    /// JWKS endpoint URL. Lives under the IDP base, so `COGNITO_ENDPOINT`
+    /// redirects it too (tests can serve a JWKS); the issuer the tokens are
+    /// checked against is unaffected.
     pub fn jwks_url(&self) -> String {
+        if !self.cognito_endpoint.is_empty() {
+            return format!(
+                "{}/{}/.well-known/jwks.json",
+                self.cognito_endpoint.trim_end_matches('/'),
+                self.cognito_user_pool_id
+            );
+        }
         format!("{}/.well-known/jwks.json", self.cognito_issuer())
     }
 
@@ -150,7 +169,10 @@ impl Config {
     /// Cognito OAuth2 token endpoint.
     pub fn cognito_token_url(&self) -> String {
         if !self.cognito_endpoint.is_empty() {
-            return format!("{}/oauth2/token", self.cognito_endpoint.trim_end_matches('/'));
+            return format!(
+                "{}/oauth2/token",
+                self.cognito_endpoint.trim_end_matches('/')
+            );
         }
         format!("https://{}/oauth2/token", self.cognito_domain)
     }
@@ -209,6 +231,7 @@ impl Config {
             additional_audience: Vec::new(),
             entity_table: None,
             entity_strict_ownership: false,
+            oauth_allow_client_initiated: false,
             cognito_endpoint: String::new(),
         }
     }
@@ -254,6 +277,25 @@ mod tests {
         assert_eq!(cfg.auth_path_prefix, "/auth");
         assert_eq!(cfg.entity_table, None);
         assert!(!cfg.entity_strict_ownership);
+        assert!(
+            !cfg.oauth_allow_client_initiated,
+            "client-initiated callbacks are rejected unless opted in"
+        );
+        assert_eq!(
+            cfg.jwks_url(),
+            format!("{}/.well-known/jwks.json", cfg.cognito_issuer())
+        );
+        let mut overridden = Config::test_default();
+        overridden.cognito_endpoint = "http://127.0.0.1:9/".into();
+        assert_eq!(
+            overridden.jwks_url(),
+            "http://127.0.0.1:9/us-west-2_test123/.well-known/jwks.json"
+        );
+        assert_eq!(
+            overridden.cognito_issuer(),
+            cfg.cognito_issuer(),
+            "the issuer never follows the endpoint override"
+        );
     }
 
     #[test]

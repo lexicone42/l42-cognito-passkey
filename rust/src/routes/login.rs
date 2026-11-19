@@ -14,13 +14,13 @@
 //!   3. and on `/auth/callback` validates `state` against the session and sends
 //!      the stored verifier to the token endpoint.
 
+use aws_lc_rs::digest::{SHA256, digest};
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::Redirect;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use crate::session::middleware::SessionHandle;
@@ -45,8 +45,7 @@ fn random_token(n: usize) -> String {
 
 /// RFC 7636 code challenge = BASE64URL(SHA256(verifier)).
 pub fn code_challenge(verifier: &str) -> String {
-    let digest = Sha256::digest(verifier.as_bytes());
-    URL_SAFE_NO_PAD.encode(digest)
+    URL_SAFE_NO_PAD.encode(digest(&SHA256, verifier.as_bytes()).as_ref())
 }
 
 /// Build the Cognito authorize URL for the hosted UI.
@@ -60,7 +59,10 @@ fn authorize_url(
     let mut params = vec![
         ("client_id", config.cognito_client_id.as_str()),
         ("response_type", "code"),
-        ("scope", "openid email profile aws.cognito.signin.user.admin"),
+        (
+            "scope",
+            "openid email profile aws.cognito.signin.user.admin",
+        ),
         ("redirect_uri", redirect_uri),
         ("state", state),
         ("code_challenge", challenge),
@@ -74,7 +76,10 @@ fn authorize_url(
         .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
         .collect::<Vec<_>>()
         .join("&");
-    format!("https://{}/oauth2/authorize?{}", config.cognito_domain, query)
+    format!(
+        "https://{}/oauth2/authorize?{}",
+        config.cognito_domain, query
+    )
 }
 
 /// GET /auth/login — start the backend-owned OAuth flow.
@@ -92,7 +97,10 @@ pub async fn login(
     // session cookie) can validate state and supply the verifier.
     {
         let mut data = session.data.lock().await;
-        data.set(OAUTH_STATE_KEY, serde_json::Value::String(oauth_state.clone()));
+        data.set(
+            OAUTH_STATE_KEY,
+            serde_json::Value::String(oauth_state.clone()),
+        );
         data.set(OAUTH_VERIFIER_KEY, serde_json::Value::String(verifier));
     }
 
@@ -135,7 +143,13 @@ mod tests {
     #[test]
     fn test_authorize_url_contains_pkce_and_state() {
         let config = crate::config::Config::test_default();
-        let url = authorize_url(&config, "https://app/auth/callback", "st8", "chal", Some("a@b.com"));
+        let url = authorize_url(
+            &config,
+            "https://app/auth/callback",
+            "st8",
+            "chal",
+            Some("a@b.com"),
+        );
         assert!(url.contains("code_challenge=chal"));
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains("state=st8"));

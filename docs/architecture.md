@@ -130,6 +130,12 @@ via `exchangeCodeForTokens()` on its own callback page (`plugin/templates/callba
 > so Cognito rejects the exchange. `loginWithHostedUI()` throws
 > `AuthErrorCode.INVALID_CONFIG` for that combination.
 
+> The Rust backend's `/auth/callback` refuses a callback that carries no stored
+> `state` (nothing to check CSRF against, no verifier for PKCE) and sends the
+> browser to `/login?error=Login+session+expired`. That is also what a user sees
+> when the pre-login cookie expired or was blocked. A deployment that still routes
+> a client-owned flow to this callback must set `OAUTH_ALLOW_CLIENT_INITIATED=true`.
+
 ### CSRF Protection
 
 All POST endpoints require `X-L42-CSRF: 1`. `auth.js` adds this automatically. Cross-origin requests can't set custom headers without a CORS preflight, which your backend rejects for unknown origins.

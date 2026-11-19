@@ -33,56 +33,35 @@ pub async fn refresh_tokens(
 
     // Call Cognito to refresh
     match client::refresh_tokens(&state.http_client, &state.config, refresh_token).await {
-        Ok(result) => {
-            let auth_result = result.get("AuthenticationResult");
-            let new_access = auth_result
-                .and_then(|r| r.get("AccessToken"))
-                .and_then(|v| v.as_str());
-            let new_id = auth_result
-                .and_then(|r| r.get("IdToken"))
-                .and_then(|v| v.as_str());
+        Ok(auth) => {
+            // Use the rotated refresh token if Cognito returned one, else keep the existing one.
+            let new_refresh = auth.refresh_token.or_else(|| tokens.refresh_token.clone());
+            let new_tokens = SessionTokens {
+                access_token: auth.access_token,
+                id_token: auth.id_token,
+                refresh_token: new_refresh,
+                auth_method: tokens.auth_method.clone(),
+            };
 
-            match (new_access, new_id) {
-                (Some(at), Some(it)) => {
-                    // Use rotated refresh token if Cognito returned one, else keep existing
-                    let new_refresh = auth_result
-                        .and_then(|r| r.get("RefreshToken"))
-                        .and_then(|v| v.as_str())
-                        .map(|rt| Some(rt.to_string()))
-                        .unwrap_or_else(|| tokens.refresh_token.clone());
+            let mut data = session.data.lock().await;
+            data.set("tokens", serde_json::to_value(&new_tokens).unwrap());
 
-                    let new_tokens = SessionTokens {
-                        access_token: at.to_string(),
-                        id_token: it.to_string(),
-                        refresh_token: new_refresh,
-                        auth_method: tokens.auth_method.clone(),
-                    };
+            ocsf::authentication_event(
+                ocsf::ACTIVITY_SERVICE_TICKET,
+                "Service Ticket",
+                ocsf::STATUS_SUCCESS,
+                ocsf::SEVERITY_INFORMATIONAL,
+                email.as_deref(),
+                ocsf::AUTH_PROTOCOL_OAUTH2,
+                "OAuth 2.0/OIDC",
+                "Token refresh succeeded",
+            );
 
-                    let mut data = session.data.lock().await;
-                    data.set("tokens", serde_json::to_value(&new_tokens).unwrap());
-
-                    ocsf::authentication_event(
-                        ocsf::ACTIVITY_SERVICE_TICKET,
-                        "Service Ticket",
-                        ocsf::STATUS_SUCCESS,
-                        ocsf::SEVERITY_INFORMATIONAL,
-                        email.as_deref(),
-                        ocsf::AUTH_PROTOCOL_OAUTH2,
-                        "OAuth 2.0/OIDC",
-                        "Token refresh succeeded",
-                    );
-
-                    Ok(Json(TokenResponse {
-                        access_token: new_tokens.access_token,
-                        id_token: new_tokens.id_token,
-                        auth_method: new_tokens.auth_method.unwrap_or_else(|| "handler".into()),
-                    }))
-                }
-                _ => {
-                    // Cognito returned success but no tokens — shouldn't happen
-                    Err(AppError::Internal("Refresh failed".into()))
-                }
-            }
+            Ok(Json(TokenResponse {
+                access_token: new_tokens.access_token,
+                id_token: new_tokens.id_token,
+                auth_method: new_tokens.auth_method.unwrap_or_else(|| "handler".into()),
+            }))
         }
         Err(e) => {
             // Refresh failed — destroy session (Token Handler protocol invariant #6)

@@ -7,6 +7,7 @@
  * Files updated:
  * - src/auth.js (@version JSDoc tag)
  * - dist/auth.js (@version JSDoc tag)
+ * - src/auth.d.ts, dist/auth.d.ts (@version JSDoc tag)
  * - plugin/plugin.json (version field)
  * - plugin/CLAUDE.md (version references)
  * - CLAUDE.md (version references)
@@ -43,6 +44,21 @@ const updates = [
     patterns: [
       { regex: /@version\s+[\d.]+(-[\w.]+)?/g, replacement: `@version ${newVersion}` },
       { regex: /export const VERSION = ['"][\d.]+(-[\w.]+)?['"]/g, replacement: `export const VERSION = '${newVersion}'` }
+    ]
+  },
+  {
+    // The type declarations carry the version too; the parity test fails
+    // when they drift from package.json (they did at 0.22.0).
+    file: 'src/auth.d.ts',
+    patterns: [
+      { regex: /@version\s+[\d.]+(-[\w.]+)?/g, replacement: `@version ${newVersion}` }
+    ]
+  },
+  {
+    file: 'dist/auth.d.ts',
+    optional: true,
+    patterns: [
+      { regex: /@version\s+[\d.]+(-[\w.]+)?/g, replacement: `@version ${newVersion}` }
     ]
   },
   {

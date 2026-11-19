@@ -63,6 +63,16 @@ impl JwksCache {
         }
     }
 
+    /// A cache pre-seeded with keys that never fetches. For tests, or for a
+    /// deployment that pins its signing keys.
+    pub fn with_keys(keys: HashMap<String, DecodingKey>) -> Self {
+        Self {
+            keys: RwLock::new(Some((keys, Instant::now()))),
+            ttl: Duration::from_secs(3600),
+            http_client: reqwest::Client::new(),
+        }
+    }
+
     /// Fetch or return cached JWKS keys.
     pub async fn get_keys(&self, jwks_url: &str) -> Result<HashMap<String, DecodingKey>, JwtError> {
         // Try read lock first
@@ -74,8 +84,14 @@ impl JwksCache {
                 return Ok(keys.clone());
             }
         }
+        self.refetch(jwks_url).await
+    }
 
-        // Cache miss or expired — fetch and update
+    /// Fetch the JWKS now, replacing whatever is cached. Used on a cache miss
+    /// and when a token names a `kid` the cache has not seen: Cognito rotates
+    /// signing keys by publishing a new `kid`, and a cache that waited out its
+    /// TTL would reject every fresh login for up to an hour.
+    pub async fn refetch(&self, jwks_url: &str) -> Result<HashMap<String, DecodingKey>, JwtError> {
         let resp = self
             .http_client
             .get(jwks_url)
@@ -103,12 +119,6 @@ impl JwksCache {
         *guard = Some((key_map.clone(), Instant::now()));
 
         Ok(key_map)
-    }
-
-    /// Clear the cache. For testing.
-    pub async fn clear(&self) {
-        let mut guard = self.keys.write().await;
-        *guard = None;
     }
 }
 
@@ -165,9 +175,16 @@ pub async fn verify_id_token(
     let header = jsonwebtoken::decode_header(token).map_err(|_| JwtError::InvalidFormat)?;
     let kid = header.kid.ok_or(JwtError::MissingKid)?;
 
-    // Get signing keys
+    // Get signing keys; an unknown kid means a rotation happened since the
+    // last fetch, so look once more before giving up.
     let keys = jwks_cache.get_keys(&config.jwks_url()).await?;
-    let decoding_key = keys.get(&kid).ok_or(JwtError::KeyNotFound(kid))?;
+    let decoding_key = match keys.get(&kid) {
+        Some(k) => k.clone(),
+        None => {
+            let fresh = jwks_cache.refetch(&config.jwks_url()).await?;
+            fresh.get(&kid).cloned().ok_or(JwtError::KeyNotFound(kid))?
+        }
+    };
 
     // Validate
     let mut validation = Validation::new(Algorithm::RS256);
@@ -179,8 +196,14 @@ pub async fn verify_id_token(
     validation.set_audience(&audiences);
     validation.set_required_spec_claims(&["exp", "iss", "aud"]);
 
-    let token_data = decode::<Claims>(token, decoding_key, &validation)
+    let token_data = decode::<Claims>(token, &decoding_key, &validation)
         .map_err(|e| JwtError::Validation(e.to_string()))?;
+
+    // Cognito signs access tokens with the same keys and issuer; only an ID
+    // token carries the identity claims a session is built from.
+    if token_data.claims.token_use.as_deref() != Some("id") {
+        return Err(JwtError::Validation("token_use is not 'id'".into()));
+    }
 
     Ok(token_data.claims)
 }
@@ -286,5 +309,101 @@ mod tests {
     #[test]
     fn test_is_token_expired_garbage() {
         assert!(is_token_expired("garbage"));
+    }
+
+    // ───── Verification against real RS256 signatures ─────
+
+    struct Signer {
+        key: jsonwebtoken::EncodingKey,
+        kid: String,
+        jwk: serde_json::Value,
+        decoding: DecodingKey,
+    }
+
+    fn signer(kid: &str) -> Signer {
+        use rsa::pkcs1::EncodeRsaPrivateKey;
+        use rsa::traits::PublicKeyParts;
+        let private = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+        let n = URL_SAFE_NO_PAD.encode(private.n().to_bytes_be());
+        let e = URL_SAFE_NO_PAD.encode(private.e().to_bytes_be());
+        // jsonwebtoken's `from_rsa_der` wants PKCS#1 (RSAPrivateKey), not PKCS#8.
+        let der = private.to_pkcs1_der().unwrap();
+        Signer {
+            key: jsonwebtoken::EncodingKey::from_rsa_der(der.as_bytes()),
+            kid: kid.into(),
+            jwk: serde_json::json!({"kid": kid, "kty": "RSA", "alg": "RS256", "use": "sig", "n": n, "e": e}),
+            decoding: DecodingKey::from_rsa_components(&n, &e).unwrap(),
+        }
+    }
+
+    fn signed(s: &Signer, config: &Config, token_use: &str) -> String {
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 600;
+        let claims = serde_json::json!({
+            "sub": "user-1", "email": "u@example.com", "iss": config.cognito_issuer(),
+            "aud": config.cognito_client_id, "exp": exp, "iat": exp - 600, "token_use": token_use,
+        });
+        let mut header = jsonwebtoken::Header::new(Algorithm::RS256);
+        header.kid = Some(s.kid.clone());
+        jsonwebtoken::encode(&header, &claims, &s.key).unwrap()
+    }
+
+    #[tokio::test]
+    async fn verify_accepts_an_id_token_and_rejects_an_access_token() {
+        let config = Config::test_default();
+        let s = signer("k1");
+        let cache = JwksCache::with_keys(HashMap::from([(s.kid.clone(), s.decoding.clone())]));
+
+        let claims = verify_id_token(&signed(&s, &config, "id"), &cache, &config)
+            .await
+            .unwrap();
+        assert_eq!(claims.sub, "user-1");
+
+        let err = verify_id_token(&signed(&s, &config, "access"), &cache, &config)
+            .await
+            .expect_err("an access token must not open a session");
+        assert!(err.to_string().contains("token_use"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_kid_refetches_the_jwks_once_so_rotation_does_not_lock_users_out() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let mut config = Config::test_default();
+        config.cognito_endpoint = server.uri();
+        let old = signer("old-kid");
+        let new = signer("new-kid");
+        // The JWKS now publishes only the new key.
+        Mock::given(method("GET"))
+            .and(path_regex(r".*/\.well-known/jwks\.json$"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"keys": [new.jwk.clone()]})),
+            )
+            // One refetch for the rotated key, one for the ghost below; never more.
+            .expect(2)
+            .mount(&server)
+            .await;
+        // The cache still holds the old key, well within its TTL.
+        let cache = JwksCache::with_keys(HashMap::from([(old.kid.clone(), old.decoding.clone())]));
+
+        let claims = verify_id_token(&signed(&new, &config, "id"), &cache, &config)
+            .await
+            .expect("a token under the rotated key must verify after one refetch");
+        assert_eq!(claims.sub, "user-1");
+
+        // A token under a kid nobody publishes still fails, after the refetch.
+        let ghost = signer("ghost");
+        let err = verify_id_token(&signed(&ghost, &config, "id"), &cache, &config)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, JwtError::KeyNotFound(ref k) if k == "ghost"),
+            "got: {err:?}"
+        );
     }
 }

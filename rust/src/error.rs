@@ -108,111 +108,109 @@ impl IntoResponse for AppError {
 mod tests {
     use super::*;
 
-    /// Directly construct the expected (status, body) for an error variant.
-    /// This tests the mapping logic without needing async body extraction.
-    fn error_to_json(err: AppError) -> (StatusCode, serde_json::Value) {
-        let (status, body) = match &err {
-            AppError::NotAuthenticated => (
+    /// Render through the real `IntoResponse` and read the body back, so the
+    /// test can only pass if the mapping the server sends is the one asserted.
+    async fn render(err: AppError) -> (StatusCode, serde_json::Value) {
+        let resp = err.into_response();
+        let status = resp.status();
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json"),
+            "every error body is JSON"
+        );
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn every_variant_renders_its_documented_status_and_body() {
+        let cases: Vec<(AppError, StatusCode, serde_json::Value)> = vec![
+            (
+                AppError::NotAuthenticated,
                 StatusCode::UNAUTHORIZED,
-                serde_json::json!({"error": "Not authenticated"}),
+                json!({"error": "Not authenticated"}),
             ),
-            AppError::TokenExpired => (
+            (
+                AppError::TokenExpired,
                 StatusCode::UNAUTHORIZED,
-                serde_json::json!({"error": "Token expired"}),
+                json!({"error": "Token expired"}),
             ),
-            AppError::CsrfFailed => (
+            (
+                AppError::CsrfFailed,
                 StatusCode::FORBIDDEN,
-                serde_json::json!({
-                    "error": "CSRF validation failed",
-                    "message": "Missing X-L42-CSRF header"
-                }),
+                json!({"error": "CSRF validation failed", "message": "Missing X-L42-CSRF header"}),
             ),
-            AppError::BadRequest(msg) => {
-                (StatusCode::BAD_REQUEST, serde_json::json!({"error": msg}))
-            }
-            AppError::TokenVerificationFailed => (
+            (
+                AppError::BadRequest("Missing field".into()),
+                StatusCode::BAD_REQUEST,
+                json!({"error": "Missing field"}),
+            ),
+            (
+                AppError::TokenVerificationFailed,
                 StatusCode::FORBIDDEN,
-                serde_json::json!({"error": "Token verification failed"}),
+                json!({"error": "Token verification failed"}),
             ),
-            AppError::NoRefreshToken => (
+            (
+                AppError::NoRefreshToken,
                 StatusCode::UNAUTHORIZED,
-                serde_json::json!({"error": "No refresh token"}),
+                json!({"error": "No refresh token"}),
             ),
-            AppError::RefreshFailed(msg) => (
+            (
+                AppError::RefreshFailed("Token revoked".into()),
                 StatusCode::UNAUTHORIZED,
-                serde_json::json!({"error": "Refresh failed", "message": msg}),
+                json!({"error": "Refresh failed", "message": "Token revoked"}),
             ),
-            AppError::CedarUnavailable => (
+            (
+                AppError::CedarUnavailable,
                 StatusCode::SERVICE_UNAVAILABLE,
-                serde_json::json!({"error": "Authorization engine not available", "authorized": false}),
+                json!({"error": "Authorization engine not available", "authorized": false}),
             ),
-            AppError::AuthorizationError(_) => (
+            (
+                AppError::AuthorizationError("boom".into()),
                 StatusCode::INTERNAL_SERVER_ERROR,
-                serde_json::json!({"authorized": false, "error": "Authorization evaluation failed"}),
+                json!({"authorized": false, "error": "Authorization evaluation failed"}),
             ),
-            AppError::CredentialRejected(msg) => (
+            (
+                AppError::TokenExchangeFailed("boom".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": "Token exchange failed: boom"}),
+            ),
+            (
+                AppError::TokenDecodeFailed,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": "Failed to decode token"}),
+            ),
+            (
+                AppError::CredentialRejected("AAGUID not in allowlist".into()),
                 StatusCode::FORBIDDEN,
-                serde_json::json!({"allowed": false, "reason": msg}),
+                json!({"allowed": false, "reason": "AAGUID not in allowlist"}),
             ),
-            _ => (
+            (
+                AppError::Internal("db".into()),
                 StatusCode::INTERNAL_SERVER_ERROR,
-                serde_json::json!({"error": "internal"}),
+                json!({"error": "db"}),
             ),
-        };
-        (status, body)
+        ];
+        for (err, want_status, want_body) in cases {
+            let name = format!("{err:?}");
+            let (status, body) = render(err).await;
+            assert_eq!(status, want_status, "{name}");
+            assert_eq!(body, want_body, "{name}");
+        }
     }
 
-    #[test]
-    fn test_not_authenticated() {
-        let (status, body) = error_to_json(AppError::NotAuthenticated);
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(body["error"], "Not authenticated");
-    }
-
-    #[test]
-    fn test_csrf_failed() {
-        let (status, body) = error_to_json(AppError::CsrfFailed);
-        assert_eq!(status, StatusCode::FORBIDDEN);
-        assert_eq!(body["error"], "CSRF validation failed");
-        assert_eq!(body["message"], "Missing X-L42-CSRF header");
-    }
-
-    #[test]
-    fn test_cedar_unavailable() {
-        let (status, body) = error_to_json(AppError::CedarUnavailable);
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(body["authorized"], false);
-    }
-
-    #[test]
-    fn test_token_expired() {
-        let (status, body) = error_to_json(AppError::TokenExpired);
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(body["error"], "Token expired");
-    }
-
-    #[test]
-    fn test_bad_request() {
-        let (status, body) = error_to_json(AppError::BadRequest("Missing field".into()));
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body["error"], "Missing field");
-    }
-
-    #[test]
-    fn test_credential_rejected() {
-        let (status, body) = error_to_json(AppError::CredentialRejected(
-            "AAGUID not in allowlist".into(),
-        ));
-        assert_eq!(status, StatusCode::FORBIDDEN);
-        assert_eq!(body["allowed"], false);
-        assert_eq!(body["reason"], "AAGUID not in allowlist");
-    }
-
-    #[test]
-    fn test_refresh_failed() {
-        let (status, body) = error_to_json(AppError::RefreshFailed("Token revoked".into()));
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(body["error"], "Refresh failed");
-        assert_eq!(body["message"], "Token revoked");
+    #[tokio::test]
+    async fn internal_details_never_leak_through_authorization_errors() {
+        // The Cedar failure variant carries a diagnostic string for the log,
+        // but the client sees only the generic message.
+        let (_, body) = render(AppError::AuthorizationError(
+            "policy parse at line 3".into(),
+        ))
+        .await;
+        assert!(!body.to_string().contains("line 3"));
     }
 }

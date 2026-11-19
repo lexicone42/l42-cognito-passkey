@@ -318,6 +318,7 @@ WebAuthn browser prompts (Touch ID, Windows Hello) have built-in accessibility. 
 | "Auth not configured" | Config script missing or after auth.js import | Set `window.L42_AUTH_CONFIG` before importing |
 | Callback not working | URL mismatch | Callback URL must exactly match Cognito app client setting |
 | Session cookies not set | Cookie domain wrong | Set `COOKIE_DOMAIN` in backend `.env` |
+| `error=Login+session+expired` after Cognito | Callback arrived without the pre-login session: cookie blocked/expired, or a client-owned flow pointed at `/auth/callback` | Use `loginEndpoint: "/auth/login"`; check the pre-login cookie reaches the callback host; `OAUTH_ALLOW_CLIENT_INITIATED=true` only for a deliberate client-owned flow |
 | Groups not appearing | User not in Cognito groups | Add user to groups in Cognito Console |
 | "USER_AUTH flow not enabled" | Missing auth flow | Add `ALLOW_USER_AUTH` to User Pool Client |
 | "WebAuthn not enabled" | Not configured via boto3 | Run the boto3 script above |

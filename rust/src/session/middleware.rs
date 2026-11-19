@@ -22,6 +22,19 @@ use super::cookie::{sign_session_id, verify_cookie};
 use super::{SessionBackend, SessionData};
 
 const COOKIE_NAME: &str = "l42_session";
+/// The `__Host-` prefix makes the browser refuse the cookie unless it is
+/// Secure, Path=/ and carries no Domain, which pins it to this exact host:
+/// no subdomain can plant or read it. Used whenever those conditions hold.
+const HOST_COOKIE_NAME: &str = "__Host-l42_session";
+
+/// The cookie name this deployment sets: host-locked when it can be.
+fn cookie_name(https_only: bool, cookie_domain: Option<&str>) -> &'static str {
+    if https_only && cookie_domain.is_none() {
+        HOST_COOKIE_NAME
+    } else {
+        COOKIE_NAME
+    }
+}
 const MAX_AGE_SECS: u64 = 30 * 24 * 3600; // 30 days
 
 /// Shared handle to session state, inserted into request extensions.
@@ -126,17 +139,31 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let session_cookie = parse_cookie(cookie_header, COOKIE_NAME);
+    // Prefer the host-locked cookie; still honour the plain one so a
+    // deployment that drops COOKIE_DOMAIN keeps its users signed in until
+    // their next save moves them over.
+    let session_cookie = parse_cookie(cookie_header, HOST_COOKIE_NAME)
+        .or_else(|| parse_cookie(cookie_header, COOKIE_NAME));
     let session_id = session_cookie.and_then(|v| verify_cookie(layer.secret.as_bytes(), v));
 
     let (handle, initial_data) = match session_id {
         Some(id) => {
             match layer.backend.load(&id).await {
-                Some(data) => {
+                Ok(Some(data)) => {
                     let initial = data.clone();
                     (SessionHandle::new(id, data), initial)
                 }
-                None => {
+                Err(e) => {
+                    // The store is down. Saying "not logged in" here would be
+                    // a lie with consequences (a fresh anonymous session and
+                    // cookie for a signed-in user); say what is true instead.
+                    tracing::error!("Session load failed for {}: {}", id, e);
+                    return error_response(
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        "Session store unavailable",
+                    );
+                }
+                Ok(None) => {
                     // Expired or missing — create new session
                     let new_id = generate_session_id();
                     (
@@ -171,20 +198,25 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
         // Always clear the browser cookie so the client is locally logged out,
         // but if the server-side delete failed the session record may still be
         // live — surface that as a 500 rather than a phantom-successful logout.
-        let cookie = make_delete_cookie(&layer.secret, &session_id, layer.https_only, domain);
+        let cookies = make_delete_cookies(layer.https_only, domain);
         let delete_result = layer.backend.delete(&session_id).await;
         if let Err(e) = delete_result {
             tracing::error!("Session delete failed for {}: {}", session_id, e);
             let mut err = error_response(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Logout could not fully complete: server session may still be active",
             );
-            err.headers_mut()
-                .append(header::SET_COOKIE, cookie.parse().unwrap());
+            for cookie in &cookies {
+                err.headers_mut()
+                    .append(header::SET_COOKIE, cookie.parse().unwrap());
+            }
             return err;
         }
-        response
-            .headers_mut()
-            .append(header::SET_COOKIE, cookie.parse().unwrap());
+        for cookie in &cookies {
+            response
+                .headers_mut()
+                .append(header::SET_COOKIE, cookie.parse().unwrap());
+        }
     } else if current_data != initial_data {
         // Only persist when the handler actually modified session data.
         // Without this check, every unauthenticated request (including GET /health)
@@ -205,7 +237,10 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
         // Return 500 so the client's error path engages instead.
         if let Err(e) = layer.backend.save(&save_id, &current_data).await {
             tracing::error!("Session save failed for {}: {}", save_id, e);
-            return error_response("Session could not be persisted");
+            return error_response(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Session could not be persisted",
+            );
         }
         if rotate && save_id != session_id {
             // Best-effort cleanup of the old record; a failure here doesn't
@@ -223,15 +258,11 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
     response
 }
 
-/// Build a 500 response for a session persistence failure. The body mirrors the
+/// Build an error response for a session store failure. The body mirrors the
 /// shape of other `AppError` JSON bodies (`{"error": ...}`).
-fn error_response(message: &str) -> Response {
+fn error_response(status: axum::http::StatusCode, message: &str) -> Response {
     use axum::response::IntoResponse;
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        axum::Json(serde_json::json!({ "error": message })),
-    )
-        .into_response()
+    (status, axum::Json(serde_json::json!({ "error": message }))).into_response()
 }
 
 fn generate_session_id() -> String {
@@ -250,7 +281,7 @@ fn make_set_cookie(
 ) -> String {
     let signed = sign_session_id(secret.as_bytes(), session_id);
     let mut parts = vec![
-        format!("{}={}", COOKIE_NAME, signed),
+        format!("{}={}", cookie_name(https_only, cookie_domain), signed),
         format!("Max-Age={}", MAX_AGE_SECS),
         "Path=/".into(),
         "HttpOnly".into(),
@@ -265,14 +296,21 @@ fn make_set_cookie(
     parts.join("; ")
 }
 
-fn make_delete_cookie(
-    _secret: &str,
-    _session_id: &str,
-    https_only: bool,
-    cookie_domain: Option<&str>,
-) -> String {
+/// The cookies that clear a session: the active name, plus the plain name
+/// when the active one is host-locked, so a cookie set before this
+/// deployment moved to `__Host-` is cleared too.
+fn make_delete_cookies(https_only: bool, cookie_domain: Option<&str>) -> Vec<String> {
+    let active = cookie_name(https_only, cookie_domain);
+    let mut out = vec![make_delete_cookie(active, https_only, cookie_domain)];
+    if active != COOKIE_NAME {
+        out.push(make_delete_cookie(COOKIE_NAME, https_only, None));
+    }
+    out
+}
+
+fn make_delete_cookie(name: &str, https_only: bool, cookie_domain: Option<&str>) -> String {
     let mut parts = vec![
-        format!("{}=", COOKIE_NAME),
+        format!("{}=", name),
         "Max-Age=0".into(),
         "Path=/".into(),
         "HttpOnly".into(),
@@ -346,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_make_delete_cookie() {
-        let cookie = make_delete_cookie("secret", "sid", false, None);
+        let cookie = make_delete_cookie(COOKIE_NAME, false, None);
         assert!(cookie.contains("Max-Age=0"));
         assert!(cookie.starts_with("l42_session=;"));
         assert!(!cookie.contains("Domain="));
@@ -354,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_make_delete_cookie_with_domain() {
-        let cookie = make_delete_cookie("secret", "sid", false, Some(".example.com"));
+        let cookie = make_delete_cookie(COOKIE_NAME, false, Some(".example.com"));
         assert!(cookie.contains("Max-Age=0"));
         assert!(cookie.contains("Domain=.example.com"));
     }
@@ -381,5 +419,40 @@ mod tests {
         let b = "a-much-longer-token-value";
         let result: bool = a.as_bytes().ct_eq(b.as_bytes()).into();
         assert!(!result);
+    }
+
+    #[test]
+    fn the_cookie_is_host_locked_only_when_secure_and_domainless() {
+        assert_eq!(cookie_name(true, None), "__Host-l42_session");
+        assert_eq!(cookie_name(true, Some(".example.com")), "l42_session");
+        assert_eq!(cookie_name(false, None), "l42_session");
+    }
+
+    #[test]
+    fn a_host_locked_set_cookie_satisfies_the_prefix_rules() {
+        let c = make_set_cookie("secret", "sid", true, None);
+        assert!(c.starts_with("__Host-l42_session="), "{c}");
+        assert!(
+            c.contains("Secure") && c.contains("Path=/") && !c.contains("Domain="),
+            "{c}"
+        );
+        let c = make_set_cookie("secret", "sid", true, Some(".example.com"));
+        assert!(
+            c.starts_with("l42_session=") && c.contains("Domain=.example.com"),
+            "{c}"
+        );
+    }
+
+    #[test]
+    fn deleting_a_host_locked_session_also_clears_the_legacy_cookie() {
+        let cs = make_delete_cookies(true, None);
+        assert_eq!(cs.len(), 2);
+        assert!(
+            cs[0].starts_with("__Host-l42_session=; Max-Age=0"),
+            "{}",
+            cs[0]
+        );
+        assert!(cs[1].starts_with("l42_session=; Max-Age=0"), "{}", cs[1]);
+        assert_eq!(make_delete_cookies(false, None).len(), 1);
     }
 }

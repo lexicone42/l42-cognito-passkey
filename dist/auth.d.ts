@@ -4,7 +4,7 @@
  * Type declarations for the l42-cognito-passkey authentication library.
  * These types match the exports of src/auth.js (v0.21.1).
  *
- * @version 0.21.1
+ * @version 0.22.0
  * @license Apache-2.0
  */
 

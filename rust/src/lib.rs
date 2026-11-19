@@ -40,8 +40,8 @@ pub struct AppState {
 
 /// Build the Axum router with all middleware and routes.
 ///
-/// The router is generic over the session backend, but for now we
-/// only use `InMemoryBackend` (DynamoDB in Phase 5).
+/// The session backend is `AnyBackend`: in-memory for development, DynamoDB
+/// in production, chosen by `SESSION_BACKEND`.
 pub fn create_app(state: Arc<AppState>) -> Router {
     let session_layer = state.session_layer.clone();
 

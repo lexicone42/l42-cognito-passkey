@@ -2,10 +2,45 @@
 //!
 //! Mirrors `app/cognito.py` — `exchange_code_for_tokens` and `cognito_request`.
 
+use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
 
 use crate::config::Config;
+
+/// Cognito's `/oauth2/token` response for `grant_type=authorization_code`.
+///
+/// Typed so a malformed exchange surfaces as an error at the client instead
+/// of as empty strings stored in a session.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OAuthTokens {
+    pub access_token: String,
+    pub id_token: String,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub expires_in: Option<u64>,
+    #[serde(default)]
+    pub token_type: Option<String>,
+}
+
+/// The `AuthenticationResult` member of a Cognito IDP auth response.
+/// `refresh_token` is present only when the app client rotated it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AuthenticationResult {
+    pub access_token: String,
+    pub id_token: String,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub expires_in: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct AuthResponse {
+    authentication_result: Option<AuthenticationResult>,
+}
 
 /// Exchange an OAuth authorization code for tokens.
 ///
@@ -16,7 +51,7 @@ pub async fn exchange_code_for_tokens(
     code: &str,
     redirect_uri: &str,
     code_verifier: Option<&str>,
-) -> Result<HashMap<String, Value>, CognitoError> {
+) -> Result<OAuthTokens, CognitoError> {
     let mut params = vec![
         ("grant_type", "authorization_code".to_string()),
         ("client_id", config.cognito_client_id.clone()),
@@ -47,9 +82,9 @@ pub async fn exchange_code_for_tokens(
         return Err(CognitoError::TokenExchangeFailed(text));
     }
 
-    resp.json()
+    resp.json::<OAuthTokens>()
         .await
-        .map_err(|e| CognitoError::RequestFailed(e.to_string()))
+        .map_err(|e| CognitoError::TokenExchangeFailed(format!("malformed token response: {e}")))
 }
 
 /// Make a request to Cognito IDP (e.g., InitiateAuth for refresh).
@@ -111,7 +146,7 @@ pub async fn refresh_tokens(
     http_client: &reqwest::Client,
     config: &Config,
     refresh_token: &str,
-) -> Result<Value, CognitoError> {
+) -> Result<AuthenticationResult, CognitoError> {
     let mut body = serde_json::json!({
         "ClientId": config.cognito_client_id,
         "RefreshToken": refresh_token,
@@ -121,7 +156,12 @@ pub async fn refresh_tokens(
         body["ClientSecret"] = serde_json::Value::String(config.cognito_client_secret.clone());
     }
 
-    cognito_request(http_client, config, "GetTokensFromRefreshToken", &body).await
+    let data = cognito_request(http_client, config, "GetTokensFromRefreshToken", &body).await?;
+    let parsed: AuthResponse = serde_json::from_value(data)
+        .map_err(|e| CognitoError::CognitoError(format!("malformed refresh response: {e}")))?;
+    parsed.authentication_result.ok_or_else(|| {
+        CognitoError::CognitoError("refresh response had no AuthenticationResult".into())
+    })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -168,6 +208,7 @@ mod tests {
             additional_audience: Vec::new(),
             entity_table: None,
             entity_strict_ownership: false,
+            oauth_allow_client_initiated: false,
         }
     }
 
@@ -201,9 +242,9 @@ mod tests {
         .await
         .expect("exchange should succeed");
 
-        assert_eq!(tokens["access_token"], "at-new");
-        assert_eq!(tokens["id_token"], "it-new");
-        assert_eq!(tokens["refresh_token"], "rt-new");
+        assert_eq!(tokens.access_token, "at-new");
+        assert_eq!(tokens.id_token, "it-new");
+        assert_eq!(tokens.refresh_token.as_deref(), Some("rt-new"));
     }
 
     #[tokio::test]
@@ -258,7 +299,9 @@ mod tests {
         let data = refresh_tokens(&client, &config, "rt-123")
             .await
             .expect("refresh should succeed");
-        assert_eq!(data["AuthenticationResult"]["AccessToken"], "at-refreshed");
+        assert_eq!(data.access_token, "at-refreshed");
+        assert_eq!(data.id_token, "it-refreshed");
+        assert!(data.refresh_token.is_none());
     }
 
     #[tokio::test]
@@ -286,7 +329,8 @@ mod tests {
         let client = reqwest::Client::new();
         let data = refresh_tokens(&client, &config, "rt-old").await.unwrap();
         assert_eq!(
-            data["AuthenticationResult"]["RefreshToken"], "rt-ROTATED-new",
+            data.refresh_token.as_deref(),
+            Some("rt-ROTATED-new"),
             "rotation must surface the new refresh token so the handler persists it"
         );
     }
@@ -338,11 +382,51 @@ mod tests {
 
         let client = reqwest::Client::new();
         let data = refresh_tokens(&client, &config, "rt-keep").await.unwrap();
-        let result = &data["AuthenticationResult"];
-        assert_eq!(result["AccessToken"], "at2");
+        assert_eq!(data.access_token, "at2");
         assert!(
-            result.get("RefreshToken").is_none(),
+            data.refresh_token.is_none(),
             "Cognito omits RefreshToken when it did not rotate"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_refresh_without_authentication_result_is_an_error() {
+        // A 200 with no AuthenticationResult used to reach the handler as a
+        // bare Value and fail later with a generic "Refresh failed".
+        let server = MockServer::start().await;
+        let config = test_config_with_url(&server.uri());
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        let client = reqwest::Client::new();
+        let err = refresh_tokens(&client, &config, "rt")
+            .await
+            .expect_err("must be an error");
+        assert!(
+            err.to_string().contains("AuthenticationResult"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_with_malformed_body_is_an_error() {
+        let server = MockServer::start().await;
+        let config = test_config_with_url(&server.uri());
+        Mock::given(method("POST"))
+            .and(path("/oauth2/token"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"id_token": "only"})),
+            )
+            .mount(&server)
+            .await;
+        let client = reqwest::Client::new();
+        let err = exchange_code_for_tokens(&client, &config, "code", "http://localhost/cb", None)
+            .await
+            .expect_err("a token response without access_token must not succeed");
+        assert!(
+            matches!(err, CognitoError::TokenExchangeFailed(_)),
+            "got: {err:?}"
         );
     }
 }

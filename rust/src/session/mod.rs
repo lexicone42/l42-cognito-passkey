@@ -69,11 +69,14 @@ pub struct SessionError(pub String);
 /// depends on this to avoid setting a session cookie for a session that was
 /// never actually written.
 pub trait SessionBackend: Send + Sync {
-    /// Load session data by ID. Returns `None` if not found or expired.
+    /// Load session data by ID. `Ok(None)` means not found or expired.
+    /// `Err` means the store could not be consulted at all: the middleware
+    /// answers 503 rather than treating the caller as logged out, so an
+    /// outage never turns every user into an anonymous one.
     fn load(
         &self,
         session_id: &str,
-    ) -> impl std::future::Future<Output = Option<SessionData>> + Send;
+    ) -> impl std::future::Future<Output = Result<Option<SessionData>, SessionError>> + Send;
 
     /// Save session data. `Err` means the write did not durably persist.
     fn save(
@@ -100,14 +103,18 @@ pub enum AnyBackend {
     /// exercise the middleware's persistence-failure path. Not for production.
     #[doc(hidden)]
     Failing(memory::FailingBackend),
+    /// Test double whose reads fail — exercises the middleware's 503 path.
+    #[doc(hidden)]
+    Unavailable(memory::UnavailableBackend),
 }
 
 impl SessionBackend for AnyBackend {
-    async fn load(&self, session_id: &str) -> Option<SessionData> {
+    async fn load(&self, session_id: &str) -> Result<Option<SessionData>, SessionError> {
         match self {
             AnyBackend::Memory(b) => b.load(session_id).await,
             AnyBackend::DynamoDb(b) => b.load(session_id).await,
             AnyBackend::Failing(b) => b.load(session_id).await,
+            AnyBackend::Unavailable(b) => b.load(session_id).await,
         }
     }
 
@@ -116,6 +123,7 @@ impl SessionBackend for AnyBackend {
             AnyBackend::Memory(b) => b.save(session_id, data).await,
             AnyBackend::DynamoDb(b) => b.save(session_id, data).await,
             AnyBackend::Failing(b) => b.save(session_id, data).await,
+            AnyBackend::Unavailable(b) => b.save(session_id, data).await,
         }
     }
 
@@ -124,6 +132,7 @@ impl SessionBackend for AnyBackend {
             AnyBackend::Memory(b) => b.delete(session_id).await,
             AnyBackend::DynamoDb(b) => b.delete(session_id).await,
             AnyBackend::Failing(b) => b.delete(session_id).await,
+            AnyBackend::Unavailable(b) => b.delete(session_id).await,
         }
     }
 }

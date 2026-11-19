@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- **`/auth/callback` refuses a callback with no stored `state`** (Rust). A backend-owned login always leaves `state` + PKCE verifier in the pre-login session; without them there is no CSRF check and no PKCE, so the exchange is refused and the browser goes to `/login?error=Login+session+expired`. Opt out with `OAUTH_ALLOW_CLIENT_INITIATED=true` for a deliberate client-owned flow.
+- **`verify_id_token` requires `token_use == "id"`** (Rust) — an access token signed by the same pool can no longer open a session via `POST /auth/session`.
+- **Host-locked session cookie** (Rust) — with `SESSION_HTTPS_ONLY=true` and no `COOKIE_DOMAIN` the cookie is named `__Host-l42_session`; browsers refuse it from any other host or subdomain. The plain `l42_session` cookie is still read (and cleared on logout) so existing sessions carry over.
+
+### Fixed
+
+- **A session-store outage is a 503, not a logout** (Rust) — `SessionBackend::load` returns `Result<Option<_>>`; a DynamoDB read failure no longer hands a signed-in user a fresh anonymous session and cookie.
+- **JWKS key rotation** (Rust) — a token whose `kid` is not in the cache triggers one refetch before failing, instead of rejecting every fresh login until the hour-long cache TTL lapses.
+- **Logoff events for password sessions** (Rust) were logged with the OAuth protocol id; they now use the same mapping as login.
+- **Typed Cognito responses** (Rust) — the token exchange and refresh parse into `OAuthTokens` / `AuthenticationResult`; a malformed response is an error at the client instead of empty strings in a session.
+
+### Changed
+
+- **Crypto converges on aws-lc** (Rust) — `jsonwebtoken` 11 on `aws_lc_rs`, HMAC and SHA-256 from `aws-lc-rs`; `hmac`/`sha2` dropped. `reqwest` 0.13, `lambda_http` 1, AWS SDK crates on `default-https-client`.
+- `JwksCache::with_keys` constructs a pre-seeded cache; `JwksCache::clear` (unused) is gone; `CedarState::from_raw` is test-only.
+- `AppError` responses are tested through `IntoResponse` (the old tests re-implemented the mapping).
+
 ## [0.22.0] - 2026-06-14
 
 A seven-lens design review drove this release — all 15 identified design-flaws are fixed. See PR #26 / issue #25.
