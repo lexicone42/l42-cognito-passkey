@@ -49,17 +49,19 @@ impl Default for InMemoryBackend {
 }
 
 impl SessionBackend for InMemoryBackend {
-    async fn load(&self, session_id: &str) -> Option<SessionData> {
-        let entry = self.store.get(session_id)?;
+    async fn load(&self, session_id: &str) -> Result<Option<SessionData>, SessionError> {
+        let Some(entry) = self.store.get(session_id) else {
+            return Ok(None);
+        };
         let (data, created) = entry.value();
 
         if created.elapsed() > self.max_age {
             drop(entry); // Release the read lock before removing
             self.store.remove(session_id);
-            return None;
+            return Ok(None);
         }
 
-        Some(data.clone())
+        Ok(Some(data.clone()))
     }
 
     async fn save(&self, session_id: &str, data: &SessionData) -> Result<(), SessionError> {
@@ -87,8 +89,8 @@ impl SessionBackend for InMemoryBackend {
 pub struct FailingBackend;
 
 impl SessionBackend for FailingBackend {
-    async fn load(&self, _session_id: &str) -> Option<SessionData> {
-        None
+    async fn load(&self, _session_id: &str) -> Result<Option<SessionData>, SessionError> {
+        Ok(None)
     }
 
     async fn save(&self, _session_id: &str, _data: &SessionData) -> Result<(), SessionError> {
@@ -97,6 +99,25 @@ impl SessionBackend for FailingBackend {
 
     async fn delete(&self, _session_id: &str) -> Result<(), SessionError> {
         Err(SessionError("simulated delete failure".into()))
+    }
+}
+
+/// Test double whose every operation fails, as a store that is down would.
+/// Public and `#[doc(hidden)]` for the integration tests. Not for production.
+#[doc(hidden)]
+pub struct UnavailableBackend;
+
+impl SessionBackend for UnavailableBackend {
+    async fn load(&self, _session_id: &str) -> Result<Option<SessionData>, SessionError> {
+        Err(SessionError("simulated store outage".into()))
+    }
+
+    async fn save(&self, _session_id: &str, _data: &SessionData) -> Result<(), SessionError> {
+        Err(SessionError("simulated store outage".into()))
+    }
+
+    async fn delete(&self, _session_id: &str) -> Result<(), SessionError> {
+        Err(SessionError("simulated store outage".into()))
     }
 }
 
@@ -112,7 +133,7 @@ mod tests {
         data.set("key", serde_json::json!("value"));
 
         backend.save("s1", &data).await.unwrap();
-        let loaded = backend.load("s1").await;
+        let loaded = backend.load("s1").await.unwrap();
 
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap().get("key").unwrap(), "value");
@@ -121,7 +142,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_nonexistent() {
         let backend = InMemoryBackend::new();
-        assert!(backend.load("nonexistent").await.is_none());
+        assert!(backend.load("nonexistent").await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -130,10 +151,10 @@ mod tests {
         let data = SessionData::new();
 
         backend.save("s1", &data).await.unwrap();
-        assert!(backend.load("s1").await.is_some());
+        assert!(backend.load("s1").await.unwrap().is_some());
 
         backend.delete("s1").await.unwrap();
-        assert!(backend.load("s1").await.is_none());
+        assert!(backend.load("s1").await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -160,7 +181,7 @@ mod tests {
         assert_eq!(created1, created2);
 
         // But data should be updated
-        let loaded = backend.load("s1").await.unwrap();
+        let loaded = backend.load("s1").await.unwrap().unwrap();
         assert_eq!(loaded.get("v").unwrap(), 2);
     }
 
@@ -175,7 +196,7 @@ mod tests {
         // Tiny sleep to ensure the instant has elapsed
         tokio::time::sleep(Duration::from_millis(1)).await;
 
-        assert!(backend.load("s1").await.is_none());
+        assert!(backend.load("s1").await.unwrap().is_none());
         // Expired entry should be removed from store
         assert_eq!(backend.len(), 0);
     }
@@ -196,6 +217,7 @@ mod tests {
                 .load("session-a")
                 .await
                 .unwrap()
+                .unwrap()
                 .get("user")
                 .unwrap(),
             "alice"
@@ -205,6 +227,7 @@ mod tests {
                 .load("session-b")
                 .await
                 .unwrap()
+                .unwrap()
                 .get("user")
                 .unwrap(),
             "bob"
@@ -212,7 +235,7 @@ mod tests {
 
         // Deleting one doesn't affect the other
         backend.delete("session-a").await.unwrap();
-        assert!(backend.load("session-a").await.is_none());
-        assert!(backend.load("session-b").await.is_some());
+        assert!(backend.load("session-a").await.unwrap().is_none());
+        assert!(backend.load("session-b").await.unwrap().is_some());
     }
 }

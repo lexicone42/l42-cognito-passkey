@@ -214,6 +214,7 @@ async fn main() {
         https_only: config.session_https_only,
         cookie_domain: config.cookie_domain.clone(),
         service_token: config.service_token.clone(),
+        accept_legacy_cookie: config.session_cookie_accept_legacy,
     });
 
     let state = Arc::new(AppState {

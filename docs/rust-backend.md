@@ -33,9 +33,11 @@ The binary is dual-mode: detects `AWS_LAMBDA_RUNTIME_API` at startup and runs as
 | `DYNAMODB_TABLE` | Prod | DynamoDB table name |
 | `SESSION_HTTPS_ONLY` | Yes | `true` for production |
 | `FRONTEND_URL` | Yes | Frontend origin for CORS + redirects |
-| `COOKIE_DOMAIN` | No | `Domain=` on cookies (e.g., `.example.com`) |
+| `COOKIE_DOMAIN` | No | `Domain=` on cookies (e.g., `.example.com`). Leave unset on a single-host deployment: with `SESSION_HTTPS_ONLY=true` and no domain the cookie is `__Host-l42_session`, which browsers refuse to accept from any other host or subdomain. |
 | `AUTH_PATH_PREFIX` | No | Route prefix (default: `/auth`) |
 | `CALLBACK_USE_ORIGIN` | No | `true` for multi-CloudFront deployments |
+| `OAUTH_ALLOW_CLIENT_INITIATED` | No | `true` lets `/auth/callback` complete a hosted-UI login that did not start at `/auth/login` (no stored `state`, no PKCE verifier). Default `false`: such callbacks are refused with `/login?error=Login+session+expired`. |
+| `SESSION_COOKIE_ACCEPT_LEGACY` | No | `true` keeps reading the plain `l42_session` cookie while the host-locked `__Host-l42_session` is being set, so sessions survive dropping `COOKIE_DOMAIN`. A plain cookie can be planted from a sibling subdomain, so leave this on only for a short migration window, then remove it. Default `false`: users sign in once more. |
 | `CALLBACK_ALLOWED_ORIGINS` | No | Comma-separated allowed origins |
 | `AAGUID_ALLOWLIST` | No | Comma-separated allowed authenticator AAGUIDs |
 | `REQUIRE_DEVICE_BOUND` | No | `true` to reject synced passkeys at registration |

@@ -9,20 +9,20 @@ license = "Apache-2.0"
 axum = { version = "0.8", features = ["json", "query"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
-lambda_http = "0.14"
+lambda_http = "1"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-jsonwebtoken = "9"
-hmac = "0.12"
-sha2 = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"] }
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
+# One crypto stack: HMAC, SHA-256 and the JWT backend all come from aws-lc.
+aws-lc-rs = "1"
 base64 = "0.22"
 cookie = "0.18"
 cedar-policy = "4"
 ciborium = "0.2"
-aws-config = "1"
-aws-sdk-dynamodb = "1"
+aws-config = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-dynamodb = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 rand = "0.8"

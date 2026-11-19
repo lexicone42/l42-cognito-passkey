@@ -21,11 +21,11 @@ pub async fn logout(session: SessionHandle) -> Json<SuccessResponse> {
                 .and_then(|c| c.email)
         });
 
-        let (proto, proto_name) = match tokens.and_then(|t| t.auth_method) {
-            Some(ref m) if m == "passkey" => (ocsf::AUTH_PROTOCOL_FIDO2, "FIDO2/Passkey"),
-            Some(ref m) if m == "password" => (ocsf::AUTH_PROTOCOL_OAUTH2, "OAuth 2.0/OIDC"),
-            _ => (ocsf::AUTH_PROTOCOL_OAUTH2, "OAuth 2.0/OIDC"),
-        };
+        // Same mapping the login paths use, so a password session logs off as
+        // a password session (it used to be logged as OAuth here).
+        let method = tokens.and_then(|t| t.auth_method);
+        let (proto, proto_name) =
+            ocsf::auth_protocol_from_method(method.as_deref().unwrap_or("oauth"));
 
         (email, proto, proto_name)
     };

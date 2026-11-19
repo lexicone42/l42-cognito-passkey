@@ -6,19 +6,14 @@
 //! scheme with no cross-language format dependency. The HMAC covers
 //! only the session ID — the session data lives server-side.
 
+use aws_lc_rs::hmac::{HMAC_SHA256, Key};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
-
-type HmacSha256 = Hmac<Sha256>;
 
 /// Sign a session ID, returning the cookie value.
 ///
 /// Format: `base64url(session_id).base64url(hmac(secret, session_id))`
 pub fn sign_session_id(secret: &[u8], session_id: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC key length is always valid");
-    mac.update(session_id.as_bytes());
-    let signature = mac.finalize().into_bytes();
+    let signature = aws_lc_rs::hmac::sign(&Key::new(HMAC_SHA256, secret), session_id.as_bytes());
 
     let id_encoded = URL_SAFE_NO_PAD.encode(session_id.as_bytes());
     let sig_encoded = URL_SAFE_NO_PAD.encode(signature);
@@ -37,10 +32,13 @@ pub fn verify_cookie(secret: &[u8], cookie_value: &str) -> Option<String> {
 
     let expected_sig = URL_SAFE_NO_PAD.decode(sig_part).ok()?;
 
-    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC key length is always valid");
-    mac.update(session_id.as_bytes());
-
-    mac.verify_slice(&expected_sig).ok()?;
+    // Constant-time compare inside aws-lc.
+    aws_lc_rs::hmac::verify(
+        &Key::new(HMAC_SHA256, secret),
+        session_id.as_bytes(),
+        &expected_sig,
+    )
+    .ok()?;
 
     Some(session_id)
 }

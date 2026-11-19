@@ -36,7 +36,10 @@ fn now_secs() -> u64 {
 }
 
 impl SessionBackend for DynamoDbBackend {
-    async fn load(&self, session_id: &str) -> Option<SessionData> {
+    async fn load(&self, session_id: &str) -> Result<Option<SessionData>, SessionError> {
+        // A failed read is an outage, not an absent session: report it so the
+        // middleware can answer 503 instead of handing out a fresh anonymous
+        // session (and a cookie) to someone who is in fact logged in.
         let result = self
             .client
             .get_item()
@@ -44,9 +47,14 @@ impl SessionBackend for DynamoDbBackend {
             .key("session_id", AttributeValue::S(session_id.to_string()))
             .send()
             .await
-            .ok()?;
+            .map_err(|e| {
+                tracing::error!("Failed to load session {}: {}", session_id, e);
+                SessionError(format!("dynamodb load: {e}"))
+            })?;
 
-        let item = result.item()?;
+        let Some(item) = result.item() else {
+            return Ok(None);
+        };
 
         // Check application-level TTL (in case DynamoDB hasn't cleaned up yet)
         let created_at = item
@@ -57,7 +65,7 @@ impl SessionBackend for DynamoDbBackend {
 
         let now = now_secs();
         if now.saturating_sub(created_at) > MAX_AGE_SECS {
-            // Expired — delete and return None
+            // Expired — delete and report absent
             let _ = self
                 .client
                 .delete_item()
@@ -65,12 +73,30 @@ impl SessionBackend for DynamoDbBackend {
                 .key("session_id", AttributeValue::S(session_id.to_string()))
                 .send()
                 .await;
-            return None;
+            return Ok(None);
         }
 
-        // Deserialize session data from JSON string
-        let data_json = item.get("data")?.as_s().ok()?;
-        serde_json::from_str(data_json).ok()
+        // A record we cannot decode is treated as absent (and logged) rather
+        // than as an outage: an outage would pin the user to a 503 until the
+        // cookie expired, while absent lets the next login overwrite it.
+        let Some(data_json) = item.get("data").and_then(|v| v.as_s().ok()) else {
+            tracing::warn!(
+                "Session {} has no data attribute; treating as absent",
+                session_id
+            );
+            return Ok(None);
+        };
+        match serde_json::from_str(data_json) {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => {
+                tracing::warn!(
+                    "Session {} has undecodable data; treating as absent: {}",
+                    session_id,
+                    e
+                );
+                Ok(None)
+            }
+        }
     }
 
     async fn save(&self, session_id: &str, data: &SessionData) -> Result<(), SessionError> {

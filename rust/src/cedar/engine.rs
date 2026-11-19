@@ -97,6 +97,7 @@ impl CedarState {
     }
 
     /// Initialize from raw schema JSON and policy text (for testing).
+    #[cfg(test)]
     pub fn from_raw(schema_json: serde_json::Value, policy_text: &str) -> Result<Self, CedarError> {
         let schema = Schema::from_json_value(schema_json)
             .map_err(|e| CedarError::Init(format!("Schema error: {e}")))?;

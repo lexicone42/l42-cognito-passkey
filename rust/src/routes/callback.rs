@@ -43,7 +43,10 @@ fn forwarded_scheme<'a>(config: &crate::config::Config, headers: &'a HeaderMap) 
 /// the exchange. Both call this function so they can't drift.
 pub fn self_callback_url(config: &crate::config::Config, headers: &HeaderMap) -> String {
     if !config.callback_use_origin && !config.frontend_url.is_empty() {
-        format!("{}{}/callback", config.frontend_url, config.auth_path_prefix)
+        format!(
+            "{}{}/callback",
+            config.frontend_url, config.auth_path_prefix
+        )
     } else {
         let host = extract_host(headers);
         let scheme = forwarded_scheme(config, headers);
@@ -111,10 +114,8 @@ pub async fn oauth_callback(
     let redirect_uri = self_callback_url(&state.config, &headers);
 
     // Validate `state` against the value the /auth/login endpoint stored in this
-    // session, and take the stored PKCE verifier. Presence of a stored state
-    // means this login was backend-initiated: enforce CSRF + supply the verifier.
-    // Absence means a legacy client-initiated flow hit the backend callback —
-    // preserve backward-compatible behavior (no server-side state to check).
+    // session, and take the stored PKCE verifier. A backend-initiated login
+    // always leaves both behind; their absence is handled below.
     let (stored_state, stored_verifier) = {
         let data = session.data.lock().await;
         let s = data
@@ -143,10 +144,7 @@ pub async fn oauth_callback(
                 "OAuth state mismatch — possible CSRF",
             );
             *session.destroyed.lock().await = true;
-            return Redirect::temporary(&format!(
-                "{}/login?error=Invalid+OAuth+state",
-                frontend
-            ));
+            return Redirect::temporary(&format!("{}/login?error=Invalid+OAuth+state", frontend));
         }
     }
 
@@ -175,6 +173,26 @@ pub async fn oauth_callback(
         ));
     }
 
+    // No stored state means this callback did not start at /auth/login: the
+    // pre-login cookie expired or never reached us (stale tab, blocked
+    // cookie), or a client-initiated hosted-UI flow was pointed at this
+    // backend. Either way there is no CSRF check and no PKCE verifier, so the
+    // exchange is refused unless the deployer has opted in by name.
+    if stored_state.is_none() && !state.config.oauth_allow_client_initiated {
+        ocsf::authentication_event(
+            ocsf::ACTIVITY_AUTH_TICKET,
+            "Authentication Ticket",
+            ocsf::STATUS_FAILURE,
+            ocsf::SEVERITY_MEDIUM,
+            None,
+            ocsf::AUTH_PROTOCOL_OAUTH2,
+            "OAuth 2.0/OIDC",
+            "OAuth callback without a stored state: expired login session or client-initiated flow",
+        );
+        *session.destroyed.lock().await = true;
+        return Redirect::temporary(&format!("{}/login?error=Login+session+expired", frontend));
+    }
+
     // Require authorization code
     let code = match params.code {
         Some(ref c) if !c.is_empty() => c.as_str(),
@@ -198,19 +216,10 @@ pub async fn oauth_callback(
     )
     .await
     {
-        Ok(token_map) => {
-            let access_token = token_map
-                .get("access_token")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let id_token = token_map
-                .get("id_token")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let refresh_token = token_map
-                .get("refresh_token")
-                .and_then(|v| v.as_str())
-                .map(String::from);
+        Ok(oauth) => {
+            let access_token = oauth.access_token.as_str();
+            let id_token = oauth.id_token.as_str();
+            let refresh_token = oauth.refresh_token;
 
             // Extract email for OCSF (best-effort)
             let email = decode_jwt_unverified(id_token).ok().and_then(|c| c.email);
