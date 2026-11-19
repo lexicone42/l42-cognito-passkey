@@ -47,11 +47,18 @@ pub struct JwksResponse {
     pub keys: Vec<JwkKey>,
 }
 
+/// How long after a fetch an unknown `kid` is rejected without fetching
+/// again. Cognito rotates keys rarely; a stream of made-up kids must not
+/// turn this handler into a request amplifier against the JWKS endpoint.
+const UNKNOWN_KID_REFETCH_COOLDOWN: Duration = Duration::from_secs(60);
+
 /// Cached JWKS keys with TTL-based expiry.
 pub struct JwksCache {
     keys: RwLock<Option<(HashMap<String, DecodingKey>, Instant)>>,
     ttl: Duration,
     http_client: reqwest::Client,
+    /// Single-flight: concurrent misses share one fetch.
+    fetch_lock: tokio::sync::Mutex<()>,
 }
 
 impl JwksCache {
@@ -60,6 +67,7 @@ impl JwksCache {
             keys: RwLock::new(None),
             ttl: Duration::from_secs(3600), // 1 hour, matching Python backend
             http_client,
+            fetch_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -67,9 +75,11 @@ impl JwksCache {
     /// deployment that pins its signing keys.
     pub fn with_keys(keys: HashMap<String, DecodingKey>) -> Self {
         Self {
-            keys: RwLock::new(Some((keys, Instant::now()))),
+            // Dated past the cooldown, so a rotation can be picked up at once.
+            keys: RwLock::new(Some((keys, Instant::now() - UNKNOWN_KID_REFETCH_COOLDOWN))),
             ttl: Duration::from_secs(3600),
             http_client: reqwest::Client::new(),
+            fetch_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -87,11 +97,39 @@ impl JwksCache {
         self.refetch(jwks_url).await
     }
 
-    /// Fetch the JWKS now, replacing whatever is cached. Used on a cache miss
-    /// and when a token names a `kid` the cache has not seen: Cognito rotates
-    /// signing keys by publishing a new `kid`, and a cache that waited out its
-    /// TTL would reject every fresh login for up to an hour.
+    /// Keys for a token whose `kid` the cache does not hold. Cognito rotates
+    /// signing keys by publishing a new `kid`, and a cache that waited out
+    /// its TTL would reject every fresh login for up to an hour, so fetch
+    /// once more; but at most once per cooldown, or a stream of invented
+    /// kids would turn every request into a JWKS fetch.
+    pub async fn keys_for_unknown_kid(
+        &self,
+        jwks_url: &str,
+    ) -> Result<HashMap<String, DecodingKey>, JwtError> {
+        {
+            let guard = self.keys.read().await;
+            if let Some((keys, fetched_at)) = guard.as_ref()
+                && fetched_at.elapsed() < UNKNOWN_KID_REFETCH_COOLDOWN
+            {
+                return Ok(keys.clone());
+            }
+        }
+        self.refetch(jwks_url).await
+    }
+
+    /// Fetch the JWKS now, replacing whatever is cached. Concurrent callers
+    /// share one fetch: the second to arrive waits, then uses what the first
+    /// stored.
     pub async fn refetch(&self, jwks_url: &str) -> Result<HashMap<String, DecodingKey>, JwtError> {
+        let _flight = self.fetch_lock.lock().await;
+        {
+            let guard = self.keys.read().await;
+            if let Some((keys, fetched_at)) = guard.as_ref()
+                && fetched_at.elapsed() < Duration::from_secs(1)
+            {
+                return Ok(keys.clone());
+            }
+        }
         let resp = self
             .http_client
             .get(jwks_url)
@@ -181,7 +219,7 @@ pub async fn verify_id_token(
     let decoding_key = match keys.get(&kid) {
         Some(k) => k.clone(),
         None => {
-            let fresh = jwks_cache.refetch(&config.jwks_url()).await?;
+            let fresh = jwks_cache.keys_for_unknown_kid(&config.jwks_url()).await?;
             fresh.get(&kid).cloned().ok_or(JwtError::KeyNotFound(kid))?
         }
     };
@@ -384,8 +422,9 @@ mod tests {
                 ResponseTemplate::new(200)
                     .set_body_json(serde_json::json!({"keys": [new.jwk.clone()]})),
             )
-            // One refetch for the rotated key, one for the ghost below; never more.
-            .expect(2)
+            // One refetch for the rotated key. The ghost below arrives inside
+            // the cooldown and is rejected from the cache, without a fetch.
+            .expect(1)
             .mount(&server)
             .await;
         // The cache still holds the old key, well within its TTL.
@@ -396,7 +435,8 @@ mod tests {
             .expect("a token under the rotated key must verify after one refetch");
         assert_eq!(claims.sub, "user-1");
 
-        // A token under a kid nobody publishes still fails, after the refetch.
+        // A token under a kid nobody publishes still fails, and inside the
+        // cooldown it does so without another fetch (the mock counts them).
         let ghost = signer("ghost");
         let err = verify_id_token(&signed(&ghost, &config, "id"), &cache, &config)
             .await

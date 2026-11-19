@@ -1037,10 +1037,35 @@ async fn test_cookie_is_host_locked_when_https_and_no_domain() {
 }
 
 #[tokio::test]
-async fn test_plain_cookie_still_read_when_host_locked_is_active() {
-    // A user whose cookie predates the move to __Host- stays signed in.
+async fn test_plain_cookie_is_ignored_when_host_locked_is_active() {
+    // A plain cookie can be tossed in from a sibling subdomain; once the
+    // host-locked name is in use it must not open a session.
     let mut config = Config::test_default();
     config.session_https_only = true;
+    let (app, state) = build_test_app_with_config(config, false);
+    let claims = test_claims("user-1", "test@example.com", &["users"]);
+    let tokens = SessionTokens {
+        access_token: "at-tossed".into(),
+        id_token: TestKeys::make_unsigned_jwt(&claims),
+        refresh_token: None,
+        auth_method: None,
+    };
+    seed_session(&state, "sid-tossed", &tokens).await;
+    let req = request_with_session(
+        "GET",
+        "/auth/token",
+        "sid-tossed",
+        &state.config.session_secret,
+    );
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_plain_cookie_read_only_during_an_opted_in_migration() {
+    let mut config = Config::test_default();
+    config.session_https_only = true;
+    config.session_cookie_accept_legacy = true;
     let (app, state) = build_test_app_with_config(config, false);
     let claims = test_claims("user-1", "test@example.com", &["users"]);
     let tokens = SessionTokens {

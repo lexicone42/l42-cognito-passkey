@@ -97,6 +97,9 @@ pub struct SessionLayer<B: SessionBackend> {
     pub https_only: bool,
     pub cookie_domain: Option<String>,
     pub service_token: Option<String>,
+    /// Read the plain `l42_session` cookie even while setting the host-locked
+    /// one. A migration aid only; see `Config::session_cookie_accept_legacy`.
+    pub accept_legacy_cookie: bool,
 }
 
 /// Axum middleware function for session handling.
@@ -139,11 +142,19 @@ pub async fn session_middleware<B: SessionBackend + 'static>(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    // Prefer the host-locked cookie; still honour the plain one so a
-    // deployment that drops COOKIE_DOMAIN keeps its users signed in until
-    // their next save moves them over.
-    let session_cookie = parse_cookie(cookie_header, HOST_COOKIE_NAME)
-        .or_else(|| parse_cookie(cookie_header, COOKIE_NAME));
+    // Only the cookie this deployment sets is read. The plain name is a
+    // valid fallback solely during an opted-in migration window: a plain
+    // cookie can be tossed in from a sibling subdomain, and accepting it
+    // would hand an attacker-chosen session to the user (login CSRF), which
+    // is the attack the host-locked name exists to stop.
+    let active = cookie_name(layer.https_only, layer.cookie_domain.as_deref());
+    let session_cookie = parse_cookie(cookie_header, active).or_else(|| {
+        if active != COOKIE_NAME && layer.accept_legacy_cookie {
+            parse_cookie(cookie_header, COOKIE_NAME)
+        } else {
+            None
+        }
+    });
     let session_id = session_cookie.and_then(|v| verify_cookie(layer.secret.as_bytes(), v));
 
     let (handle, initial_data) = match session_id {

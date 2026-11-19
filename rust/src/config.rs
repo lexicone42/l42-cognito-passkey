@@ -46,6 +46,12 @@ pub struct Config {
     /// Only a deployment still running the client-owned hosted-UI flow
     /// against this backend's callback should set `OAUTH_ALLOW_CLIENT_INITIATED=true`.
     pub oauth_allow_client_initiated: bool,
+    /// Keep reading the plain `l42_session` cookie while the host-locked
+    /// `__Host-l42_session` is the one being set. Off by default: a plain
+    /// cookie can be planted from a sibling subdomain, which is the attack
+    /// the host-locked name exists to stop. Turn on only for a short
+    /// migration window after dropping `COOKIE_DOMAIN`, then turn off.
+    pub session_cookie_accept_legacy: bool,
     /// Override base URL for Cognito IDP + token endpoints (test only — points
     /// the real `refresh_tokens`/`exchange_code_for_tokens` at a mock server).
     /// Empty in production. Env: `COGNITO_ENDPOINT`.
@@ -126,6 +132,9 @@ impl Config {
                 .filter(|s| !s.is_empty())
                 .collect(),
             entity_table: env::var("ENTITY_TABLE").ok().filter(|s| !s.is_empty()),
+            session_cookie_accept_legacy: env::var("SESSION_COOKIE_ACCEPT_LEGACY")
+                .map(|v| v == "true")
+                .unwrap_or(false),
             oauth_allow_client_initiated: env::var("OAUTH_ALLOW_CLIENT_INITIATED")
                 .map(|v| v == "true")
                 .unwrap_or(false),
@@ -232,6 +241,7 @@ impl Config {
             entity_table: None,
             entity_strict_ownership: false,
             oauth_allow_client_initiated: false,
+            session_cookie_accept_legacy: false,
             cognito_endpoint: String::new(),
         }
     }

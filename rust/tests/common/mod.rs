@@ -184,6 +184,7 @@ pub fn build_test_app(with_cedar: bool) -> (axum::Router, Arc<AppState>) {
         https_only: config.session_https_only,
         cookie_domain: config.cookie_domain.clone(),
         service_token: config.service_token.clone(),
+        accept_legacy_cookie: config.session_cookie_accept_legacy,
     });
 
     let state = Arc::new(AppState {
@@ -234,6 +235,7 @@ pub fn build_test_app_with_entity_provider(
         https_only: config.session_https_only,
         cookie_domain: config.cookie_domain.clone(),
         service_token: config.service_token.clone(),
+        accept_legacy_cookie: config.session_cookie_accept_legacy,
     });
 
     let state = Arc::new(AppState {
@@ -264,6 +266,7 @@ pub fn build_test_app_failing_backend() -> (axum::Router, Arc<AppState>) {
         https_only: config.session_https_only,
         cookie_domain: config.cookie_domain.clone(),
         service_token: config.service_token.clone(),
+        accept_legacy_cookie: config.session_cookie_accept_legacy,
     });
 
     let state = Arc::new(AppState {
@@ -294,6 +297,7 @@ pub fn build_test_app_unavailable_backend() -> (axum::Router, Arc<AppState>) {
         https_only: config.session_https_only,
         cookie_domain: config.cookie_domain.clone(),
         service_token: config.service_token.clone(),
+        accept_legacy_cookie: config.session_cookie_accept_legacy,
     });
 
     let state = Arc::new(AppState {

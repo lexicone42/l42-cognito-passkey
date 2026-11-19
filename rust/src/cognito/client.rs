@@ -209,6 +209,7 @@ mod tests {
             entity_table: None,
             entity_strict_ownership: false,
             oauth_allow_client_initiated: false,
+            session_cookie_accept_legacy: false,
         }
     }
 
